@@ -135,11 +135,100 @@ class ToolRegistry {
     }
 }
 
-/** Registry with the existing Tools wired to real seams. Gmail/Room
- *  plug in through GmailApi/ScheduleStore/MemoryStore; tests pass fakes.
- *  A null dependency means "not connected on this device", also a Failure. */
+/** Ticket 03/24 search_emails Tool: read-only Gmail search (ADR-0003:
+ *  no Confirmation gate on reads). Every row carries its mailbox source
+ *  tag for the injection defences. max is optional, default 10. */
+fun searchEmailsTool(gmailApi: GmailApi?): ToolDefinition =
+    ToolDefinition(
+        name = "search_emails",
+        description = "Search the Gmail mailbox with Gmail query syntax " +
+            "(e.g. from:boss subject:plan). Read-only; returns matching rows.",
+        parameters =
+            JSONObject()
+                .put("type", "object")
+                .put(
+                    "properties",
+                    JSONObject()
+                        .put("query", JSONObject().put("type", "string").put("description", "Gmail search query, e.g. from:boss is:unread"))
+                        .put("max", JSONObject().put("type", "integer").put("description", "Max rows to return (1-25, default 10)")),
+                )
+                .put("required", JSONArray().put("query")),
+        // Read-only fetch; ADR-0003 gates only sensitive calls.
+        riskLevel = RiskLevel.LOW,
+        requiresConfirmation = false,
+        resultType = "emails",
+        execute = { args ->
+            val api = gmailApi
+                ?: return@ToolDefinition ToolResult.Failure("gmail is not connected", retryable = false)
+            val query = (args["query"] as? String)?.trim().orEmpty()
+            if (query.isEmpty()) {
+                return@ToolDefinition ToolResult.Failure(
+                    "query must not be blank for tool 'search_emails'",
+                    retryable = true,
+                )
+            }
+            val max = ((args["max"] as? Number)?.toInt() ?: 10).coerceIn(1, 25)
+            val rows = searchEmails(api, query, max)
+            ToolResult.Success(
+                rows.map { row ->
+                    mapOf(
+                        "id" to row.id,
+                        "from" to row.from,
+                        "subject" to row.subject,
+                        "snippet" to row.snippet,
+                        "source" to emailSource(row.id),
+                    )
+                },
+            )
+        },
+    )
+
+/** Ticket 03/24 read_email Tool: read one message with its body.
+ *  Read-only (ADR-0003: ungated); the result carries its mailbox
+ *  source tag for the injection defences. */
+fun readEmailTool(gmailApi: GmailApi?): ToolDefinition =
+    ToolDefinition(
+        name = "read_email",
+        description = "Read one Gmail message with its body. Read-only; returns the message.",
+        parameters =
+            JSONObject()
+                .put("type", "object")
+                .put(
+                    "properties",
+                    JSONObject()
+                        .put("id", JSONObject().put("type", "string").put("description", "Gmail message id from search_emails")),
+                )
+                .put("required", JSONArray().put("id")),
+        // Read-only fetch; ADR-0003 gates only sensitive calls.
+        riskLevel = RiskLevel.LOW,
+        requiresConfirmation = false,
+        resultType = "email",
+        execute = { args ->
+            val api = gmailApi
+                ?: return@ToolDefinition ToolResult.Failure("gmail is not connected", retryable = false)
+            val detail = readEmail(api, args["id"] as String)
+            ToolResult.Success(
+                mapOf(
+                    "id" to detail.id,
+                    "from" to detail.from,
+                    "subject" to detail.subject,
+                    "snippet" to detail.snippet,
+                    "body" to detail.body,
+                    "source" to detail.source,
+                ),
+            )
+        },
+    )
+
+/** Registry with the read/search Tools + schedule/memory Tools wired to
+ *  real seams. Gmail/Room plug in through GmailApi/ScheduleStore/
+ *  MemoryStore; tests pass fakes. A null dependency means "not connected
+ *  on this device", also a Failure. */
 fun defaultToolRegistry(gmailApi: GmailApi? = null, scheduleStore: ScheduleStore? = null, memoryStore: MemoryStore? = null): ToolRegistry {
     val registry = ToolRegistry()
+
+    registry.register(searchEmailsTool(gmailApi))
+    registry.register(readEmailTool(gmailApi))
 
     val emailFn = demoToolSchema().getJSONObject("function")
     registry.register(

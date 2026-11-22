@@ -162,4 +162,15 @@ class FakeGmailApi(private val inbox: List<EmailSummary> = emptyList()) : GmailA
         sent += rawBase64Url
     }
     override fun listInbox(): List<EmailSummary> = inbox.toList()
+    override fun searchInbox(query: String, max: Int): List<EmailSummary> =
+        inbox.filter {
+            it.from.contains(query, ignoreCase = true) ||
+                it.subject.contains(query, ignoreCase = true) ||
+                it.snippet.contains(query, ignoreCase = true)
+        }.take(max.coerceIn(1, 25))
+    override fun readMessage(id: String): EmailDetail {
+        val row = inbox.firstOrNull { it.id == id }
+            ?: throw NoSuchElementException("unknown message: $id")
+        return EmailDetail(row.id, row.from, row.subject, row.snippet, "", emailSource(row.id))
+    }
 }
