@@ -1,0 +1,11 @@
+# Android
+*.iml
+.idea/
+.gradle/
+build/
+app/build/
+local.properties
+*.jks
+*.keystore
+# Secrets - never commit real keys; copy local.properties.sample to local.properties
+# and fill in your own keys.

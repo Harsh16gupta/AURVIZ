@@ -1,0 +1,11 @@
+# Copy to local.properties and fill in. Never commit real keys.
+# sdk.dir=/Users/YOU/Library/Android/sdk
+LLM_DEFAULT_PROVIDER=gemini
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-2.5-flash
+DEEPSEEK_API_KEY=
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+GROQ_API_KEY=
+GROQ_MODEL=llama-3.1-8b-instant
+META_LLAMA_API_KEY=
+SUPERMEMORY_API_KEY=
