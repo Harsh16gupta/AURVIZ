@@ -111,6 +111,21 @@ class GmailHttpApi(
         }
     }
 
+    // Ticket 03/24: Gmail search syntax over users.messages.list, then one
+    // metadata fetch per hit for the From/Subject rows the loop reads.
+    override fun searchInbox(query: String, max: Int): List<EmailSummary> {
+        val limit = max.coerceIn(1, 25)
+        val encoded = java.net.URLEncoder.encode(query, "UTF-8")
+        val ids = parseMessageIds(get("/messages?q=$encoded&maxResults=$limit"))
+        return ids.take(limit).map { id ->
+            parseMessageMeta(get("/messages/$id?format=metadata&metadataHeaders=From&metadataHeaders=Subject"))
+        }
+    }
+
+    // Ticket 03/24: full-format users.messages.get, body decoded in Email.kt.
+    override fun readMessage(id: String): EmailDetail =
+        parseMessageFull(get("/messages/$id?format=full"))
+
     fun fetchProfileEmail(): String {
         val json = JSONObject(get("/profile"))
         return json.getString("emailAddress")

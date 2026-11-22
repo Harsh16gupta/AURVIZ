@@ -18,6 +18,17 @@ class ToolRegistryTest {
                 EmailSummary("1", "boss@work.com", "Q3 plan", "draft", true),
                 EmailSummary("2", "news@x.com", "Sale", "buy", false),
             )
+        override fun searchInbox(query: String, max: Int): List<EmailSummary> =
+            listInbox().filter {
+                it.from.contains(query, ignoreCase = true) ||
+                    it.subject.contains(query, ignoreCase = true) ||
+                    it.snippet.contains(query, ignoreCase = true)
+            }.take(max.coerceIn(1, 25))
+        override fun readMessage(id: String): EmailDetail {
+            val row = listInbox().firstOrNull { it.id == id }
+                ?: throw NoSuchElementException("unknown message: $id")
+            return EmailDetail(row.id, row.from, row.subject, row.snippet, "", emailSource(row.id))
+        }
     }
 
     private fun registry(): ToolRegistry =
@@ -114,11 +125,11 @@ class ToolRegistryTest {
     }
 
     @Test
-    fun toolSchemasExposeBothToolsForLlm() {
+    fun toolSchemasExposeAllToolsForLlm() {
         val schemas = registry().toolSchemas()
         val names = (0 until schemas.length())
             .map { schemas.getJSONObject(it).getJSONObject("function").getString("name") }
             .toSet()
-        assertEquals(setOf("getImportantEmails", "createSchedule"), names)
+        assertEquals(setOf("search_emails", "read_email", "getImportantEmails", "createSchedule"), names)
     }
 }

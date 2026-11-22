@@ -11,11 +11,16 @@ data class EmailDraft(
     val body: String,
 )
 
-// The plug shape. Real Gmail implements this with users.messages.send.
+// The plug shape. Real Gmail implements this with users.messages.list
+// (search), users.messages.get (read), and users.messages.send.
 interface GmailApi {
     fun send(rawBase64Url: String)
 
     fun listInbox(): List<EmailSummary>
+
+    fun searchInbox(query: String, max: Int): List<EmailSummary>
+
+    fun readMessage(id: String): EmailDetail
 }
 
 // One row from the mailbox. important = unread + starred/boss-like,
@@ -31,6 +36,35 @@ data class EmailSummary(
 // Read the mailbox: important first, then the rest, at most max rows.
 fun readImportant(api: GmailApi, max: Int): List<EmailSummary> =
     (api.listInbox().filter { it.important } + api.listInbox().filter { !it.important }).take(max)
+
+// Ticket 03/24: search + read for the agent loop. Read-only (ADR-0003:
+// no Confirmation gate on reads); every result carries its mailbox
+// source tag so the injection defences (ticket 16) can treat mail
+// content as data, never instructions.
+
+// One fully-read message. source names the mailbox origin of every
+// row the Tools return, so downstream policy can tell tool data
+// apart from model instructions.
+data class EmailDetail(
+    val id: String,
+    val from: String,
+    val subject: String,
+    val snippet: String,
+    val body: String,
+    val source: String,
+)
+
+/** Mailbox origin tag for one message, carried in every Tool result. */
+fun emailSource(id: String): String = "gmail:$id"
+
+// Search the mailbox with Gmail query syntax ("from:boss subject:plan"),
+// at most max rows (clamped to 1..25, the Gmail page-size window).
+fun searchEmails(api: GmailApi, query: String, max: Int): List<EmailSummary> =
+    api.searchInbox(query, max.coerceIn(1, 25))
+
+// Read one message with its body. Throws when the id is unknown; the
+// ToolRegistry turns that into a structured error, never a crash.
+fun readEmail(api: GmailApi, id: String): EmailDetail = api.readMessage(id)
 
 // Where the Gmail sign-in tokens live. revoke() = disconnect:
 // tokens gone, nothing can send until the user connects again.
@@ -138,6 +172,67 @@ fun parseMessageMeta(getJson: String): EmailSummary {
         subject = subject,
         snippet = obj.optString("snippet"),
         important = "IMPORTANT" in labels,
+    )
+}
+
+// Gmail bodies are base64url without padding. Restore the padding the
+// transport stripped before decoding.
+fun decodeGmailBody(data: String): String {
+    var text = data.trim()
+    val remainder = text.length % 4
+    if (remainder > 0) text += "=".repeat(4 - remainder)
+    return String(java.util.Base64.getUrlDecoder().decode(text), Charsets.UTF_8)
+}
+
+// Plain-text body out of a full-format payload: recurse into multipart
+// parts preferring text/plain, otherwise take the first decodable leaf
+// (e.g. a singlepart text/html message).
+fun extractPlainText(payload: org.json.JSONObject): String {
+    val parts = payload.optJSONArray("parts")
+    if (parts != null && parts.length() > 0) {
+        for (i in 0 until parts.length()) {
+            val part = parts.getJSONObject(i)
+            if (part.optString("mimeType").startsWith("text/plain")) {
+                val text = extractPlainText(part)
+                if (text.isNotBlank()) return text
+            }
+        }
+        for (i in 0 until parts.length()) {
+            val text = extractPlainText(parts.getJSONObject(i))
+            if (text.isNotBlank()) return text
+        }
+        return ""
+    }
+    val data = payload.optJSONObject("body")?.optString("data").orEmpty()
+    if (data.isBlank()) return ""
+    return decodeGmailBody(data)
+}
+
+// Full-format users.messages.get response: headers + snippet + decoded
+// body, tagged with the mailbox source for the injection defences.
+fun parseMessageFull(getJson: String): EmailDetail {
+    val obj = org.json.JSONObject(getJson)
+    val id = obj.getString("id")
+    var from = ""
+    var subject = ""
+    val payload = obj.optJSONObject("payload")
+    val headers = payload?.optJSONArray("headers")
+    if (headers != null) {
+        for (i in 0 until headers.length()) {
+            val header = headers.getJSONObject(i)
+            when (header.optString("name").lowercase()) {
+                "from" -> from = header.optString("value")
+                "subject" -> subject = header.optString("value")
+            }
+        }
+    }
+    return EmailDetail(
+        id = id,
+        from = from,
+        subject = subject,
+        snippet = obj.optString("snippet"),
+        body = payload?.let(::extractPlainText).orEmpty(),
+        source = emailSource(id),
     )
 }
 
