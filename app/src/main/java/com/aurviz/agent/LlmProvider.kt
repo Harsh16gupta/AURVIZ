@@ -46,14 +46,15 @@ fun demoToolSchema(): JSONObject =
 
 /** Scheduling Tool: the LLM proposes WHAT + WHEN in words; the app parses
  *  the time with its tested parser and shows a preview for Confirm.
- *  The LLM never sets alarms itself — same Confirm gate as email send. */
+ *  The LLM never sets alarms itself — same Confirm gate as email send
+ *  (ADR-0003: requiresConfirmation). */
 fun scheduleToolSchema(): JSONObject =
     JSONObject()
         .put("type", "function")
         .put(
             "function",
             JSONObject()
-                .put("name", "createSchedule")
+                .put("name", "create_schedule")
                 .put("description", "Save a recurring routine that runs later. Split the request into WHAT to do (task) and WHEN it runs (when, in the user's own words).")
                 .put(
                     "parameters",
@@ -69,7 +70,53 @@ fun scheduleToolSchema(): JSONObject =
                 ),
         )
 
-fun allToolSchemas(): JSONArray = JSONArray().put(demoToolSchema()).put(scheduleToolSchema())
+/** Scheduling Tool: read-only list, no Confirmation (ADR-0003: reads,
+ *  searches, and lists are ungated). */
+fun listSchedulesToolSchema(): JSONObject =
+    JSONObject()
+        .put("type", "function")
+        .put(
+            "function",
+            JSONObject()
+                .put("name", "list_schedules")
+                .put("description", "List the saved recurring routines with their ids, instructions, and times.")
+                .put(
+                    "parameters",
+                    JSONObject()
+                        .put("type", "object")
+                        .put("properties", JSONObject()),
+                ),
+        )
+
+/** Scheduling Tool: deleting a routine is state-changing, so it carries
+ *  the same Confirm gate as creation (ADR-0003: requiresConfirmation). */
+fun cancelScheduleToolSchema(): JSONObject =
+    JSONObject()
+        .put("type", "function")
+        .put(
+            "function",
+            JSONObject()
+                .put("name", "cancel_schedule")
+                .put("description", "Delete a saved recurring routine. Use the schedule_id from list_schedules.")
+                .put(
+                    "parameters",
+                    JSONObject()
+                        .put("type", "object")
+                        .put(
+                            "properties",
+                            JSONObject()
+                                .put("schedule_id", JSONObject().put("type", "string").put("description", "The routine id, e.g. sched_1")),
+                        )
+                        .put("required", JSONArray().put("schedule_id")),
+                ),
+        )
+
+fun allToolSchemas(): JSONArray =
+    JSONArray()
+        .put(demoToolSchema())
+        .put(scheduleToolSchema())
+        .put(listSchedulesToolSchema())
+        .put(cancelScheduleToolSchema())
 
 fun buildToolsRequestBody(model: String, userText: String, tools: JSONArray): JSONObject =
     JSONObject()
@@ -165,11 +212,28 @@ object Providers {
         }
 }
 
-/** Canned provider for planner tests: no network, fixed tool call. */
-class FakeLlmProvider : LlmProvider {
-    override fun plan(userText: String): LlmResult =
+/** Scripted multi-turn provider for AgentLoop tests (ADR-0005): each chat
+ *  returns the next scripted turn in order (repeating the last when the
+ *  loop asks more turns than scripted) and records every messages list it
+ *  saw. The default script preserves the old single-turn canned reply. */
+class FakeLlmProvider(
+    private val script: List<LlmResult> = listOf(
         LlmResult(
             toolCalls = listOf(ToolCall("call_fake001", "getImportantEmails", mapOf("max_results" to 5))),
             content = null,
-        )
+        ),
+    ),
+) : LlmProvider, ChatLlmProvider {
+    private var next = 0
+    val seenMessages = mutableListOf<List<ChatMessage>>()
+
+    override fun plan(userText: String): LlmResult =
+        chat(listOf(ChatMessage(role = "user", content = userText)))
+
+    override fun chat(messages: List<ChatMessage>): LlmResult {
+        seenMessages += messages.toList()
+        val result = script[minOf(next, script.lastIndex)]
+        next++
+        return result
+    }
 }

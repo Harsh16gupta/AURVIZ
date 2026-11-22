@@ -47,13 +47,25 @@ class ToolRegistryTest {
         assertTrue(emails.resultType.isNotBlank())
         assertTrue(emails.parameters.getJSONObject("properties").has("max_results"))
 
-        // ADR-0003: create_schedule is a sensitive Tool, gated per call.
-        val schedule = registry.find("createSchedule")!!
-        assertEquals(RiskLevel.MEDIUM, schedule.riskLevel)
-        assertTrue(schedule.requiresConfirmation)
-        assertTrue(schedule.resultType.isNotBlank())
-        val props = schedule.parameters.getJSONObject("properties")
+        // ADR-0003: create_schedule and cancel_schedule are sensitive Tools,
+        // gated per call; list_schedules is a read and ungated.
+        val create = registry.find("create_schedule")!!
+        assertEquals(RiskLevel.MEDIUM, create.riskLevel)
+        assertTrue(create.requiresConfirmation)
+        assertTrue(create.resultType.isNotBlank())
+        val props = create.parameters.getJSONObject("properties")
         assertTrue(props.has("task") && props.has("when"))
+
+        val list = registry.find("list_schedules")!!
+        assertEquals(RiskLevel.LOW, list.riskLevel)
+        assertFalse(list.requiresConfirmation)
+        assertTrue(list.resultType.isNotBlank())
+
+        val cancel = registry.find("cancel_schedule")!!
+        assertEquals(RiskLevel.MEDIUM, cancel.riskLevel)
+        assertTrue(cancel.requiresConfirmation)
+        assertTrue(cancel.resultType.isNotBlank())
+        assertTrue(cancel.parameters.getJSONObject("properties").has("schedule_id"))
     }
 
     @Test
@@ -95,18 +107,58 @@ class ToolRegistryTest {
     fun validScheduleCallSucceedsAndStores() {
         val store = InMemoryScheduleStore()
         val registry = defaultToolRegistry(gmailApi = FakeGmail(), scheduleStore = store)
-        val result = registry.execute("createSchedule", mapOf("task" to "check emails", "when" to "at 9am"))
+        val result = registry.execute("create_schedule", mapOf("task" to "check emails", "when" to "at 9am"))
         assertTrue(result is ToolResult.Success)
         assertEquals(1, store.list().size)
     }
 
     @Test
     fun unparseableWhenNamesTheViolation() {
-        val result = registry().execute("createSchedule", mapOf("task" to "check emails", "when" to "someday maybe"))
+        val result = registry().execute("create_schedule", mapOf("task" to "check emails", "when" to "someday maybe"))
         assertTrue(result is ToolResult.Failure)
         result as ToolResult.Failure
         assertTrue(result.error.contains("when"))
         assertTrue(result.retryable)
+    }
+
+    @Test
+    fun crudRoundTripThroughRegistry() {
+        val store = InMemoryScheduleStore()
+        val registry = defaultToolRegistry(gmailApi = FakeGmail(), scheduleStore = store)
+
+        val created = registry.execute("create_schedule", mapOf("task" to "check emails", "when" to "at 9am"))
+        assertTrue(created is ToolResult.Success)
+        val id = ((created as ToolResult.Success).data as Map<*, *>)["id"] as String
+
+        val listed = registry.execute("list_schedules", emptyMap())
+        assertTrue(listed is ToolResult.Success)
+        val rows = (listed as ToolResult.Success).data as List<*>
+        assertEquals(1, rows.size)
+        assertEquals(id, (rows[0] as Map<*, *>)["id"])
+
+        val cancelled = registry.execute("cancel_schedule", mapOf("schedule_id" to id))
+        assertTrue(cancelled is ToolResult.Success)
+
+        val listedAgain = registry.execute("list_schedules", emptyMap())
+        assertTrue(listedAgain is ToolResult.Success)
+        assertTrue(((listedAgain as ToolResult.Success).data as List<*>).isEmpty())
+        assertTrue(store.list().isEmpty())
+    }
+
+    @Test
+    fun cancelUnknownIdIsRetryableError() {
+        val result = registry().execute("cancel_schedule", mapOf("schedule_id" to "sched_999"))
+        assertTrue(result is ToolResult.Failure)
+        result as ToolResult.Failure
+        assertTrue(result.error.contains("sched_999"))
+        assertTrue(result.retryable)
+    }
+
+    @Test
+    fun cancelMissingIdNamesTheViolation() {
+        val result = registry().execute("cancel_schedule", emptyMap())
+        assertTrue(result is ToolResult.Failure)
+        assertTrue((result as ToolResult.Failure).error.contains("schedule_id"))
     }
 
     @Test
@@ -134,7 +186,7 @@ class ToolRegistryTest {
         val names = (0 until schemas.length())
             .map { schemas.getJSONObject(it).getJSONObject("function").getString("name") }
             .toSet()
-        assertEquals(setOf("search_emails", "read_email", "send_email", "getImportantEmails", "createSchedule", "save_memory", "search_memory"), names)
+        assertEquals(setOf("search_emails", "read_email", "send_email", "getImportantEmails", "create_schedule", "list_schedules", "cancel_schedule", "save_memory", "search_memory"), names)
     }
 
     @Test
