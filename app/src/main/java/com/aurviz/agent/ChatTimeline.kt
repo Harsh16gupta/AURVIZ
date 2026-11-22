@@ -37,7 +37,7 @@ fun buildTimeline(plan: Plan, doneCount: Int, error: String?): List<TimelineStep
         rows += TimelineStep(title, state, stepError)
     }
     when {
-        error != null -> rows += TimelineStep("Error: $error", StepState.FAILED, error)
+        error != null -> rows += TimelineStep("Error: $error", StepState.FAILED)
         total == 0 -> rows += TimelineStep("Nothing to do — ask again", StepState.READY)
         doneCount >= total -> rows += TimelineStep("Done", StepState.DONE)
         else -> rows += TimelineStep("Working…", StepState.RUNNING)
