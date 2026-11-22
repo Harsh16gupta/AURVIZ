@@ -29,6 +29,10 @@ data class AgentUiState(
     val statusLine: String = "Type a command to begin.",
     val timeline: List<TimelineStep> = emptyList(),
     val providerUsed: String? = null,
+    // Every provider that saw the prompt, in try-order. Size > 1 means the
+    // private-context prompt was replayed — retryDisclosure() renders the
+    // visible "retried on Y" line from this (ADR-0004, ticket 22).
+    val providersTried: List<String> = emptyList(),
     val memories: List<Memory> = emptyList(),
     val schedules: List<Schedule> = emptyList(),
     val emails: List<EmailSummary> = emptyList(),
