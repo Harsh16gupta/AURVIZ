@@ -59,7 +59,7 @@ class AgentLoopTest {
             FakeLlmProvider(
                 listOf(
                     call("call_1", "getImportantEmails", mapOf("max_results" to 5)),
-                    call("call_2", "createSchedule", mapOf("task" to "check mail", "when" to "at 9am")),
+                    call("call_2", "create_schedule", mapOf("task" to "check mail", "when" to "at 9am")),
                     answer("Done"),
                 ),
             )
@@ -141,7 +141,7 @@ class AgentLoopTest {
         val llm =
             FakeLlmProvider(
                 listOf(
-                    call("call_1", "createSchedule", mapOf("task" to "check mail", "when" to "at 9am")),
+                    call("call_1", "create_schedule", mapOf("task" to "check mail", "when" to "at 9am")),
                     answer("OK, I won't schedule it"),
                 ),
             )
@@ -192,7 +192,7 @@ class AgentLoopTest {
             FakeLlmProvider(
                 listOf(
                     call("call_1", "getImportantEmails", mapOf("max_results" to 5)),
-                    call("call_2", "createSchedule", mapOf("task" to "check mail", "when" to "at 9am")),
+                    call("call_2", "create_schedule", mapOf("task" to "check mail", "when" to "at 9am")),
                     answer("Done"),
                 ),
             )
@@ -203,7 +203,7 @@ class AgentLoopTest {
         assertEquals("Planned 2 steps", rows[1].title)
         assertEquals("Tool 1 of 2: getImportantEmails", rows[2].title)
         assertEquals(StepState.DONE, rows[2].state)
-        assertEquals("Tool 2 of 2: createSchedule", rows[3].title)
+        assertEquals("Tool 2 of 2: create_schedule", rows[3].title)
         assertEquals(StepState.DONE, rows[3].state)
         assertEquals(StepState.DONE, rows.last().state)
     }

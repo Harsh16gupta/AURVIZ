@@ -1,5 +1,10 @@
 package com.aurviz.agent
 
+import java.time.DayOfWeek
+import java.time.Instant
+import java.time.ZoneId
+import java.time.ZoneOffset
+import java.time.ZonedDateTime
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -44,6 +49,93 @@ class ScheduleTest {
         assertEquals("check emails", parsed.instruction)
     }
 
+    // --- Seam A2: 12am/12pm edges (the hour==12 branch) ---
+
+    @Test
+    fun twelveAmIsMidnight() {
+        val parsed = parseSchedule("wake me at 12am")!!
+        assertEquals(0, parsed.hour)
+        assertEquals(0, parsed.minute)
+    }
+
+    @Test
+    fun twelvePmIsNoon() {
+        val parsed = parseSchedule("lunch at 12pm")!!
+        assertEquals(12, parsed.hour)
+        assertEquals(0, parsed.minute)
+    }
+
+    @Test
+    fun twelveThirtyAmAndPm() {
+        assertEquals(0, parseSchedule("wake me at 12:30am")!!.hour)
+        assertEquals(30, parseSchedule("wake me at 12:30am")!!.minute)
+        assertEquals(12, parseSchedule("lunch at 12:30pm")!!.hour)
+        assertEquals(30, parseSchedule("lunch at 12:30pm")!!.minute)
+    }
+
+    // --- Seam A3: next fire time in a zone (DST-free timezone change) ---
+
+    @Test
+    fun nextFireTodayWhenTimeStillAhead() {
+        val schedule = Schedule("sched_1", "check emails", 9, 0)
+        val zone = ZoneId.of("Asia/Kolkata")
+        val now = ZonedDateTime.of(2026, 11, 23, 7, 0, 0, 0, zone)
+        val next = nextFireTime(schedule, zone, now)!!
+        assertEquals(ZonedDateTime.of(2026, 11, 23, 9, 0, 0, 0, zone), next)
+    }
+
+    @Test
+    fun nextFireTomorrowWhenTimePassed() {
+        val schedule = Schedule("sched_1", "check emails", 9, 0)
+        val zone = ZoneId.of("Asia/Kolkata")
+        val now = ZonedDateTime.of(2026, 11, 23, 10, 0, 0, 0, zone)
+        val next = nextFireTime(schedule, zone, now)!!
+        assertEquals(ZonedDateTime.of(2026, 11, 24, 9, 0, 0, 0, zone), next)
+    }
+
+    @Test
+    fun exactFireInstantRearmsNextDay() {
+        val schedule = Schedule("sched_1", "check emails", 9, 0)
+        val zone = ZoneId.of("Asia/Kolkata")
+        val now = ZonedDateTime.of(2026, 11, 23, 9, 0, 0, 0, zone)
+        val next = nextFireTime(schedule, zone, now)!!
+        assertEquals(ZonedDateTime.of(2026, 11, 24, 9, 0, 0, 0, zone), next)
+    }
+
+    @Test
+    fun mondayOnlySkipsToMonday() {
+        val schedule = Schedule("sched_1", "weekly report", 9, 0, days = setOf(1))
+        val zone = ZoneId.of("Asia/Kolkata")
+        // 2026-11-21 is a Saturday.
+        val now = ZonedDateTime.of(2026, 11, 21, 10, 0, 0, 0, zone)
+        val next = nextFireTime(schedule, zone, now)!!
+        assertEquals(DayOfWeek.MONDAY, next.dayOfWeek)
+        assertEquals(ZonedDateTime.of(2026, 11, 23, 9, 0, 0, 0, zone), next)
+    }
+
+    @Test
+    fun sameWallTimeIsADifferentInstantAfterTimezoneChange() {
+        // DST-free zones: a traveller keeps 9:00 wall-clock, but the
+        // instant moves. Re-arm must follow the zone, not a fixed offset.
+        val schedule = Schedule("sched_1", "check emails", 9, 0)
+        val now = ZonedDateTime.of(2026, 1, 15, 3, 0, 0, 0, ZoneOffset.UTC)
+        val kolkata = nextFireTime(schedule, ZoneId.of("Asia/Kolkata"), now)!!
+        val dubai = nextFireTime(schedule, ZoneId.of("Asia/Dubai"), now)!!
+        assertEquals(9, kolkata.withZoneSameInstant(ZoneId.of("Asia/Kolkata")).hour)
+        assertEquals(9, dubai.withZoneSameInstant(ZoneId.of("Asia/Dubai")).hour)
+        assertEquals(Instant.parse("2026-01-15T03:30:00Z"), kolkata.toInstant())
+        assertEquals(Instant.parse("2026-01-15T05:00:00Z"), dubai.toInstant())
+        assertFalse(kolkata.toInstant() == dubai.toInstant())
+    }
+
+    @Test
+    fun emptyDaysNeverFires() {
+        val schedule = Schedule("sched_1", "nothing", 9, 0, days = emptySet())
+        val zone = ZoneId.of("Asia/Kolkata")
+        val now = ZonedDateTime.of(2026, 11, 23, 7, 0, 0, 0, zone)
+        assertNull(nextFireTime(schedule, zone, now))
+    }
+
     @Test
     fun previewShowsTimeAndInstruction() {
         val parsed = parseSchedule("every morning at 9AM check emails")!!
@@ -68,6 +160,47 @@ class ScheduleTest {
         val saved = createSchedule(store, "check emails", 9, 0)
         deleteSchedule(store, saved.id)
         assertTrue(listSchedules(store).isEmpty())
+    }
+
+    // --- Seam B2: Room adapter round-trips ids ("sched_12" <-> pid 12) ---
+
+    private class FakeScheduleDao : ScheduleDao {
+        private val rows = mutableListOf<ScheduleRow>()
+        private var nextPid = 0L
+        override fun listAll(): List<ScheduleRow> = rows.toList()
+        override fun insert(row: ScheduleRow): Long {
+            nextPid += 1
+            rows += row.copy(pid = nextPid)
+            return nextPid
+        }
+        override fun deleteById(pid: Long) {
+            rows.removeAll { it.pid == pid }
+        }
+    }
+
+    @Test
+    fun roomStoreCrudRoundTripsIds() {
+        val store = RoomScheduleStore(FakeScheduleDao())
+        val saved = createSchedule(store, "check emails", 9, 0, days = setOf(1, 2, 3, 4, 5))
+        assertTrue(saved.id.startsWith("sched_"))
+
+        val listed = listSchedules(store)
+        assertEquals(1, listed.size)
+        assertEquals(saved.id, listed[0].id)
+        assertEquals("check emails", listed[0].instruction)
+        assertEquals(9, listed[0].hour)
+        assertEquals(setOf(1, 2, 3, 4, 5), listed[0].days)
+
+        deleteSchedule(store, saved.id)
+        assertTrue(listSchedules(store).isEmpty())
+    }
+
+    @Test
+    fun roomStoreDeleteIgnoresMalformedId() {
+        val store = RoomScheduleStore(FakeScheduleDao())
+        createSchedule(store, "check emails", 9, 0)
+        deleteSchedule(store, "not-a-schedule-id")
+        assertEquals(1, listSchedules(store).size)
     }
 
     // --- Seam C: firing decision on a fake clock ---
