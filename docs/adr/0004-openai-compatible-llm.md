@@ -1,0 +1,3 @@
+# OpenAI-compatible REST client for four swappable models
+
+Gemini Pro latency is a risk but Gemini Flash, Groq Llama, DeepSeek, and Meta Llama all expose OpenAI-compatible chat-completions with tools. We use one OpenAI-shaped HTTP client (OkHttp/Retrofit, no official Kotlin SDK exists) with baseURL + key + model from BuildConfig/local.properties behind an LLMProvider interface, with in-app picker (Gemini/DeepSeek/Groq-Llama/Meta) + auto-fallback on 429/error. Default is Gemini Flash free; user holds paid DeepSeek + Meta keys so all four are wired from the start. Switching providers is a config change, not a code change. Failure UX is Retry in timeline + offline queue for memory/schedule writes.
