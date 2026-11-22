@@ -23,6 +23,7 @@ import com.aurviz.agent.LoopbackReceiver
 import com.aurviz.agent.LlmKeys
 import com.aurviz.agent.LlmResult
 import com.aurviz.agent.MIGRATION_1_2
+import com.aurviz.agent.MIGRATION_2_3
 import com.aurviz.agent.Memory
 import com.aurviz.agent.NamedProvider
 import com.aurviz.agent.Plan
@@ -144,7 +145,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
 
     private val db: AppDb =
         Room.databaseBuilder(application, AppDb::class.java, "aurviz.db")
-            .addMigrations(MIGRATION_1_2)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
             .build()
     private val roomStore = RoomMemoryStore(db.memories())
     private val scheduleStore = RoomScheduleStore(db.schedules())

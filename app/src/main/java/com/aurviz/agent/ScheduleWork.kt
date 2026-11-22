@@ -24,7 +24,7 @@ class ScheduleWorker(context: Context, params: WorkerParameters) : Worker(contex
     override fun doWork(): Result {
         val scheduleId = inputData.getString(SCHEDULE_ID_KEY) ?: return Result.failure()
         val db = Room.databaseBuilder(applicationContext, AppDb::class.java, "aurviz.db")
-            .addMigrations(MIGRATION_1_2)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
             .build()
         val store = RoomScheduleStore(db.schedules())
         val schedule = store.list().find { it.id == scheduleId } ?: return Result.failure()
