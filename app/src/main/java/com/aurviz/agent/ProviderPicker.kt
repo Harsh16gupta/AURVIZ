@@ -91,6 +91,16 @@ fun retryDisclosure(result: FallbackResult): String? =
         null
     }
 
+// Ticket 36: user-entered keys from TokenVault override the BuildConfig keys
+// per provider; a blank vault entry falls back to BuildConfig. On a release
+// build (empty BuildConfig keys) with nothing entered, the result stays
+// blank and planWithFallback refuses to call — never a baked-in key.
+fun effectiveSettings(base: ProviderSettings, user: LlmKeys): ProviderSettings =
+    base.copy(
+        geminiKey = user.geminiKey.ifBlank { base.geminiKey },
+        groqKey = user.groqKey.ifBlank { base.groqKey },
+    )
+
 // --- Thin wiring: settings come from BuildConfig (local.properties). ---
 
 fun settingsFromBuildConfig(): ProviderSettings =
@@ -108,8 +118,9 @@ fun providerFromConfig(config: ProviderConfig): LlmProvider =
 
 // Real providers in try-order: picked one first, then the rest.
 // No-key entries stay in the list — planWithFallback skips them.
-fun defaultCandidates(preferred: String): List<NamedProvider> {
-    val settings = settingsFromBuildConfig()
+// User keys from Settings (TokenVault) win over BuildConfig per provider.
+fun defaultCandidates(preferred: String, userKeys: LlmKeys = LlmKeys()): List<NamedProvider> {
+    val settings = effectiveSettings(settingsFromBuildConfig(), userKeys)
     val order = listOf(preferred.trim().lowercase(), "gemini", "groq", "deepseek").distinct()
     return order.map { name ->
         val config = resolveProvider(name, settings)

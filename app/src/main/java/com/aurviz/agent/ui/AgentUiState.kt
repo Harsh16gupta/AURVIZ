@@ -2,11 +2,14 @@ package com.aurviz.agent.ui
 
 import com.aurviz.agent.EmailDraft
 import com.aurviz.agent.EmailSummary
+import com.aurviz.agent.FallbackResult
+import com.aurviz.agent.LlmResult
 import com.aurviz.agent.Memory
 import com.aurviz.agent.ParsedSchedule
 import com.aurviz.agent.Schedule
 import com.aurviz.agent.TimelineStep
 import com.aurviz.agent.WebPage
+import com.aurviz.agent.retryDisclosure
 import com.aurviz.agent.ui.components.VoiceState as OrbState
 
 // One snapshot of everything the Compose screens render.
@@ -53,5 +56,18 @@ data class AgentUiState(
     val loopbackHint: String = "",
     val exactAlarmNeeded: Boolean = false,
     val batteryOptimizationNeeded: Boolean = false,
+    // Ticket 36: whether a user-entered key exists in TokenVault per provider.
+    // The key values themselves never enter UI state — only these flags.
+    val geminiKeySet: Boolean = false,
+    val groqKeySet: Boolean = false,
     val sending: Boolean = false,
 )
+
+// Ticket 11/24: visible retry line for CommandScreen, rendered from the
+// copied providersTried via retryDisclosure() (ticket 35). Null when the
+// first provider answered or nothing ran yet — no silent replay.
+fun AgentUiState.retryLine(): String? {
+    val used = providerUsed ?: return null
+    if (providersTried.size <= 1) return null
+    return retryDisclosure(FallbackResult(LlmResult(emptyList(), null), used, providersTried))
+}

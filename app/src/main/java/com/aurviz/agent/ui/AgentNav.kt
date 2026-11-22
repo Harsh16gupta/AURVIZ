@@ -137,6 +137,8 @@ fun AgentNav(
                             onRevokeGmail = vm::revokeGmail,
                             onPasteLink = vm::onPastedLink,
                             onDismissPasteFallback = vm::dismissPasteFallback,
+                            onSaveLlmKeys = vm::saveLlmKeys,
+                            onClearLlmKeys = vm::clearLlmKeys,
                             onOpenExactAlarmSettings = onOpenExactAlarmSettings,
                             onRefreshExactAlarm = vm::refreshExactAlarmFlag,
                             onOpenBatterySettings = onOpenBatterySettings,
