@@ -1,5 +1,7 @@
 package com.aurviz.agent
 
+import org.json.JSONObject
+
 // Ticket 17/24: scheduled-run deferral seam (ADR-0002, gaps §3E). A
 // scheduled run has no user present, so its Confirmation never approves:
 // the loop runs on the read-only allowlist (GLOSSARY Schedule — the
@@ -63,4 +65,268 @@ fun runScheduled(
         }
     }
     return result
+}
+
+// --- Ticket 13/24: headless scheduled runs (ADR-0002, gaps §3D). ---
+// runScheduled above is the deferral seam; below is the Worker-grade
+// runner: the read-only registry view, the schedule_runs idempotency
+// contract (scheduleId+fireTime), the headless LLM path, and the
+// notification wording. Room adapters live in ScheduleDb.kt; the
+// expedited Worker wiring lives in ScheduleWork.kt. Pure logic,
+// JVM-testable throughout.
+
+// ADR-0002: scheduled runs see reads only. A scheduled send_email or
+// schedule/memory write is never executed: the loop records a
+// PendingApproval row and the user approves in-app.
+val SCHEDULED_RUN_ALLOWLIST: Set<String> =
+    setOf(
+        "search_emails",
+        "read_email",
+        "get_page_text",
+        "search_memory",
+        "list_schedules",
+    )
+
+// Terminal run states, stored in schedule_runs.status. RUNNING is the
+// transient claim marker so a double-fire loses the race instead of
+// double-running; finish() always overwrites it.
+enum class ScheduleRunStatus {
+    RUNNING,
+    SUCCESS,
+    BLOCKED_WRITE,
+    AUTH_ERROR,
+    FAILED,
+}
+
+// One recorded run: the idempotency key is scheduleId+fireTime, so a
+// double-fired alarm never double-runs the loop.
+data class ScheduleRun(
+    val scheduleId: String,
+    val fireTime: Long,
+    val status: ScheduleRunStatus,
+    val error: String?,
+    val result: String?,
+    val durationMs: Long,
+)
+
+// The plug shape. Tests use InMemoryScheduleRunStore; Room implements
+// this on the phone (RoomScheduleStore in ScheduleDb.kt). claim()
+// inserts the RUNNING marker and returns its pid, or null when the key
+// already exists (the double-fire loses here, before any LLM call).
+interface ScheduleRunStore {
+    fun claim(scheduleId: String, fireTime: Long): Long?
+
+    fun finish(pid: Long, status: ScheduleRunStatus, error: String?, result: String?, durationMs: Long)
+
+    fun find(scheduleId: String, fireTime: Long): ScheduleRun?
+
+    fun list(): List<ScheduleRun>
+}
+
+class InMemoryScheduleRunStore : ScheduleRunStore {
+    private val rows = mutableMapOf<Pair<String, Long>, Pair<Long, ScheduleRun>>()
+    private var nextPid = 0L
+
+    @Synchronized
+    override fun claim(scheduleId: String, fireTime: Long): Long? {
+        val key = scheduleId to fireTime
+        if (key in rows) return null
+        nextPid += 1
+        rows[key] = nextPid to ScheduleRun(scheduleId, fireTime, ScheduleRunStatus.RUNNING, null, null, 0L)
+        return nextPid
+    }
+
+    @Synchronized
+    override fun finish(pid: Long, status: ScheduleRunStatus, error: String?, result: String?, durationMs: Long) {
+        val entry = rows.entries.firstOrNull { it.value.first == pid } ?: return
+        rows[entry.key] = pid to ScheduleRun(entry.key.first, entry.key.second, status, error, result, durationMs)
+    }
+
+    @Synchronized
+    override fun find(scheduleId: String, fireTime: Long): ScheduleRun? = rows[scheduleId to fireTime]?.second
+
+    @Synchronized
+    override fun list(): List<ScheduleRun> = rows.values.map { it.second }
+}
+
+// Expired/revoked Gmail credentials surface as read failures, never
+// silent no-ops: the runner maps them to the Reconnect notification.
+fun isGmailAuthFailure(error: String): Boolean {
+    val text = error.lowercase()
+    return text.contains("not connected") ||
+        text.contains("401") ||
+        text.contains("unauthorized") ||
+        text.contains("invalid_grant") ||
+        text.contains("token refresh") ||
+        text.contains("token expired") ||
+        text.contains("reconnect gmail")
+}
+
+// The loop's registry view for scheduled runs: allowlisted reads run
+// as-is; every other tool keeps its name/schema (so the model recovers
+// from the refusal like any structured error) but is forced through
+// the Confirmation gate with neutered executors, so even a caller that
+// skips the gate cannot reach the real transport or store.
+fun scheduledRegistry(full: ToolRegistry): ToolRegistry {
+    val out = ToolRegistry()
+    for (name in full.names()) {
+        val definition = full.find(name) ?: continue
+        if (name in SCHEDULED_RUN_ALLOWLIST) {
+            out.register(definition)
+        } else {
+            out.register(
+                definition.copy(
+                    requiresConfirmation = true,
+                    execute = { blockedScheduledTool(name) },
+                    approvedExecute = null,
+                ),
+            )
+        }
+    }
+    return out
+}
+
+private fun blockedScheduledTool(name: String): ToolResult =
+    ToolResult.Failure(
+        "tool '$name' never runs in scheduled runs: recorded for approval instead; nothing ran",
+        retryable = false,
+    )
+
+// Headless chat over the single-shot fallback seam (ADR-0004): every
+// loop turn replays the rendered messages through the candidates in
+// order. Same turn shape as the foreground FallbackChatLlm; this one
+// lives in the agent package so the Worker never imports UI.
+fun renderScheduledPrompt(messages: List<ChatMessage>): String =
+    messages.joinToString("\n") { message ->
+        when (message.role) {
+            "assistant" ->
+                ("[assistant] " + message.content.orEmpty() +
+                    message.toolCalls.joinToString(" ", prefix = " ") { it.name }).trim()
+            "tool" -> "[tool ${message.toolCallId}] ${message.content.orEmpty()}"
+            else -> message.content.orEmpty()
+        }
+    }
+
+class HeadlessChatLlm(
+    private val candidates: List<NamedProvider>,
+) : ChatLlmProvider {
+    override fun chat(messages: List<ChatMessage>): LlmResult =
+        planWithFallback(renderScheduledPrompt(messages), candidates).result
+}
+
+// What the summary note says: the loop's answer (or its error), plus
+// how many attempted writes are waiting for approval.
+fun scheduledSummary(answer: String?, error: String?, blockedCount: Int): String {
+    val base = answer ?: error.orEmpty()
+    return if (blockedCount > 0) "$base (${blockedCount} request(s) need your approval)" else base
+}
+
+fun scheduledRunNotification(
+    schedule: Schedule,
+    answer: String?,
+    error: String?,
+    blockedCount: Int,
+    authFailed: Boolean,
+): ScheduleNotification =
+    if (authFailed) {
+        ScheduleNotification(
+            "Reconnect Gmail",
+            "Routine \"${schedule.instruction}\" couldn't reach Gmail (sign-in expired). Reconnect Gmail to resume routines.",
+        )
+    } else {
+        buildResultNotification(schedule, scheduledSummary(answer, error, blockedCount))
+    }
+
+sealed interface ScheduledRunOutcome {
+    data class Ran(
+        val run: ScheduleRun,
+        val notification: ScheduleNotification,
+        val blocked: List<PendingApproval>,
+    ) : ScheduledRunOutcome
+
+    data class DuplicateSkipped(val run: ScheduleRun) : ScheduledRunOutcome
+}
+
+// One headless run: claim the idempotency key first (double-fires stop
+// here, before any LLM call), run the AgentLoop on the read-only view
+// with a headless confirmer (no UI exists to approve: every write is
+// rejected and recorded), then store the run and build the note.
+// Never throws: a transport failure becomes a FAILED run row.
+fun runScheduledRoutine(
+    schedule: Schedule,
+    fireTime: Long,
+    llm: ChatLlmProvider,
+    registry: ToolRegistry,
+    runs: ScheduleRunStore,
+    approvals: PendingApprovalStore,
+    nowMs: () -> Long = System::currentTimeMillis,
+): ScheduledRunOutcome {
+    runs.find(schedule.id, fireTime)?.let { return ScheduledRunOutcome.DuplicateSkipped(it) }
+    val pid =
+        runs.claim(schedule.id, fireTime)
+            ?: return ScheduledRunOutcome.DuplicateSkipped(
+                runs.find(schedule.id, fireTime)
+                    ?: ScheduleRun(schedule.id, fireTime, ScheduleRunStatus.RUNNING, null, null, 0L),
+            )
+    val startMs = nowMs()
+    val blockedCalls = mutableListOf<ToolCall>()
+    val readOnly = scheduledRegistry(registry)
+    val loop =
+        AgentLoop(
+            llm,
+            readOnly,
+            confirm = { call ->
+                if (call.name in SCHEDULED_RUN_ALLOWLIST) {
+                    ApprovalDecision.Approved
+                } else {
+                    blockedCalls += call
+                    ApprovalDecision.Rejected
+                }
+            },
+        )
+    val result =
+        try {
+            loop.run(schedule.instruction)
+        } catch (e: Exception) {
+            AgentLoopResult.Failed(
+                "scheduled run failed: ${e.message ?: e.javaClass.simpleName}",
+                emptyList(),
+                emptyList(),
+            )
+        }
+    val failureTexts =
+        result.steps.mapNotNull { (it.result as? ToolResult.Failure)?.error } +
+            ((result as? AgentLoopResult.Failed)?.error?.let { listOf(it) } ?: emptyList())
+    val authFailed = failureTexts.any(::isGmailAuthFailure)
+    val blocked =
+        blockedCalls.map { call ->
+            approvals.save(
+                PendingApproval(
+                    scheduleId = schedule.id,
+                    toolName = call.name,
+                    arguments = call.arguments,
+                    reason = "scheduled run: sensitive tool held for user approval, never executed",
+                ),
+            )
+        }
+    val answer = (result as? AgentLoopResult.Answered)?.answer
+    val error = (result as? AgentLoopResult.Failed)?.error ?: failureTexts.firstOrNull()
+    val status =
+        when {
+            authFailed -> ScheduleRunStatus.AUTH_ERROR
+            blockedCalls.isNotEmpty() -> ScheduleRunStatus.BLOCKED_WRITE
+            result is AgentLoopResult.Answered -> ScheduleRunStatus.SUCCESS
+            else -> ScheduleRunStatus.FAILED
+        }
+    val durationMs = (nowMs() - startMs).coerceAtLeast(0L)
+    val resultText = answer ?: error.orEmpty()
+    runs.finish(pid, status, error, resultText, durationMs)
+    val run =
+        runs.find(schedule.id, fireTime)
+            ?: ScheduleRun(schedule.id, fireTime, status, error, resultText, durationMs)
+    return ScheduledRunOutcome.Ran(
+        run,
+        scheduledRunNotification(schedule, answer, error, blockedCalls.size, authFailed),
+        blocked,
+    )
 }

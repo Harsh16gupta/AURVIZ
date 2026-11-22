@@ -2,11 +2,14 @@ package com.aurviz.agent
 
 import androidx.room.Dao
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import org.json.JSONObject
 
 // Session 3 thin wiring: routines live in the same on-phone database.
 // Room only stores rows; all decisions (parse/due/reboot/note) stay in
@@ -49,6 +52,154 @@ val MIGRATION_1_2 =
             )
         }
     }
+
+// Version 3 -> 4 adds the ticket 13/24 scheduled-run tables (ADR-0002):
+// schedule_runs records every headless run with the idempotency key
+// scheduleId+fireTime (unique index, so a double-fire loses the race),
+// and pending_approvals holds writes the loop attempted but never ran.
+val MIGRATION_3_4 =
+    object : Migration(3, 4) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `schedule_runs` (" +
+                    "`pid` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                    "`scheduleId` TEXT NOT NULL, " +
+                    "`fireTime` INTEGER NOT NULL, " +
+                    "`status` TEXT NOT NULL, " +
+                    "`error` TEXT, " +
+                    "`result` TEXT, " +
+                    "`durationMs` INTEGER NOT NULL)",
+            )
+            db.execSQL(
+                "CREATE UNIQUE INDEX IF NOT EXISTS `index_schedule_runs_scheduleId_fireTime` " +
+                    "ON `schedule_runs` (`scheduleId`, `fireTime`)",
+            )
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `pending_approvals` (" +
+                    "`pid` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                    "`scheduleId` TEXT NOT NULL, " +
+                    "`toolName` TEXT NOT NULL, " +
+                    "`argsJson` TEXT NOT NULL, " +
+                    "`reason` TEXT NOT NULL, " +
+                    "`createdAt` INTEGER NOT NULL)",
+            )
+        }
+    }
+
+// One recorded headless run. The unique (scheduleId, fireTime) index is
+// the double-fire guard: the second claim inserts nothing (IGNORE).
+@Entity(
+    tableName = "schedule_runs",
+    indices = [Index(value = ["scheduleId", "fireTime"], unique = true)],
+)
+data class ScheduleRunRow(
+    @PrimaryKey(autoGenerate = true) val pid: Long = 0,
+    val scheduleId: String,
+    val fireTime: Long,
+    val status: String,
+    val error: String?,
+    val result: String?,
+    val durationMs: Long,
+)
+
+@Dao
+interface ScheduleRunDao {
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    fun insertIgnore(row: ScheduleRunRow): Long
+
+    @Query("SELECT * FROM schedule_runs WHERE scheduleId = :scheduleId AND fireTime = :fireTime LIMIT 1")
+    fun find(scheduleId: String, fireTime: Long): ScheduleRunRow?
+
+    @Query("SELECT * FROM schedule_runs ORDER BY pid ASC")
+    fun listAll(): List<ScheduleRunRow>
+
+    @Query("UPDATE schedule_runs SET status = :status, `error` = :error, `result` = :result, durationMs = :durationMs WHERE pid = :pid")
+    fun finish(pid: Long, status: String, error: String?, result: String?, durationMs: Long)
+}
+
+// One write a scheduled run attempted but never executed: the user
+// approves it in-app. argsJson carries the exact attempted arguments;
+// reason records why it was held (ticket 17/24 wording).
+@Entity(tableName = "pending_approvals")
+data class PendingApprovalRow(
+    @PrimaryKey(autoGenerate = true) val pid: Long = 0,
+    val scheduleId: String,
+    val toolName: String,
+    val argsJson: String,
+    val reason: String,
+    val createdAt: Long,
+)
+
+@Dao
+interface PendingApprovalDao {
+    @Insert
+    fun insert(row: PendingApprovalRow): Long
+
+    @Query("SELECT * FROM pending_approvals ORDER BY pid ASC")
+    fun listAll(): List<PendingApprovalRow>
+
+    @Query("DELETE FROM pending_approvals WHERE pid = :pid")
+    fun deleteById(pid: Long)
+}
+
+// Adapter: Room rows in, ScheduleRun objects out. A -1 insert (IGNORE
+// conflict on the idempotency key) is the duplicate-fire signal.
+class RoomScheduleRunStore(private val dao: ScheduleRunDao) : ScheduleRunStore {
+    override fun claim(scheduleId: String, fireTime: Long): Long? {
+        val pid =
+            dao.insertIgnore(
+                ScheduleRunRow(
+                    scheduleId = scheduleId,
+                    fireTime = fireTime,
+                    status = ScheduleRunStatus.RUNNING.name,
+                    error = null,
+                    result = null,
+                    durationMs = 0L,
+                ),
+            )
+        return if (pid == -1L) null else pid
+    }
+
+    override fun finish(pid: Long, status: ScheduleRunStatus, error: String?, result: String?, durationMs: Long) {
+        dao.finish(pid, status.name, error, result, durationMs)
+    }
+
+    override fun find(scheduleId: String, fireTime: Long): ScheduleRun? = dao.find(scheduleId, fireTime)?.toRun()
+
+    override fun list(): List<ScheduleRun> = dao.listAll().map { it.toRun() }
+
+    private fun ScheduleRunRow.toRun(): ScheduleRun =
+        ScheduleRun(scheduleId, fireTime, ScheduleRunStatus.valueOf(status), error, result, durationMs)
+}
+
+class RoomPendingApprovalStore(private val dao: PendingApprovalDao) : PendingApprovalStore {
+    override fun save(approval: PendingApproval): PendingApproval {
+        dao.insert(
+            PendingApprovalRow(
+                scheduleId = approval.scheduleId,
+                toolName = approval.toolName,
+                argsJson = JSONObject(approval.arguments.filterValues { it != null }).toString(),
+                reason = approval.reason,
+                createdAt = System.currentTimeMillis(),
+            ),
+        )
+        return approval
+    }
+
+    override fun list(): List<PendingApproval> =
+        dao.listAll().map {
+            PendingApproval(it.scheduleId, it.toolName, argsFromJson(it.argsJson), it.reason)
+        }
+
+    private fun argsFromJson(json: String): Map<String, Any?> {
+        val obj = JSONObject(json)
+        val out = mutableMapOf<String, Any?>()
+        for (key in obj.keys()) {
+            out[key] = if (obj.isNull(key)) null else obj.get(key)
+        }
+        return out
+    }
+}
 
 // Adapter: Room rows in, Schedule objects out. Ids round-trip
 // ("sched_12" -> pid 12) so unschedule-by-id works on the phone too.

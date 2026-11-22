@@ -28,8 +28,11 @@ fun nextTriggerMillis(hour: Int, minute: Int, nowMillis: Long = System.currentTi
     return next.timeInMillis
 }
 
-private fun alarmIntent(context: Context, scheduleId: String): PendingIntent {
-    val intent = Intent(context, AlarmReceiver::class.java).putExtra(SCHEDULE_ID_KEY, scheduleId)
+private fun alarmIntent(context: Context, scheduleId: String, fireTimeMs: Long = 0L): PendingIntent {
+    val intent =
+        Intent(context, AlarmReceiver::class.java)
+            .putExtra(SCHEDULE_ID_KEY, scheduleId)
+            .putExtra(FIRE_TIME_KEY, fireTimeMs)
     val code = scheduleId.removePrefix("sched_").toIntOrNull() ?: scheduleId.hashCode()
     return PendingIntent.getBroadcast(
         context, code, intent,
@@ -44,9 +47,9 @@ fun registerRoutineAlarm(context: Context, schedule: Schedule): Boolean {
     val triggerAt = nextTriggerMillis(schedule.hour, schedule.minute)
     val exact = Build.VERSION.SDK_INT < 31 || alarms.canScheduleExactAlarms()
     if (exact) {
-        alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, alarmIntent(context, schedule.id))
+        alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, alarmIntent(context, schedule.id, triggerAt))
     } else {
-        alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, alarmIntent(context, schedule.id))
+        alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, alarmIntent(context, schedule.id, triggerAt))
     }
     return exact
 }
@@ -59,15 +62,19 @@ fun cancelRoutineAlarm(context: Context, scheduleId: String) {
 // The alarm went off: hand the routine to the worker, then set tomorrow's.
 // onReceive must return fast, so the database work runs on a side thread
 // held open with goAsync (the phone may otherwise kill us mid-query).
+// The alarm's own trigger instant travels as FIRE_TIME_KEY, so a
+// double-delivered alarm claims the same schedule_runs key and the
+// second delivery skips instead of double-running.
 class AlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val scheduleId = intent.getStringExtra(SCHEDULE_ID_KEY) ?: return
+        val fireTime = intent.getLongExtra(FIRE_TIME_KEY, 0L).takeIf { it > 0 } ?: System.currentTimeMillis()
         val ongoing = goAsync()
         Thread {
             try {
-                enqueueRoutineWork(context, scheduleId)
+                enqueueRoutineWork(context, scheduleId, fireTime)
                 val db = Room.databaseBuilder(context, AppDb::class.java, "aurviz.db")
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                     .build()
                 db.schedules().listAll()
                     .find { "sched_${it.pid}" == scheduleId }
@@ -89,7 +96,7 @@ class BootReceiver : BroadcastReceiver() {
         Thread {
             try {
                 val db = Room.databaseBuilder(context, AppDb::class.java, "aurviz.db")
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                     .build()
                 val store = RoomScheduleStore(db.schedules())
                 for (id in schedulesToRescheduleAfterReboot(store)) {
