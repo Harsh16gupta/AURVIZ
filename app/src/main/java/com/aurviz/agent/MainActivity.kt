@@ -25,6 +25,10 @@ class MainActivity : Activity() {
     private lateinit var micButton: Button
     private lateinit var timelineView: TextView
     private lateinit var retryButton: Button
+    private lateinit var memoryView: TextView
+    private lateinit var forgetButton: Button
+    private lateinit var roomStore: MemoryStore
+    private var pendingForget: List<Memory> = emptyList()
     private var currentRows: List<TimelineStep> = emptyList()
     private var recognizer: SpeechRecognizer? = null
     private var voiceText: String? = null
@@ -42,6 +46,20 @@ class MainActivity : Activity() {
             text = "Retry failed step"
             visibility = android.view.View.GONE
         }
+        // Session 1 wiring: the on-phone memory (Room survives restarts).
+        // Small lists only, so main-thread queries are fine for this demo;
+        // Spec 07 moves database work off the main thread.
+        roomStore =
+            RoomMemoryStore(
+                androidx.room.Room.databaseBuilder(this, AppDb::class.java, "aurviz.db")
+                    .allowMainThreadQueries()
+                    .build()
+                    .memories(),
+            )
+        memoryView = TextView(this).apply { textSize = 14f }
+        forgetButton = Button(this).apply {
+            visibility = android.view.View.GONE
+        }
 
         val layout =
             LinearLayout(this).apply {
@@ -53,10 +71,21 @@ class MainActivity : Activity() {
                 addView(sendButton)
                 addView(timelineView)
                 addView(retryButton)
+                addView(memoryView)
+                addView(forgetButton)
             }
         setContentView(layout)
 
         refreshMicButton()
+        renderMemories()
+        forgetButton.setOnClickListener {
+            // Confirmed: delete exactly the previewed ids, nothing else.
+            pendingForget.forEach { roomStore.delete(it.id) }
+            liveText.text = "Deleted ${pendingForget.size}."
+            pendingForget = emptyList()
+            forgetButton.visibility = android.view.View.GONE
+            renderMemories()
+        }
         micButton.setOnClickListener { onMicTapped() }
         retryButton.setOnClickListener {
             // Retry keeps finished steps, only the failed one runs again.
@@ -65,14 +94,50 @@ class MainActivity : Activity() {
         }
         sendButton.setOnClickListener {
             val command = resolveCommandInput(voiceText, typedInput.text.toString())
-            liveText.text = "Command: $command"
             voiceText = null
+            val lower = command.lowercase()
+            // "remember my boss is Priya" -> store it, show the list.
+            if (lower.startsWith("remember ")) {
+                val fact = command.substring(9).trim()
+                if (fact.isBlank()) {
+                    liveText.text = "What should I remember?"
+                } else {
+                    rememberFact(roomStore, fact, "you told me")
+                    liveText.text = "Saved: $fact"
+                    currentRows = emptyList()
+                    renderTimeline()
+                    renderMemories()
+                }
+                return@setOnClickListener
+            }
+            // "forget boss" -> preview first, delete only on confirm.
+            if (lower.startsWith("forget ")) {
+                val preview = forgetPreview(roomStore, command.substring(7).trim())
+                pendingForget = preview
+                if (preview.isEmpty()) {
+                    liveText.text = "Nothing matches that."
+                    forgetButton.visibility = android.view.View.GONE
+                } else {
+                    liveText.text =
+                        "Delete these?\n" + preview.joinToString("\n") { "• ${it.text} (${it.source})" }
+                    forgetButton.text = "Delete ${preview.size}"
+                    forgetButton.visibility = android.view.View.VISIBLE
+                }
+                return@setOnClickListener
+            }
+            // Normal command: recall what we know, then plan as before.
+            // (Fake ignores the context line; the real provider will read it.)
+            val known = recallFor(roomStore, command).take(3)
+            val knownLine = if (known.isEmpty()) "" else "\nKnown: " + known.joinToString("; ") { it.text }
+            liveText.text = "Command: $command$knownLine"
             // T5 demo flow (Fake = no keys needed on device):
             // first Send shows step 2 failed so Retry can be checked.
             // Real runner swaps FakeLlmProvider for planWithFallback later.
-            when (val outcome = planCommand(command, FakeLlmProvider())) {
+            val effective =
+                if (known.isEmpty()) command else "Known: " + known.joinToString("; ") { it.text } + ". $command"
+            when (val outcome = planCommand(effective, FakeLlmProvider())) {
                 is PlannerOutcome.NeedsClarification -> {
-                    liveText.text = "Command: $command\nAgent: ${outcome.question}"
+                    liveText.text = "Command: $command$knownLine\nAgent: ${outcome.question}"
                     currentRows = buildTimeline(Plan(emptyList()), doneCount = 0, error = null)
                 }
                 is PlannerOutcome.Ready -> {
@@ -81,6 +146,17 @@ class MainActivity : Activity() {
             }
             renderTimeline()
         }
+    }
+
+    // The remembered list with sources, so auto-saves can be audited.
+    private fun renderMemories() {
+        val all = roomStore.list()
+        memoryView.text =
+            if (all.isEmpty()) {
+                "Remembered: nothing yet (try: remember my boss is Priya)"
+            } else {
+                "Remembered:\n" + all.joinToString("\n") { "• ${it.text} (${it.source})" }
+            }
     }
 
     // Draw the rows. Finished steps stay visible; failed one shows Retry.
