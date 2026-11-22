@@ -1,6 +1,9 @@
 package com.aurviz.agent
 
+import com.aurviz.agent.ui.AgentUiState
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 // T4 slice 1 (red): picker = name in, address + key + model out.
@@ -97,6 +100,60 @@ class ProviderPickerTest {
                 },
             )
         planWithFallback("check mail", listOf(none))
+    }
+
+    @Test
+    fun retryDisclosureNamesRetriedProvider() {
+        val first = failOn("gemini", HttpFailure("rate_limited", 0, true))
+        val second = successOn("groq")
+        val outcome = planWithFallback("check mail", listOf(first, second))
+        assertEquals("Retried on groq (tried gemini, groq)", retryDisclosure(outcome))
+    }
+
+    @Test
+    fun noDisclosureWhenFirstProviderSucceeds() {
+        val outcome = planWithFallback("check mail", listOf(successOn("gemini")))
+        assertNull(retryDisclosure(outcome))
+    }
+
+    @Test
+    fun crossProviderRetryDisclosesEveryProviderThatSawThePrompt() {
+        // ADR-0004: the same private-context prompt is replayed to the second
+        // provider, so the retry must never be silent — every provider that
+        // saw the prompt has to be disclosed in UI state.
+        val seenPrompts = mutableMapOf<String, String>()
+        val flaky =
+            NamedProvider(
+                "gemini",
+                "gemini-key",
+                object : LlmProvider {
+                    override fun plan(userText: String): LlmResult {
+                        seenPrompts["gemini"] = userText
+                        throw LlmException(HttpFailure("rate_limited", 0, true), "HTTP 429")
+                    }
+                },
+            )
+        val backup =
+            NamedProvider(
+                "groq",
+                "groq-key",
+                object : LlmProvider {
+                    override fun plan(userText: String): LlmResult {
+                        seenPrompts["groq"] = userText
+                        return LlmResult(emptyList(), "done")
+                    }
+                },
+            )
+        val prompt = "Known: take nightly meds. Summarize inbox"
+        val outcome = planWithFallback(prompt, listOf(flaky, backup))
+        assertEquals(prompt, seenPrompts["gemini"])
+        assertEquals(prompt, seenPrompts["groq"])
+        assertEquals(listOf("gemini", "groq"), outcome.tried)
+        val state = AgentUiState(providerUsed = outcome.providerName, providersTried = outcome.tried)
+        val disclosure = retryDisclosure(outcome)
+        assertEquals("Retried on groq (tried gemini, groq)", disclosure)
+        assertEquals(outcome.tried, state.providersTried)
+        assertEquals("groq", state.providerUsed)
     }
 }
 
