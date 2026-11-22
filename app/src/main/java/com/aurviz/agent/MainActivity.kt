@@ -23,6 +23,9 @@ class MainActivity : Activity() {
     private lateinit var typedInput: EditText
     private lateinit var liveText: TextView
     private lateinit var micButton: Button
+    private lateinit var timelineView: TextView
+    private lateinit var retryButton: Button
+    private var currentRows: List<TimelineStep> = emptyList()
     private var recognizer: SpeechRecognizer? = null
     private var voiceText: String? = null
     private var retriedOnline = false
@@ -34,6 +37,11 @@ class MainActivity : Activity() {
         liveText = TextView(this).apply { textSize = 16f }
         micButton = Button(this).apply { text = "🎤 Speak" }
         val sendButton = Button(this).apply { text = "Send" }
+        timelineView = TextView(this).apply { textSize = 14f }
+        retryButton = Button(this).apply {
+            text = "Retry failed step"
+            visibility = android.view.View.GONE
+        }
 
         val layout =
             LinearLayout(this).apply {
@@ -43,16 +51,57 @@ class MainActivity : Activity() {
                 addView(liveText)
                 addView(typedInput)
                 addView(sendButton)
+                addView(timelineView)
+                addView(retryButton)
             }
         setContentView(layout)
 
         refreshMicButton()
         micButton.setOnClickListener { onMicTapped() }
+        retryButton.setOnClickListener {
+            // Retry keeps finished steps, only the failed one runs again.
+            currentRows = retryTimeline(currentRows)
+            renderTimeline()
+        }
         sendButton.setOnClickListener {
             val command = resolveCommandInput(voiceText, typedInput.text.toString())
             liveText.text = "Command: $command"
             voiceText = null
+            // T5 demo flow (Fake = no keys needed on device):
+            // first Send shows step 2 failed so Retry can be checked.
+            // Real runner swaps FakeLlmProvider for planWithFallback later.
+            when (val outcome = planCommand(command, FakeLlmProvider())) {
+                is PlannerOutcome.NeedsClarification -> {
+                    liveText.text = "Command: $command\nAgent: ${outcome.question}"
+                    currentRows = buildTimeline(Plan(emptyList()), doneCount = 0, error = null)
+                }
+                is PlannerOutcome.Ready -> {
+                    currentRows = buildTimeline(outcome.plan, doneCount = 0, error = "Demo: no internet")
+                }
+            }
+            renderTimeline()
         }
+    }
+
+    // Draw the rows. Finished steps stay visible; failed one shows Retry.
+    private fun renderTimeline() {
+        timelineView.text = currentRows.joinToString("\n") { row ->
+            val mark =
+                when (row.state) {
+                    StepState.DONE -> "✓"
+                    StepState.RUNNING -> "▶"
+                    StepState.FAILED -> "✗"
+                    StepState.READY -> "○"
+                }
+            val err = if (row.error != null) " (${row.error})" else ""
+            "$mark ${row.title}$err"
+        }
+        retryButton.visibility =
+            if (currentRows.any { it.state == StepState.FAILED }) {
+                android.view.View.VISIBLE
+            } else {
+                android.view.View.GONE
+            }
     }
 
     override fun onDestroy() {
