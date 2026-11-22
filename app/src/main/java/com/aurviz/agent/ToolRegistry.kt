@@ -359,6 +359,7 @@ fun defaultToolRegistry(
     memoryStore: MemoryStore? = null,
     sendPolicy: SendPolicy = DefaultSendPolicy(),
     webBridge: WebBridge? = null,
+    backgroundWebLoader: BackgroundPageLoader? = null,
 ): ToolRegistry {
     val registry = ToolRegistry()
 
@@ -388,6 +389,7 @@ fun defaultToolRegistry(
                             "from" to row.from,
                             "subject" to row.subject,
                             "snippet" to row.snippet,
+                            "source" to emailSource(row.id),
                         )
                     },
                 )
@@ -538,7 +540,7 @@ fun defaultToolRegistry(
         ),
     )
 
-    registerWebTools(registry, webBridge)
+    registerWebTools(registry, webBridge, backgroundWebLoader)
 
     return registry
 }
@@ -546,8 +548,18 @@ fun defaultToolRegistry(
 /** Ticket 07/24: five foreground web Tools over the WebView bridge. Reads
  *  and in-page interactions are LOW risk and need no Confirmation; the user
  *  watches the foreground tab. A null bridge means the Browser tab has not
- *  attached yet — a retryable Failure, never a hang. */
-fun registerWebTools(registry: ToolRegistry, webBridge: WebBridge?) {
+ *  attached yet — a retryable Failure, never a hang.
+ *
+ *  Ticket 08/24: get_page_text additionally accepts a headless
+ *  BackgroundPageLoader (OkHttp + Jsoup). When the bridge is attached it
+ *  still wins (foreground behavior unchanged); when it is null — the
+ *  scheduled-run case, ADR-0002 — the loader serves the read. The other
+ *  four Tools stay foreground-only: they need the live tab. */
+fun registerWebTools(
+    registry: ToolRegistry,
+    webBridge: WebBridge?,
+    backgroundWebLoader: BackgroundPageLoader? = null,
+) {
     fun webFailure(tool: String, e: WebException): ToolResult.Failure {
         val where = if (e.failure.url.isNotBlank()) ": ${e.failure.url}" else ""
         // "blocked" never clears on retry (same URL, same verdict), so say
@@ -584,6 +596,7 @@ fun registerWebTools(registry: ToolRegistry, webBridge: WebBridge?) {
                             "title" to page.title,
                             "text" to page.text,
                             "links" to page.links,
+                            "source" to pageSource(page.url),
                         ),
                     )
                 } catch (e: WebException) {
@@ -602,12 +615,24 @@ fun registerWebTools(registry: ToolRegistry, webBridge: WebBridge?) {
             requiresConfirmation = false,
             resultType = "page_text",
             execute = { args ->
-                val bridge = webBridge ?: return@ToolDefinition noBridge()
                 val url = args["url"] as String
                 try {
-                    val page = openPage(bridge, url)
+                    // Foreground tab wins when attached; headless loader
+                    // serves scheduled runs (webBridge == null, ADR-0002).
+                    val page =
+                        if (webBridge != null) {
+                            openPage(webBridge, url)
+                        } else {
+                            val loader = backgroundWebLoader ?: return@ToolDefinition noBridge()
+                            openBackgroundPage(loader, url)
+                        }
                     ToolResult.Success(
-                        mapOf("url" to page.url, "title" to page.title, "text" to page.text),
+                        mapOf(
+                            "url" to page.url,
+                            "title" to page.title,
+                            "text" to page.text,
+                            "source" to pageSource(page.url),
+                        ),
                     )
                 } catch (e: WebException) {
                     webFailure("get_page_text", e)
@@ -630,7 +655,12 @@ fun registerWebTools(registry: ToolRegistry, webBridge: WebBridge?) {
                 try {
                     val page = parsePage("", bridge.click(selector))
                     ToolResult.Success(
-                        mapOf("title" to page.title, "text" to page.text, "links" to page.links),
+                        mapOf(
+                            "title" to page.title,
+                            "text" to page.text,
+                            "links" to page.links,
+                            "source" to pageSource(bridge.currentUrl()),
+                        ),
                     )
                 } catch (e: WebException) {
                     webFailure("click", e)
@@ -664,7 +694,12 @@ fun registerWebTools(registry: ToolRegistry, webBridge: WebBridge?) {
                 try {
                     val page = parsePage("", bridge.scrollBy(px))
                     ToolResult.Success(
-                        mapOf("title" to page.title, "text" to page.text, "links" to page.links),
+                        mapOf(
+                            "title" to page.title,
+                            "text" to page.text,
+                            "links" to page.links,
+                            "source" to pageSource(bridge.currentUrl()),
+                        ),
                     )
                 } catch (e: WebException) {
                     webFailure("scroll", e)
@@ -687,7 +722,13 @@ fun registerWebTools(registry: ToolRegistry, webBridge: WebBridge?) {
                 try {
                     val text = bridge.pageText()
                     val chunks = relevantChunks(WebPage(url = "", title = "", text = text, links = emptyList()), query)
-                    ToolResult.Success(mapOf("query" to query, "chunks" to chunks))
+                    ToolResult.Success(
+                        mapOf(
+                            "query" to query,
+                            "chunks" to chunks,
+                            "source" to pageSource(bridge.currentUrl()),
+                        ),
+                    )
                 } catch (e: WebException) {
                     webFailure("extract", e)
                 }

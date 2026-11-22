@@ -23,6 +23,7 @@ import com.aurviz.agent.LoopbackReceiver
 import com.aurviz.agent.LlmKeys
 import com.aurviz.agent.LlmResult
 import com.aurviz.agent.MIGRATION_1_2
+import com.aurviz.agent.MIGRATION_2_3
 import com.aurviz.agent.Memory
 import com.aurviz.agent.NamedProvider
 import com.aurviz.agent.Plan
@@ -56,6 +57,7 @@ import com.aurviz.agent.planWithFallback
 import com.aurviz.agent.refreshBatteryNeeded
 import com.aurviz.agent.scheduleTimingNote
 import com.aurviz.agent.readImportant
+import com.aurviz.agent.recallFor
 import com.aurviz.agent.registerRoutineAlarm
 import com.aurviz.agent.rememberFact
 import com.aurviz.agent.retryDisclosure
@@ -104,11 +106,13 @@ fun LoopUiProgress.withEvent(event: AgentEvent): LoopUiProgress =
     }
 
 // Deterministic messages→prompt rendering for the single-shot fallback
-// seam below: assistant turns keep their Tool names, tool turns keep
-// their JSON results tagged with the matching tool_call_id (ADR-0005).
+// seam below: the system prompt (framing + delimited memories) stays
+// first, assistant turns keep their Tool names, tool turns keep their
+// JSON results tagged with the matching tool_call_id (ADR-0005).
 fun renderLoopPrompt(messages: List<ChatMessage>): String =
     messages.joinToString("\n") { message ->
         when (message.role) {
+            "system" -> "[system] ${message.content.orEmpty()}"
             "assistant" ->
                 ("[assistant] " + message.content.orEmpty() +
                     message.toolCalls.joinToString(" ", prefix = " ") { it.name }).trim()
@@ -145,7 +149,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
 
     private val db: AppDb =
         Room.databaseBuilder(application, AppDb::class.java, "aurviz.db")
-            .addMigrations(MIGRATION_1_2)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
             .build()
     private val roomStore = RoomMemoryStore(db.memories())
     private val scheduleStore = RoomScheduleStore(db.schedules())
@@ -778,7 +782,10 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                     confirm = confirm,
                 )
             try {
-                when (val result = loop.run(cmd)) {
+                // Ticket 16/29: memories ride in the loop's delimited system
+                // section via recallFor — never concatenated into the command.
+                val memories = recallFor(roomStore, cmd)
+                when (val result = loop.run(cmd, memories)) {
                     is AgentLoopResult.Answered -> {
                         val tried = chat.tried.toList()
                         val used = chat.lastProvider

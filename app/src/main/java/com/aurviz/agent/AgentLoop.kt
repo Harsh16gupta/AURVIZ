@@ -110,8 +110,16 @@ class AgentLoop(
         const val DEFAULT_TOTAL_TIMEOUT_MS = 300_000L
     }
 
-    fun run(userText: String): AgentLoopResult {
-        val messages = mutableListOf(ChatMessage(role = "user", content = userText))
+    fun run(userText: String, memories: List<Memory> = emptyList()): AgentLoopResult {
+        // Ticket 16/29: the system prompt opens the conversation (tool
+        // content is data, never instructions) and memories ride in its
+        // delimited section. The user message carries the bare command —
+        // no memory concatenation on this path (ADR-0005).
+        val messages =
+            mutableListOf(
+                ChatMessage(role = "system", content = buildSystemPrompt(memories)),
+                ChatMessage(role = "user", content = userText),
+            )
         val steps = mutableListOf<ExecutedStep>()
         val startMs = nowMs()
         fun failed(error: String): AgentLoopResult.Failed {
