@@ -67,7 +67,7 @@ class AlarmReceiver : BroadcastReceiver() {
             try {
                 enqueueRoutineWork(context, scheduleId)
                 val db = Room.databaseBuilder(context, AppDb::class.java, "aurviz.db")
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .build()
                 db.schedules().listAll()
                     .find { "sched_${it.pid}" == scheduleId }
@@ -89,7 +89,7 @@ class BootReceiver : BroadcastReceiver() {
         Thread {
             try {
                 val db = Room.databaseBuilder(context, AppDb::class.java, "aurviz.db")
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .build()
                 val store = RoomScheduleStore(db.schedules())
                 for (id in schedulesToRescheduleAfterReboot(store)) {
