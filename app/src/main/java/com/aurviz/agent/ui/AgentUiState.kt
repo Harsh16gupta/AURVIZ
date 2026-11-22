@@ -6,6 +6,7 @@ import com.aurviz.agent.FallbackResult
 import com.aurviz.agent.LlmResult
 import com.aurviz.agent.Memory
 import com.aurviz.agent.ParsedSchedule
+import com.aurviz.agent.PendingApproval
 import com.aurviz.agent.Schedule
 import com.aurviz.agent.TimelineStep
 import com.aurviz.agent.ToolCall
@@ -51,6 +52,11 @@ data class AgentUiState(
     // unseen flags computed at raise time; StepDone clears it.
     // Approve/Reject resolve the suspended gate — nothing runs before.
     val pendingApproval: ToolCall? = null,
+    // Ticket 15/28: writes a scheduled run held for the user (GLOSSARY
+    // Confirmation for unattended runs, ADR-0002). Each row renders its
+    // approval card in-app; approving runs the held call exactly once,
+    // rejecting drops it untouched.
+    val pendingApprovals: List<PendingApproval> = emptyList(),
     val pendingApprovalUnseen: List<String> = emptyList(),
     val webPage: WebPage? = null,
     val webLoading: Boolean = false,

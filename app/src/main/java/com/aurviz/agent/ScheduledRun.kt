@@ -11,26 +11,84 @@ import org.json.JSONObject
 // transport is untouched on every path. The Worker persists these rows to
 // Room and posts the notification on the device; the in-memory store
 // below is the JVM-testable seam.
+//
+// Ticket 15/28: the row carries a stable id (Room pid / in-memory
+// counter) so the in-app screen can approve or reject one row. take() is
+// the atomic claim: it removes and returns the row, or null when another
+// approval already claimed it. approvePendingApproval claims first and
+// only then runs the held call through the registry's single gated path
+// (executeGated as Approved), so a double-approve executes exactly once;
+// rejectPendingApproval claims and drops without ever touching the
+// transport. Claimed rows never return to the store, so a failed
+// execution still counts as handled — nothing runs twice.
 data class PendingApproval(
     val scheduleId: String,
     val toolName: String,
     val arguments: Map<String, Any?>,
     val reason: String,
+    val id: String = "",
 )
 
 interface PendingApprovalStore {
     fun save(approval: PendingApproval): PendingApproval
     fun list(): List<PendingApproval>
+    fun take(id: String): PendingApproval?
 }
 
 class InMemoryPendingApprovalStore : PendingApprovalStore {
-    private val items = mutableListOf<PendingApproval>()
+    private val items = mutableMapOf<String, PendingApproval>()
+    private var nextId = 0L
+
+    @Synchronized
     override fun save(approval: PendingApproval): PendingApproval {
-        items += approval
-        return approval
+        nextId += 1
+        val saved = approval.copy(id = "approval_$nextId")
+        items[saved.id] = saved
+        return saved
     }
-    override fun list(): List<PendingApproval> = items.toList()
+
+    @Synchronized
+    override fun list(): List<PendingApproval> = items.values.toList()
+
+    @Synchronized
+    override fun take(id: String): PendingApproval? = items.remove(id)
 }
+
+// One in-app decision on a held write: Executed carries the held call
+// plus the gated result (Success or a structured Failure the screen can
+// show); Rejected means the row was dropped untouched; AlreadyHandled
+// means a previous approve/reject already claimed the row.
+sealed interface PendingApprovalOutcome {
+    data class Executed(val approval: PendingApproval, val result: ToolResult) : PendingApprovalOutcome
+    data object Rejected : PendingApprovalOutcome
+    data object AlreadyHandled : PendingApprovalOutcome
+}
+
+// In-app approve: claim the row first so a concurrent double-approve
+// loses here, before any transport touch; then run the exact held
+// arguments through the single gated path as Approved. The deterministic
+// policy screen still applies (a Deny comes back as Executed Failure),
+// and the registry validates args before anything runs.
+fun approvePendingApproval(
+    store: PendingApprovalStore,
+    id: String,
+    registry: ToolRegistry,
+): PendingApprovalOutcome {
+    val approval = store.take(id) ?: return PendingApprovalOutcome.AlreadyHandled
+    val gated =
+        registry.executeGated(
+            ToolCall(approval.id, approval.toolName, approval.arguments),
+        ) { ApprovalDecision.Approved }
+    return PendingApprovalOutcome.Executed(approval, gated.result)
+}
+
+// In-app reject: claim and drop. The transport is never touched.
+fun rejectPendingApproval(
+    store: PendingApprovalStore,
+    id: String,
+): PendingApprovalOutcome =
+    if (store.take(id) == null) PendingApprovalOutcome.AlreadyHandled
+    else PendingApprovalOutcome.Rejected
 
 // Tool names that never run unattended. Attempts reach this set either as
 // gate-refusals (registered but gated) or as unknown-tool failures (absent
