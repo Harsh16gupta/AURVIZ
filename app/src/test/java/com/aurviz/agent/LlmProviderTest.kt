@@ -78,4 +78,13 @@ class LlmProviderTest {
         assertEquals("getImportantEmails", result.toolCalls[0].name)
         assertEquals(5, result.toolCalls[0].arguments["max_results"])
     }
+
+    @Test
+    fun scheduleToolSchemaNamesTaskAndWhen() {
+        val fn = scheduleToolSchema().getJSONObject("function")
+        assertEquals("createSchedule", fn.getString("name"))
+        val required = fn.getJSONObject("parameters").getJSONArray("required")
+        val names = (0 until required.length()).map { required.getString(it) }.toSet()
+        assertEquals(setOf("task", "when"), names)
+    }
 }

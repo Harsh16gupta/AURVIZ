@@ -25,10 +25,16 @@ class MainActivity : Activity() {
     private lateinit var micButton: Button
     private lateinit var timelineView: TextView
     private lateinit var retryButton: Button
-    private lateinit var memoryView: TextView
+    private lateinit var memoryList: LinearLayout
     private lateinit var forgetButton: Button
     private lateinit var roomStore: MemoryStore
     private var pendingForget: List<Memory> = emptyList()
+    // Session 3: routines notebook + pending preview (confirm-gated like email).
+    private lateinit var scheduleStore: RoomScheduleStore
+    private lateinit var scheduleList: LinearLayout
+    private lateinit var exactAlarmButton: Button
+    private lateinit var scheduleConfirmButton: Button
+    private var pendingSchedule: ParsedSchedule? = null
     private lateinit var connectButton: Button
     private lateinit var sendConfirmButton: Button
     private val tokens = TokenStore()
@@ -47,6 +53,12 @@ class MainActivity : Activity() {
     private var recognizer: SpeechRecognizer? = null
     private var voiceText: String? = null
     private var retriedOnline = false
+    // H4: every database call goes through here. One thread = no two
+    // writes stepping on each other; screen updates hop back with
+    // runOnUiThread at each call site.
+    private val dbIo = java.util.concurrent.Executors.newSingleThreadExecutor()
+    // H4: encrypted file behind the in-memory TokenStore.
+    private lateinit var tokenVault: TokenVault
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -61,16 +73,29 @@ class MainActivity : Activity() {
             visibility = android.view.View.GONE
         }
         // Session 1 wiring: the on-phone memory (Room survives restarts).
-        // Small lists only, so main-thread queries are fine for this demo;
-        // Spec 07 moves database work off the main thread.
-        roomStore =
-            RoomMemoryStore(
-                androidx.room.Room.databaseBuilder(this, AppDb::class.java, "aurviz.db")
-                    .allowMainThreadQueries()
-                    .build()
-                    .memories(),
-            )
-        memoryView = TextView(this).apply { textSize = 14f }
+        // H4: database work runs on ONE background thread (never the screen
+        // thread), so lists never freeze the screen as they grow.
+        // Session 3 shares the same database file: the migration adds only
+        // the new table, existing memories survive the upgrade.
+        val db =
+            androidx.room.Room.databaseBuilder(this, AppDb::class.java, "aurviz.db")
+                .addMigrations(MIGRATION_1_2)
+                .build()
+        roomStore = RoomMemoryStore(db.memories())
+        scheduleStore = RoomScheduleStore(db.schedules())
+        // H4: pick up last time's login from the encrypted file, if any.
+        tokenVault = TokenVault(this)
+        tokenVault.loadInto(tokens)
+        scheduleList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        scheduleConfirmButton = Button(this).apply {
+            text = "Confirm routine"
+            visibility = android.view.View.GONE
+        }
+        exactAlarmButton = Button(this).apply {
+            text = "Allow exact alarms (for on-time routines)"
+            visibility = android.view.View.GONE
+        }
+        memoryList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         forgetButton = Button(this).apply {
             visibility = android.view.View.GONE
         }
@@ -98,29 +123,48 @@ class MainActivity : Activity() {
         }
         webBridge = WebViewBridge(webView)
 
-        val layout =
+        // H1: one scrollable screen with named sections — no more cramped
+        // single column, and small phones can reach every button.
+        val body =
             LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(48, 48, 48, 48)
+                addView(sectionHeader("Chat"))
                 addView(micButton)
                 addView(liveText)
                 addView(typedInput)
                 addView(sendButton)
                 addView(timelineView)
                 addView(retryButton)
-                addView(memoryView)
+                addView(sectionHeader("Routines"))
+                addView(scheduleList)
+                addView(scheduleConfirmButton)
+                addView(exactAlarmButton)
+                addView(sectionHeader("Remembered"))
+                addView(memoryList)
                 addView(forgetButton)
+                addView(sectionHeader("Gmail"))
                 addView(connectButton)
                 addView(sendConfirmButton)
                 addView(pasteInput)
                 addView(useLinkButton)
+                addView(sectionHeader("Page"))
                 addView(webView)
             }
-        setContentView(layout)
+        setContentView(android.widget.ScrollView(this).apply { addView(body) })
 
         refreshMicButton()
+        updateExactAlarmButton()
         renderMemories()
         renderGmailStatus()
+        renderSchedules()
+        // Session 3: result notes need this on Android 13+; routines still
+        // run without it, the note just stays silent until allowed.
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 41)
+        }
         connectButton.setOnClickListener {
             // Desktop-ID + loopback sign-in (Google's rule for native apps):
             // we listen on 127.0.0.1 and Google sends the code back there.
@@ -168,15 +212,27 @@ class MainActivity : Activity() {
         }
         forgetButton.setOnClickListener {
             // Confirmed: delete exactly the previewed ids, nothing else.
-            pendingForget.forEach { roomStore.delete(it.id) }
-            liveText.text = "Deleted ${pendingForget.size}."
+            val victims = pendingForget
             pendingForget = emptyList()
             forgetButton.visibility = android.view.View.GONE
-            renderMemories()
+            dbIo.execute {
+                victims.forEach { roomStore.delete(it.id) }
+                runOnUiThread {
+                    liveText.text = "Deleted ${victims.size}."
+                    renderMemories()
+                }
+            }
         }
         sendConfirmButton.setOnClickListener {
             // The only path that ever sends mail: preview was shown first.
             sendPendingDraft()
+        }
+        scheduleConfirmButton.setOnClickListener {
+            // The only path that ever saves a routine: preview was shown first.
+            savePendingSchedule()
+        }
+        exactAlarmButton.setOnClickListener {
+            startActivity(Intent(android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM))
         }
         useLinkButton.setOnClickListener {
             // Manual fallback: the error page still shows the full callback
@@ -224,26 +280,36 @@ class MainActivity : Activity() {
             if (fact.isBlank()) {
                 liveText.text = "What should I remember?"
             } else {
-                rememberFact(roomStore, fact, "you told me")
-                liveText.text = "Saved: $fact"
-                currentRows = emptyList()
-                renderTimeline()
-                renderMemories()
+                liveText.text = "Saving…"
+                dbIo.execute {
+                    rememberFact(roomStore, fact, "you told me")
+                    runOnUiThread {
+                        liveText.text = "Saved: $fact"
+                        currentRows = emptyList()
+                        renderTimeline()
+                        renderMemories()
+                    }
+                }
             }
             return
         }
         // "forget boss" -> preview first, delete only on confirm.
         if (lower.startsWith("forget ")) {
-            val preview = forgetPreview(roomStore, command.substring(7).trim())
-            pendingForget = preview
-            if (preview.isEmpty()) {
-                liveText.text = "Nothing matches that."
-                forgetButton.visibility = android.view.View.GONE
-            } else {
-                liveText.text =
-                    "Delete these?\n" + preview.joinToString("\n") { "• ${it.text} (${it.source})" }
-                forgetButton.text = "Delete ${preview.size}"
-                forgetButton.visibility = android.view.View.VISIBLE
+            val query = command.substring(7).trim()
+            dbIo.execute {
+                val preview = forgetPreview(roomStore, query)
+                runOnUiThread {
+                    pendingForget = preview
+                    if (preview.isEmpty()) {
+                        liveText.text = "Nothing matches that."
+                        forgetButton.visibility = android.view.View.GONE
+                    } else {
+                        liveText.text =
+                            "Delete these?\n" + preview.joinToString("\n") { "• ${it.text} (${it.source})" }
+                        forgetButton.text = "Delete ${preview.size}"
+                        forgetButton.visibility = android.view.View.VISIBLE
+                    }
+                }
             }
             return
         }
@@ -263,6 +329,7 @@ class MainActivity : Activity() {
         // Forget the mailbox entirely.
         if (lower == "disconnect gmail") {
             tokens.revoke()
+            tokenVault.clear()
             pendingDraft = null
             sendConfirmButton.visibility = android.view.View.GONE
             liveText.text = "Gmail disconnected."
@@ -272,6 +339,29 @@ class MainActivity : Activity() {
         // "open example.com" -> load it in the in-app page, show what it says.
         if (lower.startsWith("open ")) {
             handleWebOpen(command.substring(5).trim())
+            return
+        }
+        // "schedule every morning at 9AM check emails" -> preview the time
+        // first, save only on Confirm (same gate as email send).
+        if (lower.startsWith("schedule ")) {
+            handleScheduleCreate(command.substring(9).trim())
+            return
+        }
+        // "schedules" -> what routines are active.
+        if (lower == "schedules") {
+            dbIo.execute {
+                val routines = listSchedules(scheduleStore)
+                runOnUiThread {
+                    renderScheduleRows(routines)
+                    liveText.text = if (routines.isEmpty()) "No routines yet." else "Routines:\n" + routines.joinToString("\n") { "• ${it.id}: ${it.instruction} at ${it.hour}:${"%02d".format(it.minute)}" }
+                }
+            }
+            return
+        }
+        // "unschedule sched_2" (or just "unschedule 2") -> stop it cleanly:
+        // database row gone, job and alarm cancelled.
+        if (lower.startsWith("unschedule ")) {
+            handleUnschedule(command.substring(11).trim())
             return
         }
         // Normal command: recall what we know, then plan with the REAL chain
@@ -359,6 +449,8 @@ class MainActivity : Activity() {
             } catch (_: Exception) {
                 tokens.gmailAccount = "connected"
             }
+            // H4: login survives restarts now — encrypted on the phone.
+            tokenVault.saveFrom(tokens)
             runOnUiThread {
                 liveText.text = "Gmail connected."
                 renderGmailStatus()
@@ -463,15 +555,16 @@ class MainActivity : Activity() {
     }
 
     private fun runRealPlan(cmd: String) {
-        val known = recallFor(roomStore, cmd).take(3)
-        val knownLine = if (known.isEmpty()) "" else "\nKnown: " + known.joinToString("; ") { it.text }
-        liveText.text = "Command: $cmd$knownLine\nAgent: thinking…"
+        liveText.text = "Command: $cmd\nAgent: thinking…"
         currentRows = emptyList()
         renderTimeline()
         retryButton.visibility = android.view.View.GONE
-        val effective =
-            if (known.isEmpty()) cmd else "Known: " + known.joinToString("; ") { it.text } + ". $cmd"
-        Thread {
+        dbIo.execute {
+            val known = recallFor(roomStore, cmd).take(3)
+            val knownLine = if (known.isEmpty()) "" else "\nKnown: " + known.joinToString("; ") { it.text }
+            runOnUiThread { liveText.text = "Command: $cmd$knownLine\nAgent: thinking…" }
+            val effective =
+                if (known.isEmpty()) cmd else "Known: " + known.joinToString("; ") { it.text } + ". $cmd"
             var used = ""
             // Same planCommand as the unit tests; only the transport is real:
             // try providers in order, skip ones with no key (T4 logic).
@@ -492,7 +585,17 @@ class MainActivity : Activity() {
                             currentRows = buildTimeline(Plan(emptyList()), doneCount = 0, error = null)
                         }
                         is PlannerOutcome.Ready -> {
-                            liveText.text = "Command: $cmd$knownLine\nRan on: $used"
+                            val first = outcome.plan.steps.firstOrNull()
+                            if (first?.name == "createSchedule") {
+                                // The LLM proposed a routine: WHEN + WHAT in the user's
+                                // own words. Same preview + Confirm gate as typing
+                                // "schedule ..." by hand — the LLM never saves directly.
+                                val when_ = first.arguments["when"] as? String ?: ""
+                                val task = first.arguments["task"] as? String ?: ""
+                                handleScheduleCreate("$when_ $task".trim())
+                            } else {
+                                liveText.text = "Command: $cmd$knownLine\nRan on: $used"
+                            }
                             currentRows = buildTimeline(outcome.plan, doneCount = 0, error = null)
                         }
                     }
@@ -506,18 +609,142 @@ class MainActivity : Activity() {
                     retryButton.visibility = android.view.View.VISIBLE
                 }
             }
-        }.start()
+        }
     }
 
     // The remembered list with sources, so auto-saves can be audited.
-    private fun renderMemories() {
-        val all = roomStore.list()
-        memoryView.text =
-            if (all.isEmpty()) {
-                "Remembered: nothing yet (try: remember my boss is Priya)"
-            } else {
-                "Remembered:\n" + all.joinToString("\n") { "• ${it.text} (${it.source})" }
+    // "schedule <words>" -> understand the time, show the preview, wait.
+    // Nothing is saved until the Confirm button is tapped.
+    private fun handleScheduleCreate(raw: String) {
+        val parsed = parseSchedule(raw)
+        if (parsed == null) {
+            liveText.text = "I couldn't find a time in that — try 'schedule every morning at 9AM check emails'."
+            scheduleConfirmButton.visibility = android.view.View.GONE
+            return
+        }
+        pendingSchedule = parsed
+        liveText.text = formatSchedulePreview(parsed)
+        scheduleConfirmButton.visibility = android.view.View.VISIBLE
+    }
+
+    private fun savePendingSchedule() {
+        val parsed = pendingSchedule ?: return
+        pendingSchedule = null
+        scheduleConfirmButton.visibility = android.view.View.GONE
+        liveText.text = "Saving routine…"
+        dbIo.execute {
+            val saved = createSchedule(scheduleStore, parsed.instruction, parsed.hour, parsed.minute, parsed.days)
+            // The alarm is the ONLY trigger: it fires at the saved time and
+            // hands the routine to the worker then. (Queueing here too would
+            // run the routine immediately at save time — wrong.)
+            val exact = registerRoutineAlarm(this, saved)
+            runOnUiThread {
+                liveText.text = if (exact) {
+                    "Routine saved (${saved.id}). Exact alarm set — 9AM means 9AM."
+                } else {
+                    "Routine saved (${saved.id}), but exact alarms are off — allow them in Settings for on-time firing."
+                }
+                updateExactAlarmButton()
+                renderSchedules()
             }
+        }
+    }
+
+    private fun handleUnschedule(raw: String) {
+        val id = raw.trim().let { if (it.startsWith("sched_")) it else "sched_$it" }
+        dbIo.execute {
+            val known = listSchedules(scheduleStore).any { it.id == id }
+            if (!known) {
+                runOnUiThread { liveText.text = "No routine $id — tap Delete on its row instead." }
+                return@execute
+            }
+            deleteSchedule(scheduleStore, id)
+            cancelRoutineWork(this, id)
+            cancelRoutineAlarm(this, id)
+            runOnUiThread {
+                liveText.text = "Routine $id stopped."
+                renderSchedules()
+            }
+        }
+    }
+
+    // H3: exact alarms need a Settings toggle on Android 12+ — a button
+    // that goes straight there beats "allow them in Settings" text.
+    private fun updateExactAlarmButton() {
+        val alarms = getSystemService(ALARM_SERVICE) as android.app.AlarmManager
+        val needsAsk = android.os.Build.VERSION.SDK_INT >= 31 && !alarms.canScheduleExactAlarms()
+        exactAlarmButton.visibility = if (needsAsk) android.view.View.VISIBLE else android.view.View.GONE
+    }
+
+    private fun sectionHeader(title: String): TextView =
+        TextView(this).apply {
+            text = title
+            textSize = 18f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setPadding(0, 24, 0, 8)
+        }
+
+    // H2: one row = label + its own action button. No more typing ids.
+    private fun actionRow(label: String, actionText: String, onAction: () -> Unit): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(
+                TextView(this@MainActivity).apply {
+                    text = label
+                    textSize = 14f
+                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                },
+            )
+            addView(Button(this@MainActivity).apply {
+                text = actionText
+                setOnClickListener { onAction() }
+            })
+        }
+
+    private fun renderSchedules() {
+        dbIo.execute {
+            val routines = listSchedules(scheduleStore)
+            runOnUiThread { renderScheduleRows(routines) }
+        }
+    }
+
+    private fun renderScheduleRows(routines: List<Schedule>) {
+        scheduleList.removeAllViews()
+        if (routines.isEmpty()) {
+            scheduleList.addView(TextView(this).apply { text = "No routines yet."; textSize = 14f })
+        }
+        for (routine in routines) {
+            scheduleList.addView(
+                actionRow("• ${routine.id}: ${routine.instruction} at ${routine.hour}:${"%02d".format(routine.minute)}", "Delete") {
+                    handleUnschedule(routine.id)
+                },
+            )
+        }
+    }
+
+    private fun renderMemories() {
+        dbIo.execute {
+            val all = roomStore.list()
+            runOnUiThread { renderMemoryRows(all) }
+        }
+    }
+
+    private fun renderMemoryRows(all: List<Memory>) {
+        memoryList.removeAllViews()
+        if (all.isEmpty()) {
+            memoryList.addView(TextView(this).apply { text = "Remembered: nothing yet (try: remember my boss is Priya)"; textSize = 14f })
+        }
+        for (memory in all) {
+            memoryList.addView(
+                actionRow("• ${memory.text} (${memory.source})", "Forget") {
+                    val id = memory.id
+                    dbIo.execute {
+                        roomStore.delete(id)
+                        runOnUiThread { renderMemories() }
+                    }
+                },
+            )
+        }
     }
 
     // Draw the rows. Finished steps stay visible; failed one shows Retry.
@@ -544,6 +771,7 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         recognizer?.destroy()
         recognizer = null
+        dbIo.shutdown()
         super.onDestroy()
     }
 
@@ -597,12 +825,21 @@ class MainActivity : Activity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        // Back from Settings: re-check the toggle without a restart.
+        updateExactAlarmButton()
+    }
+
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, results: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, results)
         if (requestCode == 1001 && results.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
             startListening()
         } else if (requestCode == 1001) {
             liveText.text = "Mic denied. No problem — type your command instead."
+        } else if (requestCode == 41 && results.firstOrNull() != PackageManager.PERMISSION_GRANTED) {
+            // H3: routines still fire and save; only the pop-up note stays silent.
+            liveText.text = "Notes off — routines still run, you just won't see them pop up."
         }
         refreshMicButton()
     }

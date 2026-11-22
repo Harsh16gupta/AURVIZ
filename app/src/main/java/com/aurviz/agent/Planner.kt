@@ -18,6 +18,7 @@ private fun requiredSlots(toolName: String): List<String> =
     when (toolName) {
         "sendEmail" -> listOf("to", "body")
         "getImportantEmails" -> listOf("max_results")
+        "createSchedule" -> listOf("task", "when")
         else -> emptyList()
     }
 
@@ -36,6 +37,8 @@ private fun slotQuestion(toolName: String, slot: String): String =
         "sendEmail" to "to" -> "Who should I send it to?"
         "sendEmail" to "body" -> "What should the message say?"
         "getImportantEmails" to "max_results" -> "How many emails should I check?"
+        "createSchedule" to "task" -> "What should the routine do?"
+        "createSchedule" to "when" -> "When should it run?"
         else -> "What's the $slot?"
     }
 

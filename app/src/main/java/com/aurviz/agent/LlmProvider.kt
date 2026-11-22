@@ -44,6 +44,33 @@ fun demoToolSchema(): JSONObject =
                 ),
         )
 
+/** Scheduling Tool: the LLM proposes WHAT + WHEN in words; the app parses
+ *  the time with its tested parser and shows a preview for Confirm.
+ *  The LLM never sets alarms itself — same Confirm gate as email send. */
+fun scheduleToolSchema(): JSONObject =
+    JSONObject()
+        .put("type", "function")
+        .put(
+            "function",
+            JSONObject()
+                .put("name", "createSchedule")
+                .put("description", "Save a recurring routine that runs later. Split the request into WHAT to do (task) and WHEN it runs (when, in the user's own words).")
+                .put(
+                    "parameters",
+                    JSONObject()
+                        .put("type", "object")
+                        .put(
+                            "properties",
+                            JSONObject()
+                                .put("task", JSONObject().put("type", "string").put("description", "What the routine does, e.g. read emails"))
+                                .put("when", JSONObject().put("type", "string").put("description", "When it runs, in the user's own words, e.g. at 2:38 a.m.")),
+                        )
+                        .put("required", JSONArray().put("task").put("when")),
+                ),
+        )
+
+fun allToolSchemas(): JSONArray = JSONArray().put(demoToolSchema()).put(scheduleToolSchema())
+
 fun buildToolsRequestBody(model: String, userText: String, tools: JSONArray): JSONObject =
     JSONObject()
         .put("model", model)
@@ -99,7 +126,7 @@ class OpenAiChatProvider(
     override fun plan(userText: String): LlmResult {
         val url = baseUrl.trimEnd('/') + "/chat/completions"
         val json =
-            buildToolsRequestBody(model, userText, JSONArray().put(demoToolSchema())).toString()
+            buildToolsRequestBody(model, userText, allToolSchemas()).toString()
         val request =
             Request.Builder()
                 .url(url)

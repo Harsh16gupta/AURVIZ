@@ -33,9 +33,10 @@ interface MemoryDao {
     fun deleteById(pid: Long)
 }
 
-@Database(entities = [MemoryRow::class], version = 1, exportSchema = false)
+@Database(entities = [MemoryRow::class, ScheduleRow::class], version = 2, exportSchema = false)
 abstract class AppDb : RoomDatabase() {
     abstract fun memories(): MemoryDao
+    abstract fun schedules(): ScheduleDao
 }
 
 // Adapter: Room rows in, Memory objects out. Ids round-trip

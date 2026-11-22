@@ -51,6 +51,9 @@ android {
 dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("androidx.room:room-runtime:2.6.1")
+    implementation("androidx.work:work-runtime-ktx:2.9.0")
+    implementation("androidx.core:core:1.13.1")
+    implementation("androidx.security:security-crypto:1.1.0")
     kapt("androidx.room:room-compiler:2.6.1")
     testImplementation("junit:junit:4.13.2")
     // org.json ships with Android at runtime; this is for JVM unit tests only.

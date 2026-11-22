@@ -18,6 +18,14 @@ class MemoryTest {
     }
 
     @Test
+    fun rememberSameFactTwiceKeepsOne() {
+        val store = InMemoryStore()
+        rememberFact(store, "my name is harsh", source = "you told me")
+        rememberFact(store, "my name is harsh", source = "you told me")
+        assertEquals(1, store.list().size)
+    }
+
+    @Test
     fun recallShowsSource() {
         val store = InMemoryStore()
         rememberFact(store, "my boss is Priya", source = "you told me")

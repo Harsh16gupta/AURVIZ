@@ -29,9 +29,12 @@ class InMemoryStore : MemoryStore {
     }
 }
 
-// Store a fact exactly as given.
-fun rememberFact(store: MemoryStore, text: String, source: String): Memory =
-    store.save(text, source)
+// Store a fact exactly as given. An identical fact (same words, same
+// source) is already there, so return it instead of saving a twin.
+fun rememberFact(store: MemoryStore, text: String, source: String): Memory {
+    store.list().find { it.text == text && it.source == source }?.let { return it }
+    return store.save(text, source)
+}
 
 // Show what "forget boss" WOULD delete, without deleting anything.
 // The screen shows this list first; only confirmed ids get deleted.

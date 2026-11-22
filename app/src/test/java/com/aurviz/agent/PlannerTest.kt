@@ -142,6 +142,51 @@ class PlannerTest {
         assertEquals("getImportantEmails", steps[0].name)
         assertEquals("sendEmail", steps[1].name)
     }
+
+    @Test
+    fun completeCreateScheduleYieldsReadyPlan() {
+        val provider =
+            StubLlmProvider(
+                LlmResult(
+                    toolCalls =
+                        listOf(
+                            ToolCall(
+                                "call_1",
+                                "createSchedule",
+                                mapOf("task" to "read emails", "when" to "at 2:38 a.m."),
+                            ),
+                        ),
+                    content = null,
+                ),
+            )
+        val outcome = planCommand("schedule email read at 2:38 a.m.", provider)
+        assertTrue(outcome is PlannerOutcome.Ready)
+        val ready = outcome as PlannerOutcome.Ready
+        assertEquals("createSchedule", ready.plan.steps[0].name)
+    }
+
+    @Test
+    fun createScheduleMissingWhenAsks() {
+        val call = ToolCall("call_1", "createSchedule", mapOf("task" to "read emails"))
+        assertEquals(listOf("when"), missingSlots(call))
+    }
+
+    @Test
+    fun createScheduleMissingTaskAsks() {
+        val provider =
+            StubLlmProvider(
+                LlmResult(
+                    toolCalls = listOf(ToolCall("call_1", "createSchedule", mapOf("when" to "at 9AM"))),
+                    content = null,
+                ),
+            )
+        val outcome = planCommand("schedule something", provider)
+        assertTrue(outcome is PlannerOutcome.NeedsClarification)
+        assertEquals(
+            "What should the routine do?",
+            (outcome as PlannerOutcome.NeedsClarification).question,
+        )
+    }
 }
 
 private class StubLlmProvider(private val result: LlmResult) : LlmProvider {
