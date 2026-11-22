@@ -1,0 +1,219 @@
+package com.aurviz.agent.ui
+
+import android.content.Intent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
+import com.aurviz.agent.ui.components.Icon
+import com.aurviz.agent.ui.components.IconButton
+import com.aurviz.agent.ui.components.ScreenScaffold
+import com.aurviz.agent.ui.theme.Space
+import com.aurviz.agent.ui.components.Text
+import com.aurviz.agent.ui.screens.BrowserScreen
+import com.aurviz.agent.ui.screens.CommandScreen
+import com.aurviz.agent.ui.screens.MemoryScreen
+import com.aurviz.agent.ui.screens.SchedulesScreen
+import com.aurviz.agent.ui.screens.SettingsScreen
+import com.aurviz.agent.ui.sheets.EmailConfirmationSheet
+import com.aurviz.agent.ui.sheets.ForgetMemorySheet
+import com.aurviz.agent.ui.sheets.VoiceCommandSheet
+import com.aurviz.agent.ui.theme.Bell
+import com.aurviz.agent.ui.theme.Brain
+import com.aurviz.agent.ui.theme.ChatCircle
+import com.aurviz.agent.ui.theme.Globe
+import com.aurviz.agent.ui.theme.Icons
+import com.aurviz.agent.ui.theme.Theme
+import com.aurviz.agent.ui.theme.User
+
+object Dests {
+    const val COMMAND = "command"
+    const val BROWSER = "browser"
+    const val SCHEDULES = "schedules"
+    const val MEMORY = "memory"
+    const val SETTINGS = "settings"
+}
+
+private data class Tab(val route: String, val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector)
+
+// Destination labels follow GLOSSARY.md: Command, Browser, Schedules,
+// Memory, Settings. A Confirmation never navigates — it opens a sheet.
+private val Tabs =
+    listOf(
+        Tab(Dests.COMMAND, "Command", Icons.ChatCircle),
+        Tab(Dests.BROWSER, "Browser", Icons.Globe),
+        Tab(Dests.SCHEDULES, "Schedules", Icons.Bell),
+        Tab(Dests.MEMORY, "Memory", Icons.Brain),
+        Tab(Dests.SETTINGS, "Settings", Icons.User),
+    )
+
+@Composable
+fun AgentNav(
+    vm: AgentViewModel,
+    onMicTap: () -> Unit,
+    onOpenExactAlarmSettings: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val navController = rememberNavController()
+    val state by vm.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    var showVoice by rememberSaveable { mutableStateOf(false) }
+
+    // One-shot: the ViewModel exposes the loopback OAuth URL; the Activity
+    // context opens it in a browser, then the event is consumed.
+    LaunchedEffect(state.authUrl) {
+        val url = state.authUrl ?: return@LaunchedEffect
+        context.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)))
+        vm.consumeAuthUrl()
+    }
+
+    ScreenScaffold(modifier) {
+        Column(Modifier.fillMaxSize()) {
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                NavHost(navController = navController, startDestination = Dests.COMMAND) {
+                    composable(Dests.COMMAND) {
+                        CommandScreen(
+                            state = state,
+                            onInputChange = vm::onInputChange,
+                            onSend = vm::sendCommand,
+                            onRetry = vm::retry,
+                            onMicTap = onMicTap,
+                            onVoiceClick = { showVoice = true },
+                            onOpenBrowser = { navController.navigate(Dests.BROWSER) },
+                        )
+                    }
+                    composable(Dests.BROWSER) {
+                        BrowserScreen(
+                            state = state,
+                            onOpenUrl = vm::openWeb,
+                            onAttachBridge = vm::attachWebBridge,
+                            onBack = { navController.navigate(Dests.COMMAND) },
+                        )
+                    }
+                    composable(Dests.SCHEDULES) {
+                        SchedulesScreen(
+                            state = state,
+                            onPreviewSchedule = { vm.sendCommand("schedule $it") },
+                            onApproveSchedule = vm::approveSchedule,
+                            onRejectSchedule = vm::rejectSchedule,
+                            onUnschedule = vm::unschedule,
+                            onBack = { navController.navigate(Dests.COMMAND) },
+                        )
+                    }
+                    composable(Dests.MEMORY) {
+                        MemoryScreen(
+                            state = state,
+                            onRemember = { vm.sendCommand("remember $it") },
+                            onForget = vm::deleteMemory,
+                            onBack = { navController.navigate(Dests.COMMAND) },
+                        )
+                    }
+                    composable(Dests.SETTINGS) {
+                        SettingsScreen(
+                            state = state,
+                            onConnectGmail = vm::startSignIn,
+                            onRevokeGmail = vm::revokeGmail,
+                            onPasteLink = vm::onPastedLink,
+                            onDismissPasteFallback = vm::dismissPasteFallback,
+                            onOpenExactAlarmSettings = onOpenExactAlarmSettings,
+                            onRefreshExactAlarm = vm::refreshExactAlarmFlag,
+                            onVoiceSettings = { showVoice = true },
+                            onBack = { navController.navigate(Dests.COMMAND) },
+                        )
+                    }
+                }
+            }
+            BottomBar(
+                currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route,
+                onSelect = { route ->
+                    navController.navigate(route) {
+                        popUpTo(Dests.COMMAND) { saveState = true }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                },
+            )
+        }
+
+        VoiceCommandSheet(
+            visible = showVoice,
+            state = state.voice,
+            onDismiss = { showVoice = false },
+            onMicTap = onMicTap,
+            onUseTranscript = {
+                val text = state.voice.transcript
+                showVoice = false
+                if (text.isNotBlank()) vm.sendCommand(text)
+            },
+        )
+        EmailConfirmationSheet(
+            draft = state.pendingEmail,
+            onApprove = vm::approveEmail,
+            onReject = vm::rejectEmail,
+        )
+        ForgetMemorySheet(
+            preview = state.pendingForget,
+            onApprove = vm::approveForget,
+            onReject = vm::rejectForget,
+        )
+    }
+}
+
+@Composable
+private fun BottomBar(currentRoute: String?, onSelect: (String) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth()
+            .background(Theme.colors.surface)
+            .navigationBarsPadding()
+            .padding(horizontal = Space * 2, vertical = Space * 2),
+        horizontalArrangement = Arrangement.SpaceAround,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Tabs.forEach { tab ->
+            val selected = currentRoute == tab.route
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(Space * 0.5f),
+            ) {
+                IconButton(
+                    onClick = { onSelect(tab.route) },
+                    contentDescription = tab.label,
+                    size = com.aurviz.agent.ui.components.IconButtonSize.Medium,
+                ) {
+                    Icon(
+                        tab.icon,
+                        contentDescription = null,
+                        modifier = Modifier.size(22.dp),
+                        tint = if (selected) Theme.colors.primary else Theme.colors.onBackgroundMuted,
+                    )
+                }
+                Text(
+                    tab.label,
+                    style = Theme.typography.caption,
+                    color = if (selected) Theme.colors.primary else Theme.colors.onBackgroundMuted,
+                )
+            }
+        }
+    }
+}

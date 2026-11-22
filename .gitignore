@@ -9,3 +9,5 @@ local.properties
 *.keystore
 # Secrets - never commit real keys; copy local.properties.sample to local.properties
 # and fill in your own keys.
+# Raw reference UI kit (source material only, never ship).
+ui_reference/

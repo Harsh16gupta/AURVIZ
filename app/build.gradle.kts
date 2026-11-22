@@ -4,6 +4,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.kapt")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 // Keys come from local.properties (git-ignored). See local.properties.sample.
@@ -38,6 +39,7 @@ android {
 
     buildFeatures {
         buildConfig = true
+        compose = true
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -55,6 +57,27 @@ dependencies {
     implementation("androidx.core:core:1.13.1")
     implementation("androidx.security:security-crypto:1.1.0")
     kapt("androidx.room:room-compiler:2.6.1")
+
+    // Compose (BOM) + lifecycle/navigation for ComponentActivity + setContent.
+    implementation(platform("androidx.compose:compose-bom:2024.10.01"))
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.foundation:foundation")
+    implementation("androidx.compose.foundation:foundation-layout")
+    implementation("androidx.compose.animation:animation")
+    implementation("androidx.compose.runtime:runtime")
+    implementation("androidx.compose.ui:ui-tooling-preview")
+    implementation("androidx.activity:activity-compose:1.9.3")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.7")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
+    implementation("androidx.navigation:navigation-compose:2.7.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+
+    // Vela design-system primitives, adapted to stock androidx.compose
+    // (no Compose Unstyled / ripple-indication / uri-painter: those tracks
+    // require compose 1.12 / AGP 9, beyond this module's Kotlin 2.0.21 +
+    // AGP 8.7.3 + compileSdk 35 toolchain).
+
     testImplementation("junit:junit:4.13.2")
     // org.json ships with Android at runtime; this is for JVM unit tests only.
     testImplementation("org.json:json:20240303")
