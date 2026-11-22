@@ -294,10 +294,9 @@ class ScheduledRunTest {
             rows += row.copy(pid = nextPid)
             return nextPid
         }
+        override fun findById(pid: Long): PendingApprovalRow? = rows.firstOrNull { it.pid == pid }
         override fun listAll(): List<PendingApprovalRow> = rows.toList()
-        override fun deleteById(pid: Long) {
-            rows.removeAll { it.pid == pid }
-        }
+        override fun deleteById(pid: Long): Int = if (rows.removeAll { it.pid == pid }) 1 else 0
     }
 
     @Test

@@ -135,11 +135,14 @@ interface PendingApprovalDao {
     @Insert
     fun insert(row: PendingApprovalRow): Long
 
+    @Query("SELECT * FROM pending_approvals WHERE pid = :pid LIMIT 1")
+    fun findById(pid: Long): PendingApprovalRow?
+
     @Query("SELECT * FROM pending_approvals ORDER BY pid ASC")
     fun listAll(): List<PendingApprovalRow>
 
     @Query("DELETE FROM pending_approvals WHERE pid = :pid")
-    fun deleteById(pid: Long)
+    fun deleteById(pid: Long): Int
 }
 
 // Adapter: Room rows in, ScheduleRun objects out. A -1 insert (IGNORE
@@ -174,22 +177,36 @@ class RoomScheduleRunStore(private val dao: ScheduleRunDao) : ScheduleRunStore {
 
 class RoomPendingApprovalStore(private val dao: PendingApprovalDao) : PendingApprovalStore {
     override fun save(approval: PendingApproval): PendingApproval {
-        dao.insert(
-            PendingApprovalRow(
-                scheduleId = approval.scheduleId,
-                toolName = approval.toolName,
-                argsJson = JSONObject(approval.arguments.filterValues { it != null }).toString(),
-                reason = approval.reason,
-                createdAt = System.currentTimeMillis(),
-            ),
-        )
-        return approval
+        val pid =
+            dao.insert(
+                PendingApprovalRow(
+                    scheduleId = approval.scheduleId,
+                    toolName = approval.toolName,
+                    argsJson = JSONObject(approval.arguments.filterValues { it != null }).toString(),
+                    reason = approval.reason,
+                    createdAt = System.currentTimeMillis(),
+                ),
+            )
+        return approval.copy(id = approvalId(pid))
     }
 
     override fun list(): List<PendingApproval> =
         dao.listAll().map {
-            PendingApproval(it.scheduleId, it.toolName, argsFromJson(it.argsJson), it.reason)
+            PendingApproval(it.scheduleId, it.toolName, argsFromJson(it.argsJson), it.reason, approvalId(it.pid))
         }
+
+    // Claim-then-read: the DELETE count is the exactly-once guard — a
+    // concurrent claim deletes zero rows and loses before any transport
+    // touch. Ids round-trip ("approval_12" -> pid 12) like the memory
+    // ("room_12") and schedule ("sched_12") stores.
+    override fun take(id: String): PendingApproval? {
+        val pid = id.removePrefix("approval_").toLongOrNull() ?: return null
+        val row = dao.findById(pid) ?: return null
+        if (dao.deleteById(pid) == 0) return null
+        return PendingApproval(row.scheduleId, row.toolName, argsFromJson(row.argsJson), row.reason, approvalId(row.pid))
+    }
+
+    private fun approvalId(pid: Long): String = "approval_$pid"
 
     private fun argsFromJson(json: String): Map<String, Any?> {
         val obj = JSONObject(json)
