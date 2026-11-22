@@ -1,6 +1,7 @@
 package com.aurviz.agent
 
 import android.content.Context
+import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 
@@ -10,15 +11,25 @@ import androidx.security.crypto.MasterKey
 // TokenStore itself stays plain + unit-tested; this vault only moves
 // its three fields to and from the encrypted file.
 
-class TokenVault(context: Context) {
-    private val prefs =
+// Ticket 36: user-entered LLM keys (Gemini, Groq — the ADR-0004 pair) live
+// in the same encrypted file. Release APKs carry no embedded keys
+// (BuildConfig key fields are empty in release builds), so these vault
+// entries are the only key source on a release install.
+data class LlmKeys(
+    val geminiKey: String = "",
+    val groqKey: String = "",
+)
+
+class TokenVault(private val prefs: SharedPreferences) {
+    constructor(context: Context) : this(
         EncryptedSharedPreferences.create(
             context.applicationContext,
             "tokens",
             MasterKey.Builder(context.applicationContext).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
             EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-        )
+        ),
+    )
 
     fun loadInto(tokens: TokenStore) {
         tokens.gmailAccessToken = prefs.getString("access", null)
@@ -36,5 +47,25 @@ class TokenVault(context: Context) {
 
     fun clear() {
         prefs.edit().clear().apply()
+    }
+
+    fun saveLlmKeys(keys: LlmKeys) {
+        prefs.edit()
+            .putString("llm_gemini_key", keys.geminiKey)
+            .putString("llm_groq_key", keys.groqKey)
+            .apply()
+    }
+
+    fun loadLlmKeys(): LlmKeys =
+        LlmKeys(
+            geminiKey = prefs.getString("llm_gemini_key", null).orEmpty(),
+            groqKey = prefs.getString("llm_groq_key", null).orEmpty(),
+        )
+
+    fun clearLlmKeys() {
+        prefs.edit()
+            .remove("llm_gemini_key")
+            .remove("llm_groq_key")
+            .apply()
     }
 }

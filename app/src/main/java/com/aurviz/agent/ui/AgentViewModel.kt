@@ -14,6 +14,7 @@ import com.aurviz.agent.GMAIL_SCOPES
 import com.aurviz.agent.GmailException
 import com.aurviz.agent.GmailHttpApi
 import com.aurviz.agent.LoopbackReceiver
+import com.aurviz.agent.LlmKeys
 import com.aurviz.agent.LlmProvider
 import com.aurviz.agent.MIGRATION_1_2
 import com.aurviz.agent.Memory
@@ -92,6 +93,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         tokenVault.loadInto(tokens)
+        refreshLlmKeyFlags()
         refreshGmailStatus()
         refreshMemories()
         refreshSchedules()
@@ -443,6 +445,28 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // --- AI keys (ticket 36): user-entered, vault-persisted, never in UI state ---
+
+    fun saveLlmKeys(geminiKey: String, groqKey: String) {
+        tokenVault.saveLlmKeys(LlmKeys(geminiKey.trim(), groqKey.trim()))
+        refreshLlmKeyFlags()
+    }
+
+    fun clearLlmKeys() {
+        tokenVault.clearLlmKeys()
+        refreshLlmKeyFlags()
+    }
+
+    private fun refreshLlmKeyFlags() {
+        val keys = tokenVault.loadLlmKeys()
+        _state.update {
+            it.copy(
+                geminiKeySet = keys.geminiKey.isNotBlank(),
+                groqKeySet = keys.groqKey.isNotBlank(),
+            )
+        }
+    }
+
     // --- Web (in-app page behind BrowserScreen's retained WebView) ---
 
     fun openWeb(raw: String) {
@@ -615,7 +639,10 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
             var used = ""
             val provider = object : LlmProvider {
                 override fun plan(userText: String): com.aurviz.agent.LlmResult {
-                    val fb = planWithFallback(userText, defaultCandidates(BuildConfig.LLM_DEFAULT_PROVIDER))
+                    val fb = planWithFallback(
+                        userText,
+                        defaultCandidates(BuildConfig.LLM_DEFAULT_PROVIDER, tokenVault.loadLlmKeys()),
+                    )
                     used = fb.providerName
                     return fb.result
                 }

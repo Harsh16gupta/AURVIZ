@@ -37,6 +37,8 @@ fun SettingsScreen(
     onRevokeGmail: () -> Unit,
     onPasteLink: (String) -> Unit,
     onDismissPasteFallback: () -> Unit,
+    onSaveLlmKeys: (String, String) -> Unit,
+    onClearLlmKeys: () -> Unit,
     onOpenExactAlarmSettings: () -> Unit,
     onRefreshExactAlarm: () -> Unit,
     onOpenBatterySettings: () -> Unit,
@@ -47,6 +49,9 @@ fun SettingsScreen(
 ) {
     var pasted by rememberSaveable { mutableStateOf("") }
     var haptics by rememberSaveable { mutableStateOf(true) }
+    // Key fields always start empty: saved keys are never read back into UI.
+    var geminiKey by rememberSaveable { mutableStateOf("") }
+    var groqKey by rememberSaveable { mutableStateOf("") }
 
     LaunchedEffect(Unit) {
         onRefreshExactAlarm()
@@ -116,6 +121,55 @@ fun SettingsScreen(
                     ) {
                         Text("Dismiss")
                     }
+                }
+            }
+        }
+        Section(
+            "AI keys",
+            footer = "Keys stay encrypted on this phone and are never baked into the app. " +
+                "Release builds ship with empty keys — enter them here to run the agent.",
+        ) {
+            OptionRow(
+                "Gemini",
+                onClick = {},
+                description = "Default provider.",
+                value = if (state.geminiKeySet) "Set" else "Not set",
+            )
+            TextField(
+                value = geminiKey,
+                onValueChange = { geminiKey = it },
+                label = "Paste Gemini API key",
+            )
+            OptionRow(
+                "Groq",
+                onClick = {},
+                description = "Fallback provider.",
+                value = if (state.groqKeySet) "Set" else "Not set",
+            )
+            TextField(
+                value = groqKey,
+                onValueChange = { groqKey = it },
+                label = "Paste Groq API key",
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(Space * 2)) {
+                Button(
+                    onClick = {
+                        onSaveLlmKeys(geminiKey, groqKey)
+                        geminiKey = ""
+                        groqKey = ""
+                    },
+                ) {
+                    Text("Save keys")
+                }
+                Button(
+                    onClick = {
+                        onClearLlmKeys()
+                        geminiKey = ""
+                        groqKey = ""
+                    },
+                    variant = ButtonVariant.Secondary,
+                ) {
+                    Text("Clear keys")
                 }
             }
         }

@@ -53,5 +53,9 @@ data class AgentUiState(
     val loopbackHint: String = "",
     val exactAlarmNeeded: Boolean = false,
     val batteryOptimizationNeeded: Boolean = false,
+    // Ticket 36: whether a user-entered key exists in TokenVault per provider.
+    // The key values themselves never enter UI state — only these flags.
+    val geminiKeySet: Boolean = false,
+    val groqKeySet: Boolean = false,
     val sending: Boolean = false,
 )
