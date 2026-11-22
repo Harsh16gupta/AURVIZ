@@ -46,6 +46,12 @@ data class ToolDefinition(
     val requiresConfirmation: Boolean,
     val resultType: String,
     val execute: (args: Map<String, Any?>) -> ToolResult,
+    // Ticket 04/24: gated entry for requiresConfirmation Tools. Plain
+    // execute() never sends (send_email's closure bakes approved=false);
+    // the confirmation UI / loop calls executeWithApproval with the user's
+    // decision, which travels out-of-band so the model cannot forge it as
+    // an arg. Null (e.g. schedule Tools) falls back to execute().
+    val approvedExecute: ((args: Map<String, Any?>) -> ToolResult)? = null,
 )
 
 private fun schemaTypeMatches(expected: String, value: Any?): Boolean =
@@ -129,6 +135,32 @@ class ToolRegistry {
         validateArgs(definition, args)?.let { return it }
         return try {
             definition.execute(args)
+        } catch (e: Exception) {
+            ToolResult.Failure("tool '$name' failed: ${e.message}", retryable = false)
+        }
+    }
+
+    /** Gated entry for requiresConfirmation Tools (ADR-0003). Unapproved
+     *  calls refuse without running anything; approved calls run the
+     *  Tool's approvedExecute entry (or execute() when it has none, e.g.
+     *  schedule Tools). The model's plain execute() path can never send.
+     */
+    fun executeWithApproval(name: String, args: Map<String, Any?>, approved: Boolean): ToolResult {
+        val definition = tools[name]
+            ?: return ToolResult.Failure(
+                "unknown tool: '$name'. Available tools: ${tools.keys.sorted().joinToString(", ")}",
+                retryable = true,
+            )
+        validateArgs(definition, args)?.let { return it }
+        if (definition.requiresConfirmation && !approved) {
+            return ToolResult.Failure(
+                "tool '$name' requires confirmation and was not approved; nothing ran",
+                retryable = false,
+            )
+        }
+        return try {
+            if (approved) definition.approvedExecute?.invoke(args) ?: definition.execute(args)
+            else definition.execute(args)
         } catch (e: Exception) {
             ToolResult.Failure("tool '$name' failed: ${e.message}", retryable = false)
         }
@@ -220,15 +252,56 @@ fun readEmailTool(gmailApi: GmailApi?): ToolDefinition =
         },
     )
 
-/** Registry with the read/search Tools + schedule/memory Tools wired to
+/** Ticket 04/24 send_email Tool: irreversible send, HIGH risk, gated per
+ *  call (ADR-0003). The plain execute() entry always refuses without
+ *  touching the transport; only executeWithApproval(approved=true) builds
+ *  the MIME from the exact To/Subject/Body args and sends, after the
+ *  deterministic SendPolicy check. */
+fun sendEmailTool(gmailApi: GmailApi?, policy: SendPolicy = AllowAllSendPolicy): ToolDefinition {
+    fun draftFrom(args: Map<String, Any?>): EmailDraft =
+        EmailDraft(
+            to = listOf(args["to"] as String),
+            subject = args["subject"] as String,
+            body = args["body"] as String,
+        )
+    return ToolDefinition(
+        name = "send_email",
+        description = "Send one Gmail message to To with Subject and Body. " +
+            "Sensitive: runs only after per-call confirmation.",
+        parameters =
+            JSONObject()
+                .put("type", "object")
+                .put(
+                    "properties",
+                    JSONObject()
+                        .put("to", JSONObject().put("type", "string").put("description", "Recipient email address"))
+                        .put("subject", JSONObject().put("type", "string").put("description", "Message subject"))
+                        .put("body", JSONObject().put("type", "string").put("description", "Plain-text message body")),
+                )
+                .put("required", JSONArray().put("to").put("subject").put("body")),
+        // Irreversible outbound send; ADR-0003 gates every call.
+        riskLevel = RiskLevel.HIGH,
+        requiresConfirmation = true,
+        resultType = "send",
+        execute = { args ->
+            executeSendEmail(gmailApi, draftFrom(args), approved = false, policy = policy)
+        },
+        approvedExecute = { args ->
+            executeSendEmail(gmailApi, draftFrom(args), approved = true, policy = policy)
+        },
+    )
+}
+
+/** Registry with the read/search Tools + send Tool + schedule/memory Tools wired to
  *  real seams. Gmail/Room plug in through GmailApi/ScheduleStore/
  *  MemoryStore; tests pass fakes. A null dependency means "not connected
  *  on this device", also a Failure. */
-fun defaultToolRegistry(gmailApi: GmailApi? = null, scheduleStore: ScheduleStore? = null, memoryStore: MemoryStore? = null): ToolRegistry {
+fun defaultToolRegistry(gmailApi: GmailApi? = null, scheduleStore: ScheduleStore? = null, memoryStore: MemoryStore? = null, sendPolicy: SendPolicy = AllowAllSendPolicy): ToolRegistry {
     val registry = ToolRegistry()
 
     registry.register(searchEmailsTool(gmailApi))
     registry.register(readEmailTool(gmailApi))
+    registry.register(sendEmailTool(gmailApi, sendPolicy))
 
     val emailFn = demoToolSchema().getJSONObject("function")
     registry.register(
