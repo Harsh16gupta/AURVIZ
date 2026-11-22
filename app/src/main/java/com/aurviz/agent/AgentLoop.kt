@@ -1,0 +1,154 @@
+package com.aurviz.agent
+
+import org.json.JSONObject
+
+// Ticket 02/24: hand-rolled agent loop (ADR-0005). The Agent keeps a
+// messages list, calls the LLM, executes each Tool call through the
+// ToolRegistry, appends role:"tool" results matched by tool_call_id, and
+// repeats until a plain answer. Tool errors arrive as structured
+// {ok:false, error, retryable} results so the model can recover instead
+// of crashing. The loop emits AgentEvents into the existing timeline UI
+// path (AgentLoopResult.toTimeline reuses buildTimeline).
+//
+// Boundaries (AGENTS.md): the Agent orchestrates; Tool implementations
+// stay in the registry. The Confirmation gate for requiresConfirmation
+// Tools suspends here via the confirm hook (approve, edit, or reject);
+// the full suspend-until-UI gate lands in ticket 03.
+
+// One turn of the conversation. Roles: "user" for the command,
+// "assistant" for LLM turns (carrying its Tool calls), "tool" for one
+// Tool result whose toolCallId matches the assistant ToolCall id.
+data class ChatMessage(
+    val role: String,
+    val content: String?,
+    val toolCalls: List<ToolCall> = emptyList(),
+    val toolCallId: String? = null,
+)
+
+// Conversational LLM seam for the loop. Single-shot LlmProvider.plan is
+// the planner seam; the loop needs the full messages list every turn.
+interface ChatLlmProvider {
+    fun chat(messages: List<ChatMessage>): LlmResult
+}
+
+// Per-sensitive-call Confirmation decision (GLOSSARY). Reject returns
+// {status:"cancelled_by_user"} to the model; the Tool never runs.
+sealed interface ApprovalDecision {
+    data object Approved : ApprovalDecision
+
+    data class ApprovedWithEdit(val args: Map<String, Any?>) : ApprovalDecision
+
+    data object Rejected : ApprovalDecision
+}
+
+// Loop lifecycle events. The UI renders these into ChatTimeline rows:
+// StepStarted/ToolRunning flip a row to RUNNING, StepDone flips it to
+// DONE, NeedsApproval raises the Confirmation card, Failed adds the
+// Error row. Terminal success is the plain answer itself.
+sealed interface AgentEvent {
+    data class StepStarted(val stepIndex: Int) : AgentEvent
+
+    data class ToolRunning(val call: ToolCall) : AgentEvent
+
+    data class NeedsApproval(val call: ToolCall) : AgentEvent
+
+    data class StepDone(val call: ToolCall, val result: ToolResult) : AgentEvent
+
+    data class Failed(val error: String) : AgentEvent
+}
+
+// One executed Tool: the call the model made (with the approved or
+// edited args) and its structured result.
+data class ExecutedStep(
+    val call: ToolCall,
+    val result: ToolResult,
+    val approved: Boolean,
+)
+
+// Terminal Task Execution outcome (GLOSSARY): the Plan the loop actually
+// made, recorded with results, plus the full messages list.
+sealed interface AgentLoopResult {
+    val steps: List<ExecutedStep>
+    val messages: List<ChatMessage>
+
+    data class Answered(
+        val answer: String,
+        override val steps: List<ExecutedStep>,
+        override val messages: List<ChatMessage>,
+    ) : AgentLoopResult
+
+    data class Failed(
+        val error: String,
+        override val steps: List<ExecutedStep>,
+        override val messages: List<ChatMessage>,
+    ) : AgentLoopResult
+}
+
+class AgentLoop(
+    private val llm: ChatLlmProvider,
+    private val registry: ToolRegistry,
+    private val maxSteps: Int = MAX_STEPS,
+    private val onEvent: (AgentEvent) -> Unit = {},
+    private val confirm: (ToolCall) -> ApprovalDecision = { ApprovalDecision.Approved },
+) {
+    companion object {
+        const val MAX_STEPS = 8
+    }
+
+    fun run(userText: String): AgentLoopResult {
+        val messages = mutableListOf(ChatMessage(role = "user", content = userText))
+        val steps = mutableListOf<ExecutedStep>()
+        repeat(maxSteps) { stepIndex ->
+            onEvent(AgentEvent.StepStarted(stepIndex))
+            val turn = llm.chat(messages.toList())
+            if (turn.toolCalls.isEmpty()) {
+                return AgentLoopResult.Answered(turn.content.orEmpty(), steps.toList(), messages.toList())
+            }
+            val calls =
+                turn.toolCalls.mapIndexed { callIndex, call ->
+                    if (call.id != null) call else call.copy(id = "call_s${stepIndex}_$callIndex")
+                }
+            messages += ChatMessage(role = "assistant", content = turn.content, toolCalls = calls)
+            for (call in calls) {
+                onEvent(AgentEvent.ToolRunning(call))
+                var args = call.arguments
+                var approved = true
+                var rejected: ToolResult? = null
+                if (registry.find(call.name)?.requiresConfirmation == true) {
+                    onEvent(AgentEvent.NeedsApproval(call))
+                    when (val decision = confirm(call)) {
+                        is ApprovalDecision.Approved -> Unit
+                        is ApprovalDecision.ApprovedWithEdit -> args = decision.args
+                        is ApprovalDecision.Rejected -> {
+                            approved = false
+                            rejected = ToolResult.Success(mapOf("status" to "cancelled_by_user"))
+                        }
+                    }
+                }
+                val result = rejected ?: registry.execute(call.name, args)
+                steps += ExecutedStep(call.copy(arguments = args), result, approved)
+                onEvent(AgentEvent.StepDone(call, result))
+                messages +=
+                    ChatMessage(
+                        role = "tool",
+                        content = JSONObject(result.toMap()).toString(),
+                        toolCallId = call.id,
+                    )
+            }
+        }
+        val error = "stopped after $maxSteps steps without an answer"
+        onEvent(AgentEvent.Failed(error))
+        return AgentLoopResult.Failed(error, steps.toList(), messages.toList())
+    }
+}
+
+// Existing timeline UI path: render the Task Execution the loop actually
+// ran. Answered marks every executed Tool DONE; Failed keeps the partial
+// steps DONE and adds the Error tail row via buildTimeline.
+fun AgentLoopResult.toTimeline(): List<TimelineStep> {
+    val plan = Plan(steps.map { it.call })
+    return when (this) {
+        is AgentLoopResult.Answered -> buildTimeline(plan, doneCount = steps.size, error = null)
+        is AgentLoopResult.Failed -> buildTimeline(plan, doneCount = steps.size, error = error)
+    }
+}

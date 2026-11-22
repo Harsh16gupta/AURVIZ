@@ -165,11 +165,28 @@ object Providers {
         }
 }
 
-/** Canned provider for planner tests: no network, fixed tool call. */
-class FakeLlmProvider : LlmProvider {
-    override fun plan(userText: String): LlmResult =
+/** Scripted multi-turn provider for AgentLoop tests (ADR-0005): each chat
+ *  returns the next scripted turn in order (repeating the last when the
+ *  loop asks more turns than scripted) and records every messages list it
+ *  saw. The default script preserves the old single-turn canned reply. */
+class FakeLlmProvider(
+    private val script: List<LlmResult> = listOf(
         LlmResult(
             toolCalls = listOf(ToolCall("call_fake001", "getImportantEmails", mapOf("max_results" to 5))),
             content = null,
-        )
+        ),
+    ),
+) : LlmProvider, ChatLlmProvider {
+    private var next = 0
+    val seenMessages = mutableListOf<List<ChatMessage>>()
+
+    override fun plan(userText: String): LlmResult =
+        chat(listOf(ChatMessage(role = "user", content = userText)))
+
+    override fun chat(messages: List<ChatMessage>): LlmResult {
+        seenMessages += messages.toList()
+        val result = script[minOf(next, script.lastIndex)]
+        next++
+        return result
+    }
 }
