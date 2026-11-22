@@ -260,3 +260,82 @@ fun sendWithConfirm(api: GmailApi, rawBase64Url: String, confirmed: Boolean): Bo
     api.send(rawBase64Url)
     return true
 }
+
+// --- Ticket 04/24: gated send executor + deterministic policy seam. ---
+// ADR-0003: send_email is HIGH risk; the Confirmation gate lives in the
+// ToolRegistry, so the model has no path around it. Approval travels
+// out-of-band (the `approved` flag comes from the gate, never from LLM
+// args, or the model could forge it). Plain registry execute() always
+// passes approved=false and refuses without touching the transport.
+//
+// The SendPolicy seam runs after the gate, before any transport touch:
+// no-op allow now; ticket 12/25 fills in the deterministic pre-send
+// check (recipient holds, injection screens).
+sealed interface SendPolicyVerdict {
+    data object Allow : SendPolicyVerdict
+
+    data class Deny(val reason: String) : SendPolicyVerdict
+}
+
+fun interface SendPolicy {
+    fun check(draft: EmailDraft): SendPolicyVerdict
+}
+
+object AllowAllSendPolicy : SendPolicy {
+    override fun check(draft: EmailDraft): SendPolicyVerdict = SendPolicyVerdict.Allow
+}
+
+// Gated send: validates the draft, demands gate approval, runs the
+// deterministic policy check, then sends exactly one MIME message built
+// from the approved To/Subject/Body. Never throws: every failure comes
+// back as a structured Failure the model can react to, and the transport
+// is untouched unless every check passes.
+fun executeSendEmail(
+    api: GmailApi?,
+    draft: EmailDraft,
+    approved: Boolean,
+    policy: SendPolicy = AllowAllSendPolicy,
+): ToolResult {
+    if (api == null) {
+        return ToolResult.Failure("gmail is not connected", retryable = false)
+    }
+    val to = draft.to.map { it.trim() }.filter { it.isNotEmpty() }
+    if (to.isEmpty()) {
+        return ToolResult.Failure(
+            "missing required argument 'to' for tool 'send_email'",
+            retryable = true,
+        )
+    }
+    if (draft.subject.isBlank()) {
+        return ToolResult.Failure(
+            "missing required argument 'subject' for tool 'send_email'",
+            retryable = true,
+        )
+    }
+    if (draft.body.isBlank()) {
+        return ToolResult.Failure(
+            "missing required argument 'body' for tool 'send_email'",
+            retryable = true,
+        )
+    }
+    if (!approved) {
+        return ToolResult.Failure(
+            "tool 'send_email' requires confirmation and was not approved; nothing was sent",
+            retryable = false,
+        )
+    }
+    when (val verdict = policy.check(draft)) {
+        is SendPolicyVerdict.Deny ->
+            return ToolResult.Failure(
+                "tool 'send_email' blocked by policy: ${verdict.reason}",
+                retryable = false,
+            )
+        SendPolicyVerdict.Allow -> Unit
+    }
+    return try {
+        api.send(buildRawMessage(draft.copy(to = to)))
+        ToolResult.Success(mapOf("sent" to true, "to" to to, "subject" to draft.subject))
+    } catch (e: Exception) {
+        ToolResult.Failure("tool 'send_email' failed: ${e.message}", retryable = false)
+    }
+}
