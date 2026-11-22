@@ -207,4 +207,117 @@ class AgentLoopTest {
         assertEquals(StepState.DONE, rows[3].state)
         assertEquals(StepState.DONE, rows.last().state)
     }
+
+    // Ticket 10/24: per-step and total timeouts abort the loop to Failed
+    // with a partial timeline. A manual clock stands in for wall time so
+    // the abort paths run deterministically through AgentLoop.run.
+
+    private class ClockLlm(
+        private val script: List<LlmResult>,
+        private val advanceMs: List<Long>,
+        private val clock: () -> Long,
+        private val setClock: (Long) -> Unit,
+    ) : ChatLlmProvider {
+        private var next = 0
+        override fun chat(messages: List<ChatMessage>): LlmResult {
+            setClock(clock() + advanceMs[minOf(next, advanceMs.lastIndex)])
+            val result = script[minOf(next, script.lastIndex)]
+            next++
+            return result
+        }
+    }
+
+    @Test
+    fun stepTimeoutAbortsToFailedWithPartialTimeline() {
+        var now = 0L
+        val llm =
+            ClockLlm(
+                script =
+                    listOf(
+                        call("call_1", "getImportantEmails", mapOf("max_results" to 5)),
+                        answer("Done"),
+                    ),
+                advanceMs = listOf(10_000L),
+                clock = { now },
+                setClock = { now = it },
+            )
+        val events = mutableListOf<AgentEvent>()
+        val loop =
+            AgentLoop(
+                llm,
+                registry(),
+                stepTimeoutMs = 1_000L,
+                totalTimeoutMs = 60_000L,
+                nowMs = { now },
+                onEvent = events::add,
+            )
+        val result = loop.run("check mail")
+        assertTrue(result is AgentLoopResult.Failed)
+        result as AgentLoopResult.Failed
+        assertTrue(result.error.contains("timed out"))
+        assertTrue(result.steps.isEmpty())
+        assertTrue(events.last() is AgentEvent.Failed)
+
+        // Partial timeline: no Tools finished, tail row is the Error.
+        val rows = result.toTimeline()
+        assertEquals(StepState.FAILED, rows.last().state)
+        assertTrue(rows.last().title.startsWith("Error:"))
+    }
+
+    @Test
+    fun totalTimeoutAbortsToFailedKeepingFinishedSteps() {
+        var now = 0L
+        val llm =
+            ClockLlm(
+                script =
+                    listOf(
+                        call("call_1", "getImportantEmails", mapOf("max_results" to 5)),
+                        call("call_2", "getImportantEmails", mapOf("max_results" to 5)),
+                        answer("Done"),
+                    ),
+                advanceMs = listOf(10_000L, 10_000L),
+                clock = { now },
+                setClock = { now = it },
+            )
+        val events = mutableListOf<AgentEvent>()
+        val loop =
+            AgentLoop(
+                llm,
+                registry(),
+                stepTimeoutMs = 60_000L,
+                totalTimeoutMs = 9_000L,
+                nowMs = { now },
+                onEvent = events::add,
+            )
+        val result = loop.run("check mail")
+        assertTrue(result is AgentLoopResult.Failed)
+        result as AgentLoopResult.Failed
+        assertTrue(result.error.contains("total timeout"))
+        assertEquals(1, result.steps.size)
+        assertTrue(events.last() is AgentEvent.Failed)
+
+        // Partial timeline: the finished Tool stays DONE, tail is the Error.
+        val rows = result.toTimeline()
+        assertTrue(rows.any { it.title == "Tool 1 of 1: getImportantEmails" && it.state == StepState.DONE })
+        assertEquals(StepState.FAILED, rows.last().state)
+        assertTrue(rows.last().title.startsWith("Error:"))
+    }
+
+    @Test
+    fun llmTransportErrorAbortsToFailed() {
+        val llm =
+            object : ChatLlmProvider {
+                override fun chat(messages: List<ChatMessage>): LlmResult =
+                    throw LlmException(HttpFailure("error", null, true), "HTTP 500")
+            }
+        val events = mutableListOf<AgentEvent>()
+        val result = AgentLoop(llm, registry(), onEvent = events::add).run("check mail")
+        assertTrue(result is AgentLoopResult.Failed)
+        result as AgentLoopResult.Failed
+        assertTrue(result.error.contains("HTTP 500"))
+        assertTrue(result.steps.isEmpty())
+        assertTrue(events.last() is AgentEvent.Failed)
+        val rows = result.toTimeline()
+        assertEquals(StepState.FAILED, rows.last().state)
+    }
 }

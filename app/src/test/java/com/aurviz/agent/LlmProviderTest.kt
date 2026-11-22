@@ -89,6 +89,14 @@ class LlmProviderTest {
     }
 
     @Test
+    fun defaultLlmHttpClientHasConnectAndReadTimeouts() {
+        // ADR-0004: no bare OkHttpClient without timeouts on the LLM path.
+        val client = llmHttpClient()
+        assertEquals(15_000, client.connectTimeoutMillis)
+        assertEquals(60_000, client.readTimeoutMillis)
+    }
+
+    @Test
     fun listSchedulesSchemaTakesNoRequiredArgs() {
         val fn = listSchedulesToolSchema().getJSONObject("function")
         assertEquals("list_schedules", fn.getString("name"))
