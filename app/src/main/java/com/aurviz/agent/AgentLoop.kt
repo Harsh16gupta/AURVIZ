@@ -14,8 +14,9 @@ import org.json.JSONObject
 //
 // Boundaries (AGENTS.md): the Agent orchestrates; Tool implementations
 // stay in the registry. The Confirmation gate for requiresConfirmation
-// Tools suspends here via the confirm hook (approve, edit, or reject);
-// the full suspend-until-UI gate lands in ticket 03.
+// Tools lives in the registry (executeGated) and the loop routes every
+// call through it, suspending on the confirm hook (approve, edited-
+// approve, reject, or timeout); real UI suspension wires in with ticket 24.
 
 // One turn of the conversation. Roles: "user" for the command,
 // "assistant" for LLM turns (carrying its Tool calls), "tool" for one
@@ -33,14 +34,16 @@ interface ChatLlmProvider {
     fun chat(messages: List<ChatMessage>): LlmResult
 }
 
-// Per-sensitive-call Confirmation decision (GLOSSARY). Reject returns
-// {status:"cancelled_by_user"} to the model; the Tool never runs.
+// Per-sensitive-call Confirmation decision (GLOSSARY). Reject and timeout
+// return {status:"cancelled_by_user"} to the model; the Tool never runs.
 sealed interface ApprovalDecision {
     data object Approved : ApprovalDecision
 
     data class ApprovedWithEdit(val args: Map<String, Any?>) : ApprovalDecision
 
     data object Rejected : ApprovalDecision
+
+    data object TimedOut : ApprovalDecision
 }
 
 // Loop lifecycle events. The UI renders these into ChatTimeline rows:
@@ -140,27 +143,16 @@ class AgentLoop(
             messages += ChatMessage(role = "assistant", content = turn.content, toolCalls = calls)
             for (call in calls) {
                 onEvent(AgentEvent.ToolRunning(call))
-                var args = call.arguments
-                var approved = true
-                var rejected: ToolResult? = null
-                if (registry.find(call.name)?.requiresConfirmation == true) {
+                if (registry.requiresConfirmation(call.name)) {
                     onEvent(AgentEvent.NeedsApproval(call))
-                    when (val decision = confirm(call)) {
-                        is ApprovalDecision.Approved -> Unit
-                        is ApprovalDecision.ApprovedWithEdit -> args = decision.args
-                        is ApprovalDecision.Rejected -> {
-                            approved = false
-                            rejected = ToolResult.Success(mapOf("status" to "cancelled_by_user"))
-                        }
-                    }
                 }
-                val result = rejected ?: registry.execute(call.name, args)
-                steps += ExecutedStep(call.copy(arguments = args), result, approved)
-                onEvent(AgentEvent.StepDone(call, result))
+                val gated = registry.executeGated(call, confirm)
+                steps += ExecutedStep(call.copy(arguments = gated.effectiveArgs), gated.result, gated.approved)
+                onEvent(AgentEvent.StepDone(call, gated.result))
                 messages +=
                     ChatMessage(
                         role = "tool",
-                        content = JSONObject(result.toMap()).toString(),
+                        content = JSONObject(gated.result.toMap()).toString(),
                         toolCallId = call.id,
                     )
             }
