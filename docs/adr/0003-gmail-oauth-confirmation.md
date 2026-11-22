@@ -1,3 +1,7 @@
-# Gmail API OAuth2 with send+read and confirmation gate
+# Gmail API OAuth2 with send+read and per-tool-call confirmation gate
 
-SMTP app-passwords are simpler for a demo but weaker for security review and lack scoped revocation. The 9AM "check important emails and prepare a summary" needs READ, not just send. We use Gmail API OAuth2 (PKCE, Settings connect) with least-privilege `gmail.send` + `gmail.readonly`, tokens in EncryptedSharedPreferences, and require explicit whole-Plan Confirmation before any send, satisfying the assignment's sensitive-action and secure-storage rules.
+Status: amended 2026-11-23 — per-tool-call confirmation replaces whole-Plan confirmation.
+
+SMTP app-passwords are simpler for a demo but weaker for security review and lack scoped revocation. The 9AM "check important emails and prepare a summary" needs READ, not just send. We use Gmail API OAuth2 (PKCE, Settings connect) with least-privilege `gmail.send` + `gmail.readonly`, tokens in EncryptedSharedPreferences.
+
+A Plan cannot be approved up front because later steps depend on earlier results and the draft does not exist yet, so confirmation is per sensitive tool call, not per Plan: `send_email`, `create_schedule`, and `cancel_schedule` set `requiresConfirmation`; reads, searches, and lists do not. The gate lives in the tool registry, so the model has no path around it — the wrapper suspends the loop until the UI returns approve, edit, or reject, and reject returns `{status:"cancelled_by_user"}` to the model. The existing preview cards become the gate's UI: show exact To/Subject/Body, highlight recipients not previously seen. A deterministic policy check runs before `send_email` regardless of what the model says, and the injection red-team test (an evil-forward email must produce a confirmation card, never a send) is the acceptance criterion. Scheduled runs never hold the send tool (see ADR-0002).
