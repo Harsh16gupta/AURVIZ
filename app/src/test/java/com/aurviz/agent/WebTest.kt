@@ -112,12 +112,16 @@ class FakeWebBridge(
     private val noMatchSelectors: Set<String> = emptySet(),
 ) : WebBridge {
     private var current: String? = null
+    private var currentPageUrl: String = ""
+
+    override fun currentUrl(): String = currentPageUrl
 
     override fun load(url: String): String {
         if (url in timeoutUrls) throw WebException(WebFailure(url, "timeout"))
         if (url in loadFailUrls) throw WebException(WebFailure(url, "load-failed"))
         val html = pages[url] ?: throw WebException(WebFailure(url, "not-found"))
         current = html
+        currentPageUrl = url
         return html
     }
 

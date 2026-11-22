@@ -162,6 +162,23 @@ private fun ftsRecall(memories: List<Memory>, words: Set<String>): List<Memory> 
         .sortedWith(boostComparator())
         .map { (memory, _, _) -> memory }
 
+// Ticket 16/29: memories travel in a delimited system section, never
+// concatenated into the user message (ADR-0005). The loop renders this
+// section into the system prompt; the model sees each fact with its id
+// and source so personalization stays distinguishable from instructions.
+const val MEMORY_SECTION_START = "[memories]"
+const val MEMORY_SECTION_END = "[/memories]"
+
+fun renderMemorySection(memories: List<Memory>): String {
+    val body =
+        if (memories.isEmpty()) {
+            "(none)"
+        } else {
+            memories.joinToString("\n") { "• ${it.id} [${it.source}]: ${it.text}" }
+        }
+    return "$MEMORY_SECTION_START\n$body\n$MEMORY_SECTION_END"
+}
+
 // Ticket 05/24: LLM-visible memory tool schemas. Room-only via
 // MemoryStore (ADR-0001): the registry injects RoomMemoryStore on the
 // phone and InMemoryStore in tests. Keyword plus recency/importance

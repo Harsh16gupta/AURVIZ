@@ -413,6 +413,7 @@ fun defaultToolRegistry(
                             "from" to row.from,
                             "subject" to row.subject,
                             "snippet" to row.snippet,
+                            "source" to emailSource(row.id),
                         )
                     },
                 )
@@ -619,6 +620,7 @@ fun registerWebTools(
                             "title" to page.title,
                             "text" to page.text,
                             "links" to page.links,
+                            "source" to pageSource(page.url),
                         ),
                     )
                 } catch (e: WebException) {
@@ -649,7 +651,12 @@ fun registerWebTools(
                             openBackgroundPage(loader, url)
                         }
                     ToolResult.Success(
-                        mapOf("url" to page.url, "title" to page.title, "text" to page.text),
+                        mapOf(
+                            "url" to page.url,
+                            "title" to page.title,
+                            "text" to page.text,
+                            "source" to pageSource(page.url),
+                        ),
                     )
                 } catch (e: WebException) {
                     webFailure("get_page_text", e)
@@ -672,7 +679,12 @@ fun registerWebTools(
                 try {
                     val page = parsePage("", bridge.click(selector))
                     ToolResult.Success(
-                        mapOf("title" to page.title, "text" to page.text, "links" to page.links),
+                        mapOf(
+                            "title" to page.title,
+                            "text" to page.text,
+                            "links" to page.links,
+                            "source" to pageSource(bridge.currentUrl()),
+                        ),
                     )
                 } catch (e: WebException) {
                     webFailure("click", e)
@@ -706,7 +718,12 @@ fun registerWebTools(
                 try {
                     val page = parsePage("", bridge.scrollBy(px))
                     ToolResult.Success(
-                        mapOf("title" to page.title, "text" to page.text, "links" to page.links),
+                        mapOf(
+                            "title" to page.title,
+                            "text" to page.text,
+                            "links" to page.links,
+                            "source" to pageSource(bridge.currentUrl()),
+                        ),
                     )
                 } catch (e: WebException) {
                     webFailure("scroll", e)
@@ -729,7 +746,13 @@ fun registerWebTools(
                 try {
                     val text = bridge.pageText()
                     val chunks = relevantChunks(WebPage(url = "", title = "", text = text, links = emptyList()), query)
-                    ToolResult.Success(mapOf("query" to query, "chunks" to chunks))
+                    ToolResult.Success(
+                        mapOf(
+                            "query" to query,
+                            "chunks" to chunks,
+                            "source" to pageSource(bridge.currentUrl()),
+                        ),
+                    )
                 } catch (e: WebException) {
                     webFailure("extract", e)
                 }

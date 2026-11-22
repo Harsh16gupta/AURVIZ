@@ -11,6 +11,9 @@ data class WebPage(
     val links: List<String>,
 )
 
+/** Page origin tag for every web Tool result, mirroring emailSource. */
+fun pageSource(url: String): String = if (url.isBlank()) "page:current" else "page:$url"
+
 // A failed open/extract, carrying the page so the screen can offer Retry.
 data class WebFailure(val url: String, val reason: String)
 
@@ -29,6 +32,11 @@ interface WebBridge {
     fun click(selector: String): String
 
     fun scrollBy(px: Int): String
+
+    // The foreground tab's current URL for result source tags (ticket
+    // 16/29: page text travels inside source-tagged results). Blank when
+    // nothing has loaded yet; the registry falls back to page:current.
+    fun currentUrl(): String = ""
 }
 
 // Only http(s) pages may load. Everything else — file:, javascript:, data:,

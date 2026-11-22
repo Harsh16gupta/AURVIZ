@@ -13,6 +13,8 @@ class WebViewBridge(private val webView: WebView) : WebBridge {
 
     @Volatile private var lastUrl: String = ""
 
+    override fun currentUrl(): String = lastUrl
+
     override fun load(url: String): String {
         lastUrl = url
         val done = CountDownLatch(1)
