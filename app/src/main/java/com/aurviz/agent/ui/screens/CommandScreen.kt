@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import com.aurviz.agent.StepState
 import com.aurviz.agent.TimelineStep
 import com.aurviz.agent.ui.AgentUiState
+import com.aurviz.agent.ui.retryLine
 import com.aurviz.agent.ui.components.Button
 import com.aurviz.agent.ui.components.ButtonVariant
 import com.aurviz.agent.ui.components.Composer
@@ -53,6 +54,11 @@ fun CommandScreen(
                 }
                 item {
                     Text(state.statusLine, color = Theme.colors.onBackgroundMuted)
+                }
+                state.retryLine()?.let { retry ->
+                    item {
+                        Text(retry, color = Theme.colors.primary)
+                    }
                 }
                 if (state.timeline.any { it.state == StepState.RUNNING }) {
                     item {
