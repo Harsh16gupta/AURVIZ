@@ -135,10 +135,10 @@ class ToolRegistry {
     }
 }
 
-/** Registry with the two existing Tools wired to real seams. Gmail/Room
- *  plug in through GmailApi/ScheduleStore; tests pass fakes. A null
- *  dependency means "not connected on this device", also a Failure. */
-fun defaultToolRegistry(gmailApi: GmailApi? = null, scheduleStore: ScheduleStore? = null): ToolRegistry {
+/** Registry with the existing Tools wired to real seams. Gmail/Room
+ *  plug in through GmailApi/ScheduleStore/MemoryStore; tests pass fakes.
+ *  A null dependency means "not connected on this device", also a Failure. */
+fun defaultToolRegistry(gmailApi: GmailApi? = null, scheduleStore: ScheduleStore? = null, memoryStore: MemoryStore? = null): ToolRegistry {
     val registry = ToolRegistry()
 
     val emailFn = demoToolSchema().getJSONObject("function")
@@ -198,6 +198,63 @@ fun defaultToolRegistry(gmailApi: GmailApi? = null, scheduleStore: ScheduleStore
                         "hour" to saved.hour,
                         "minute" to saved.minute,
                     ),
+                )
+            },
+        ),
+    )
+
+    val saveMemoryFn = saveMemoryToolSchema().getJSONObject("function")
+    registry.register(
+        ToolDefinition(
+            name = saveMemoryFn.getString("name"),
+            description = saveMemoryFn.getString("description"),
+            parameters = saveMemoryFn.getJSONObject("parameters"),
+            // On-device write, reversible via delete; not a sensitive
+            // call, so no per-call Confirmation (ADR-0003 gates sends).
+            riskLevel = RiskLevel.LOW,
+            requiresConfirmation = false,
+            resultType = "memory",
+            execute = { args ->
+                val store = memoryStore
+                    ?: return@ToolDefinition ToolResult.Failure("memory store is not available", retryable = false)
+                val text = args["text"] as String
+                val source = (args["source"] as String?)?.takeIf { it.isNotBlank() } ?: "you told me"
+                val saved = rememberFact(store, text, source)
+                ToolResult.Success(
+                    mapOf(
+                        "id" to saved.id,
+                        "text" to saved.text,
+                        "source" to saved.source,
+                    ),
+                )
+            },
+        ),
+    )
+
+    val searchMemoryFn = searchMemoryToolSchema().getJSONObject("function")
+    registry.register(
+        ToolDefinition(
+            name = searchMemoryFn.getString("name"),
+            description = searchMemoryFn.getString("description"),
+            parameters = searchMemoryFn.getJSONObject("parameters"),
+            // Read-only recall over on-device Room.
+            riskLevel = RiskLevel.LOW,
+            requiresConfirmation = false,
+            resultType = "memories",
+            execute = { args ->
+                val store = memoryStore
+                    ?: return@ToolDefinition ToolResult.Failure("memory store is not available", retryable = false)
+                val query = args["query"] as String
+                val max = (args["max_results"] as Number?)?.toInt()?.coerceAtLeast(0)
+                val hits = recallFor(store, query).let { if (max != null) it.take(max) else it }
+                ToolResult.Success(
+                    hits.map { memory ->
+                        mapOf(
+                            "id" to memory.id,
+                            "text" to memory.text,
+                            "source" to memory.source,
+                        )
+                    },
                 )
             },
         ),

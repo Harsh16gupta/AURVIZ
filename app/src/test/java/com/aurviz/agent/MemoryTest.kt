@@ -72,4 +72,24 @@ class MemoryTest {
         assertEquals(0, outbox.replay(store))
         assertEquals(2, store.list().size)
     }
+
+    @Test
+    fun recallRanksHigherWordOverlapFirst() {
+        val store = InMemoryStore()
+        rememberFact(store, "my boss is Priya", source = "you told me")
+        rememberFact(store, "my boss likes tea", source = "auto-saved")
+        val found = recallFor(store, "who is my boss Priya?")
+        assertEquals(2, found.size)
+        assertEquals("my boss is Priya", found[0].text)
+    }
+
+    @Test
+    fun recallBreaksOverlapTiesByRecencyNewestFirst() {
+        val store = InMemoryStore()
+        rememberFact(store, "my boss is Priya", source = "you told me")
+        rememberFact(store, "my boss likes tea", source = "auto-saved")
+        val found = recallFor(store, "boss")
+        assertEquals(2, found.size)
+        assertEquals("my boss likes tea", found[0].text)
+    }
 }

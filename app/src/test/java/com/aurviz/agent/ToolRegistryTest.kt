@@ -21,7 +21,11 @@ class ToolRegistryTest {
     }
 
     private fun registry(): ToolRegistry =
-        defaultToolRegistry(gmailApi = FakeGmail(), scheduleStore = InMemoryScheduleStore())
+        defaultToolRegistry(
+            gmailApi = FakeGmail(),
+            scheduleStore = InMemoryScheduleStore(),
+            memoryStore = InMemoryStore(),
+        )
 
     @Test
     fun toolsDeclareSchemaRiskConfirmationAndResultType() {
@@ -114,11 +118,65 @@ class ToolRegistryTest {
     }
 
     @Test
-    fun toolSchemasExposeBothToolsForLlm() {
+    fun toolSchemasExposeAllToolsForLlm() {
         val schemas = registry().toolSchemas()
         val names = (0 until schemas.length())
             .map { schemas.getJSONObject(it).getJSONObject("function").getString("name") }
             .toSet()
-        assertEquals(setOf("getImportantEmails", "createSchedule"), names)
+        assertEquals(setOf("getImportantEmails", "createSchedule", "save_memory", "search_memory"), names)
+    }
+
+    @Test
+    fun memoryToolsDeclareSchemaRiskConfirmationAndResultType() {
+        val registry = registry()
+        val save = registry.find("save_memory")!!
+        assertEquals(RiskLevel.LOW, save.riskLevel)
+        assertFalse(save.requiresConfirmation)
+        assertTrue(save.resultType.isNotBlank())
+        assertTrue(save.parameters.getJSONObject("properties").has("text"))
+
+        val search = registry.find("search_memory")!!
+        assertEquals(RiskLevel.LOW, search.riskLevel)
+        assertFalse(search.requiresConfirmation)
+        assertTrue(search.resultType.isNotBlank())
+        assertTrue(search.parameters.getJSONObject("properties").has("query"))
+    }
+
+    @Test
+    fun saveMemoryThenSearchMemoryReturnsTheFact() {
+        val store = InMemoryStore()
+        val registry =
+            defaultToolRegistry(
+                gmailApi = FakeGmail(),
+                scheduleStore = InMemoryScheduleStore(),
+                memoryStore = store,
+            )
+        val saved = registry.execute("save_memory", mapOf("text" to "my boss is Priya", "source" to "you told me"))
+        assertTrue(saved is ToolResult.Success)
+
+        val found = registry.execute("search_memory", mapOf("query" to "who is my boss?"))
+        assertTrue(found is ToolResult.Success)
+        found as ToolResult.Success
+        @Suppress("UNCHECKED_CAST")
+        val rows = found.data as List<Map<String, Any?>>
+        assertTrue(rows.any { it["text"] == "my boss is Priya" })
+    }
+
+    @Test
+    fun saveMemoryWithoutTextNamesTheViolation() {
+        val result = registry().execute("save_memory", emptyMap())
+        assertTrue(result is ToolResult.Failure)
+        result as ToolResult.Failure
+        assertTrue(result.error.contains("text"))
+        assertTrue(result.retryable)
+    }
+
+    @Test
+    fun searchMemoryWithoutQueryNamesTheViolation() {
+        val result = registry().execute("search_memory", emptyMap())
+        assertTrue(result is ToolResult.Failure)
+        result as ToolResult.Failure
+        assertTrue(result.error.contains("query"))
+        assertTrue(result.retryable)
     }
 }
