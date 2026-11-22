@@ -57,6 +57,17 @@ fun planWithFallback(command: String, candidates: List<NamedProvider>): Fallback
     throw lastError ?: IllegalStateException("No provider with API key")
 }
 
+// Visible "retried on Y" disclosure (ADR-0004): null when the first provider
+// answered, non-null naming every provider that saw the prompt otherwise.
+// The caller copies `tried` into AgentUiState.providersTried so a
+// cross-provider retry carrying private context is never silent.
+fun retryDisclosure(result: FallbackResult): String? =
+    if (result.tried.size > 1) {
+        "Retried on ${result.providerName} (tried ${result.tried.joinToString(", ")})"
+    } else {
+        null
+    }
+
 // --- Thin wiring: settings come from BuildConfig (local.properties). ---
 
 fun settingsFromBuildConfig(): ProviderSettings =
