@@ -29,6 +29,7 @@ class MainActivity : Activity() {
     private lateinit var forgetButton: Button
     private lateinit var roomStore: MemoryStore
     private var pendingForget: List<Memory> = emptyList()
+    private var lastCommand: String? = null
     private var currentRows: List<TimelineStep> = emptyList()
     private var recognizer: SpeechRecognizer? = null
     private var voiceText: String? = null
@@ -88,9 +89,8 @@ class MainActivity : Activity() {
         }
         micButton.setOnClickListener { onMicTapped() }
         retryButton.setOnClickListener {
-            // Retry keeps finished steps, only the failed one runs again.
-            currentRows = retryTimeline(currentRows)
-            renderTimeline()
+            // Real failure: re-run the same command through the chain again.
+            lastCommand?.let { runRealPlan(it) }
         }
         sendButton.setOnClickListener {
             val command = resolveCommandInput(voiceText, typedInput.text.toString())
@@ -125,27 +125,59 @@ class MainActivity : Activity() {
                 }
                 return@setOnClickListener
             }
-            // Normal command: recall what we know, then plan as before.
-            // (Fake ignores the context line; the real provider will read it.)
-            val known = recallFor(roomStore, command).take(3)
-            val knownLine = if (known.isEmpty()) "" else "\nKnown: " + known.joinToString("; ") { it.text }
-            liveText.text = "Command: $command$knownLine"
-            // T5 demo flow (Fake = no keys needed on device):
-            // first Send shows step 2 failed so Retry can be checked.
-            // Real runner swaps FakeLlmProvider for planWithFallback later.
-            val effective =
-                if (known.isEmpty()) command else "Known: " + known.joinToString("; ") { it.text } + ". $command"
-            when (val outcome = planCommand(effective, FakeLlmProvider())) {
-                is PlannerOutcome.NeedsClarification -> {
-                    liveText.text = "Command: $command$knownLine\nAgent: ${outcome.question}"
-                    currentRows = buildTimeline(Plan(emptyList()), doneCount = 0, error = null)
+            // Normal command: recall what we know, then plan with the REAL chain
+            // (your Gemini key). Network runs on a background thread so the
+            // screen never freezes; results come back on the UI thread.
+            runRealPlan(command)
+        }
+    }
+
+    private fun runRealPlan(cmd: String) {
+        lastCommand = cmd
+        val known = recallFor(roomStore, cmd).take(3)
+        val knownLine = if (known.isEmpty()) "" else "\nKnown: " + known.joinToString("; ") { it.text }
+        liveText.text = "Command: $cmd$knownLine\nAgent: thinking…"
+        currentRows = emptyList()
+        renderTimeline()
+        retryButton.visibility = android.view.View.GONE
+        val effective =
+            if (known.isEmpty()) cmd else "Known: " + known.joinToString("; ") { it.text } + ". $cmd"
+        Thread {
+            var used = ""
+            // Same planCommand as the unit tests; only the transport is real:
+            // try providers in order, skip ones with no key (T4 logic).
+            val provider =
+                object : LlmProvider {
+                    override fun plan(userText: String): LlmResult {
+                        val fb = planWithFallback(userText, defaultCandidates(BuildConfig.LLM_DEFAULT_PROVIDER))
+                        used = fb.providerName
+                        return fb.result
+                    }
                 }
-                is PlannerOutcome.Ready -> {
-                    currentRows = buildTimeline(outcome.plan, doneCount = 0, error = "Demo: no internet")
+            try {
+                val outcome = planCommand(effective, provider)
+                runOnUiThread {
+                    when (outcome) {
+                        is PlannerOutcome.NeedsClarification -> {
+                            liveText.text = "Command: $cmd$knownLine\nAgent: ${outcome.question}"
+                            currentRows = buildTimeline(Plan(emptyList()), doneCount = 0, error = null)
+                        }
+                        is PlannerOutcome.Ready -> {
+                            liveText.text = "Command: $cmd$knownLine\nRan on: $used"
+                            currentRows = buildTimeline(outcome.plan, doneCount = 0, error = null)
+                        }
+                    }
+                    renderTimeline()
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    liveText.text = "Command: $cmd$knownLine\nFailed: ${e.message}"
+                    currentRows = emptyList()
+                    renderTimeline()
+                    retryButton.visibility = android.view.View.VISIBLE
                 }
             }
-            renderTimeline()
-        }
+        }.start()
     }
 
     // The remembered list with sources, so auto-saves can be audited.
