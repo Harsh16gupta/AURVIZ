@@ -107,28 +107,41 @@ class ToolRegistryTest {
     fun validScheduleCallSucceedsAndStores() {
         val store = InMemoryScheduleStore()
         val registry = defaultToolRegistry(gmailApi = FakeGmail(), scheduleStore = store)
-        val result = registry.execute("create_schedule", mapOf("task" to "check emails", "when" to "at 9am"))
-        assertTrue(result is ToolResult.Success)
+        val gated =
+            registry.executeGated(
+                ToolCall("call_1", "create_schedule", mapOf("task" to "check emails", "when" to "at 9am")),
+                confirm = { ApprovalDecision.Approved },
+            )
+        assertTrue(gated.result is ToolResult.Success)
         assertEquals(1, store.list().size)
     }
 
     @Test
     fun unparseableWhenNamesTheViolation() {
-        val result = registry().execute("create_schedule", mapOf("task" to "check emails", "when" to "someday maybe"))
-        assertTrue(result is ToolResult.Failure)
-        result as ToolResult.Failure
-        assertTrue(result.error.contains("when"))
-        assertTrue(result.retryable)
+        val gated =
+            registry().executeGated(
+                ToolCall("call_1", "create_schedule", mapOf("task" to "check emails", "when" to "someday maybe")),
+                confirm = { ApprovalDecision.Approved },
+            )
+        assertTrue(gated.result is ToolResult.Failure)
+        gated.result as ToolResult.Failure
+        assertTrue((gated.result as ToolResult.Failure).error.contains("when"))
+        assertTrue((gated.result as ToolResult.Failure).retryable)
     }
 
     @Test
     fun crudRoundTripThroughRegistry() {
         val store = InMemoryScheduleStore()
         val registry = defaultToolRegistry(gmailApi = FakeGmail(), scheduleStore = store)
+        val approve: (ToolCall) -> ApprovalDecision = { ApprovalDecision.Approved }
 
-        val created = registry.execute("create_schedule", mapOf("task" to "check emails", "when" to "at 9am"))
-        assertTrue(created is ToolResult.Success)
-        val id = ((created as ToolResult.Success).data as Map<*, *>)["id"] as String
+        val created =
+            registry.executeGated(
+                ToolCall("call_1", "create_schedule", mapOf("task" to "check emails", "when" to "at 9am")),
+                confirm = approve,
+            )
+        assertTrue(created.result is ToolResult.Success)
+        val id = ((created.result as ToolResult.Success).data as Map<*, *>)["id"] as String
 
         val listed = registry.execute("list_schedules", emptyMap())
         assertTrue(listed is ToolResult.Success)
@@ -136,8 +149,12 @@ class ToolRegistryTest {
         assertEquals(1, rows.size)
         assertEquals(id, (rows[0] as Map<*, *>)["id"])
 
-        val cancelled = registry.execute("cancel_schedule", mapOf("schedule_id" to id))
-        assertTrue(cancelled is ToolResult.Success)
+        val cancelled =
+            registry.executeGated(
+                ToolCall("call_2", "cancel_schedule", mapOf("schedule_id" to id)),
+                confirm = approve,
+            )
+        assertTrue(cancelled.result is ToolResult.Success)
 
         val listedAgain = registry.execute("list_schedules", emptyMap())
         assertTrue(listedAgain is ToolResult.Success)
@@ -147,18 +164,29 @@ class ToolRegistryTest {
 
     @Test
     fun cancelUnknownIdIsRetryableError() {
-        val result = registry().execute("cancel_schedule", mapOf("schedule_id" to "sched_999"))
-        assertTrue(result is ToolResult.Failure)
-        result as ToolResult.Failure
-        assertTrue(result.error.contains("sched_999"))
-        assertTrue(result.retryable)
+        val gated =
+            registry().executeGated(
+                ToolCall("call_1", "cancel_schedule", mapOf("schedule_id" to "sched_999")),
+                confirm = { ApprovalDecision.Approved },
+            )
+        assertTrue(gated.result is ToolResult.Failure)
+        gated.result as ToolResult.Failure
+        assertTrue((gated.result as ToolResult.Failure).error.contains("sched_999"))
+        assertTrue((gated.result as ToolResult.Failure).retryable)
     }
 
     @Test
     fun cancelMissingIdNamesTheViolation() {
-        val result = registry().execute("cancel_schedule", emptyMap())
-        assertTrue(result is ToolResult.Failure)
-        assertTrue((result as ToolResult.Failure).error.contains("schedule_id"))
+        var consulted = false
+        val gated =
+            registry().executeGated(
+                ToolCall("call_1", "cancel_schedule", emptyMap()),
+                confirm = { consulted = true; ApprovalDecision.Approved },
+            )
+        assertTrue(gated.result is ToolResult.Failure)
+        assertTrue((gated.result as ToolResult.Failure).error.contains("schedule_id"))
+        // Invalid args fail before the approver is consulted.
+        assertFalse(consulted)
     }
 
     @Test

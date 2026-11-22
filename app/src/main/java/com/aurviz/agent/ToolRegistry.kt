@@ -8,9 +8,11 @@ import org.json.JSONObject
 // Arguments are validated against the schema before execution; unknown
 // Tools and invalid args return structured error results the model can
 // recover from ({ok:false, error, retryable}) instead of crashing.
-// The Confirmation gate (ticket 03/24) will live here, so the model has
-// no path around it: requiresConfirmation Tools suspend until the UI
-// returns approve, edit, or reject.
+// Ticket 09/24: the Confirmation gate lives here, so the model has no
+// path around it. execute() refuses gated Tools outright (gate-refusal:
+// use executeGated); executeGated() suspends on the approver until it
+// returns approve, edited-approve, reject, or timeout, and reject/timeout
+// return {status:"cancelled_by_user"} without running the executor.
 
 /** Sensitivity of one Tool call. Reads are LOW; state-changing but
  *  reversible calls (create_schedule) are MEDIUM; irreversible
@@ -34,6 +36,16 @@ fun ToolResult.toMap(): Map<String, Any?> =
         is ToolResult.Success -> mapOf("ok" to true, "data" to data)
         is ToolResult.Failure -> mapOf("ok" to false, "error" to error, "retryable" to retryable)
     }
+
+/** Outcome of one gated run: the structured result the model sees, the
+ *  args that actually ran (edited args when the user edited them), and
+ *  whether the user approved (false on reject/timeout/validation refusals
+ *  where the executor never ran). */
+data class GatedExecution(
+    val result: ToolResult,
+    val effectiveArgs: Map<String, Any?>,
+    val approved: Boolean,
+)
 
 /** One LLM-visible capability. parameters is the JSON-schema "parameters"
  *  object (properties + required); it is the single source of truth for
@@ -107,6 +119,11 @@ class ToolRegistry {
 
     fun names(): Set<String> = tools.keys.toSet()
 
+    /** Read-only gate query for the loop's NeedsApproval event. Asking
+     *  whether a Tool is gated never runs anything, so emitting the
+     *  Confirmation card off this is not a path around the gate. */
+    fun requiresConfirmation(name: String): Boolean = find(name)?.requiresConfirmation == true
+
     /** LLM request payload, same OpenAI function shape as allToolSchemas(). */
     fun toolSchemas(): JSONArray =
         JSONArray(
@@ -125,7 +142,9 @@ class ToolRegistry {
 
     /** Validate args against the Tool schema, then run. Never throws:
      *  unknown Tools, invalid args, and executor failures all come back
-     *  as Failure results the model can react to. */
+     *  as Failure results the model can react to. Gated Tools are refused
+     *  here (gate-refusal): the executor never runs without Confirmation,
+     *  so even a caller that skips executeGated cannot reach it. */
     fun execute(name: String, args: Map<String, Any?>): ToolResult {
         val definition = tools[name]
             ?: return ToolResult.Failure(
@@ -133,12 +152,74 @@ class ToolRegistry {
                 retryable = true,
             )
         validateArgs(definition, args)?.let { return it }
-        return try {
-            definition.execute(args)
-        } catch (e: Exception) {
-            ToolResult.Failure("tool '$name' failed: ${e.message}", retryable = false)
+        if (definition.requiresConfirmation) {
+            return ToolResult.Failure(
+                "tool '$name' requires confirmation: approve, edit, or reject it through executeGated first",
+                retryable = false,
+            )
+        }
+        return runExecutor(definition, args)
+    }
+
+    /** Gated entry point (ticket 09/24): the only path that runs a
+     *  requiresConfirmation Tool on the model's behalf. Invalid args fail
+     *  before the approver is consulted; edited args are revalidated
+     *  before they run. Reject and timeout return Success
+     *  {status:"cancelled_by_user"} (timeout adds a reason) so the model
+     *  recovers and the loop continues or ends cleanly. Approved calls run
+     *  the Tool's approvedExecute entry when it has one (send_email's
+     *  policy path) and fall back to execute() otherwise. */
+    fun executeGated(call: ToolCall, confirm: (ToolCall) -> ApprovalDecision): GatedExecution {
+        val definition = tools[call.name]
+            ?: return GatedExecution(
+                ToolResult.Failure(
+                    "unknown tool: '${call.name}'. Available tools: ${tools.keys.sorted().joinToString(", ")}",
+                    retryable = true,
+                ),
+                call.arguments,
+                approved = false,
+            )
+        validateArgs(definition, call.arguments)?.let { return GatedExecution(it, call.arguments, approved = false) }
+        if (!definition.requiresConfirmation) {
+            return GatedExecution(runExecutor(definition, call.arguments), call.arguments, approved = true)
+        }
+        return when (val decision = confirm(call)) {
+            is ApprovalDecision.Approved ->
+                GatedExecution(runApproved(definition, call.arguments), call.arguments, approved = true)
+            is ApprovalDecision.ApprovedWithEdit -> {
+                validateArgs(definition, decision.args)?.let { return GatedExecution(it, decision.args, approved = true) }
+                GatedExecution(runApproved(definition, decision.args), decision.args, approved = true)
+            }
+            is ApprovalDecision.Rejected ->
+                GatedExecution(
+                    ToolResult.Success(mapOf("status" to "cancelled_by_user")),
+                    call.arguments,
+                    approved = false,
+                )
+            is ApprovalDecision.TimedOut ->
+                GatedExecution(
+                    ToolResult.Success(
+                        mapOf("status" to "cancelled_by_user", "reason" to "confirmation_timed_out"),
+                    ),
+                    call.arguments,
+                    approved = false,
+                )
         }
     }
+
+    private fun runExecutor(definition: ToolDefinition, args: Map<String, Any?>): ToolResult =
+        try {
+            definition.execute(args)
+        } catch (e: Exception) {
+            ToolResult.Failure("tool '${definition.name}' failed: ${e.message}", retryable = false)
+        }
+
+    private fun runApproved(definition: ToolDefinition, args: Map<String, Any?>): ToolResult =
+        try {
+            definition.approvedExecute?.invoke(args) ?: definition.execute(args)
+        } catch (e: Exception) {
+            ToolResult.Failure("tool '${definition.name}' failed: ${e.message}", retryable = false)
+        }
 
     /** Gated entry for requiresConfirmation Tools (ADR-0003). Unapproved
      *  calls refuse without running anything; approved calls run the
