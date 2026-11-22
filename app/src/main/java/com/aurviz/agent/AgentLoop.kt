@@ -5,7 +5,9 @@ import org.json.JSONObject
 // Ticket 02/24: hand-rolled agent loop (ADR-0005). The Agent keeps a
 // messages list, calls the LLM, executes each Tool call through the
 // ToolRegistry, appends role:"tool" results matched by tool_call_id, and
-// repeats until a plain answer. Tool errors arrive as structured
+// repeats until a plain answer. Per-step (90s) and total (5min) timeouts
+// abort to Failed with the partial steps kept (ticket 10/24); an LLM
+// transport failure aborts the same way instead of crashing. Tool errors arrive as structured
 // {ok:false, error, retryable} results so the model can recover instead
 // of crashing. The loop emits AgentEvents into the existing timeline UI
 // path (AgentLoopResult.toTimeline reuses buildTimeline).
@@ -90,17 +92,44 @@ class AgentLoop(
     private val maxSteps: Int = MAX_STEPS,
     private val onEvent: (AgentEvent) -> Unit = {},
     private val confirm: (ToolCall) -> ApprovalDecision = { ApprovalDecision.Approved },
+    // Ticket 10/24: per-step and total timeouts (ADR-0005, gaps §3H).
+    // The blocking calls underneath are already bounded by the OkHttp
+    // connect/read timeouts; the loop turns an overrun or a transport
+    // failure into Failed with the partial steps kept. nowMs is
+    // injectable so the abort paths run deterministically in tests.
+    private val stepTimeoutMs: Long = DEFAULT_STEP_TIMEOUT_MS,
+    private val totalTimeoutMs: Long = DEFAULT_TOTAL_TIMEOUT_MS,
+    private val nowMs: () -> Long = System::currentTimeMillis,
 ) {
     companion object {
         const val MAX_STEPS = 8
+        const val DEFAULT_STEP_TIMEOUT_MS = 90_000L
+        const val DEFAULT_TOTAL_TIMEOUT_MS = 300_000L
     }
 
     fun run(userText: String): AgentLoopResult {
         val messages = mutableListOf(ChatMessage(role = "user", content = userText))
         val steps = mutableListOf<ExecutedStep>()
+        val startMs = nowMs()
+        fun failed(error: String): AgentLoopResult.Failed {
+            onEvent(AgentEvent.Failed(error))
+            return AgentLoopResult.Failed(error, steps.toList(), messages.toList())
+        }
         repeat(maxSteps) { stepIndex ->
+            if (nowMs() - startMs >= totalTimeoutMs) {
+                return failed("total timeout after ${totalTimeoutMs}ms at step $stepIndex")
+            }
             onEvent(AgentEvent.StepStarted(stepIndex))
-            val turn = llm.chat(messages.toList())
+            val stepStartMs = nowMs()
+            val turn =
+                try {
+                    llm.chat(messages.toList())
+                } catch (e: Exception) {
+                    return failed("step $stepIndex failed: ${e.message ?: e.javaClass.simpleName}")
+                }
+            if (nowMs() - stepStartMs >= stepTimeoutMs) {
+                return failed("step $stepIndex timed out after ${stepTimeoutMs}ms")
+            }
             if (turn.toolCalls.isEmpty()) {
                 return AgentLoopResult.Answered(turn.content.orEmpty(), steps.toList(), messages.toList())
             }

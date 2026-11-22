@@ -116,12 +116,21 @@ fun mapHttpError(status: Int, headers: Map<String, String>, body: String): HttpF
     return HttpFailure("error", null, true)
 }
 
+/** Shared HTTP client for the LLM path (ADR-0004, gaps §3H): connect
+ *  15s / read 60s, same pattern as GmailHttp. There is no bare
+ *  OkHttpClient() on this path — OpenAiChatProvider defaults here. */
+fun llmHttpClient(): OkHttpClient =
+    OkHttpClient.Builder()
+        .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+        .build()
+
 /** OpenAI-shape chat/completions client. Covers Gemini compat, Groq, DeepSeek. */
 class OpenAiChatProvider(
     private val baseUrl: String,
     private val apiKey: String,
     private val model: String,
-    private val client: OkHttpClient = OkHttpClient(),
+    private val client: OkHttpClient = llmHttpClient(),
 ) : LlmProvider {
     override fun plan(userText: String): LlmResult {
         val url = baseUrl.trimEnd('/') + "/chat/completions"

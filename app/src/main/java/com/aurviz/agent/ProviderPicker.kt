@@ -36,12 +36,33 @@ data class FallbackResult(
     val tried: List<String>,
 )
 
+// Ticket 10/24: exponential backoff between providers (ADR-0004, gaps
+// §3H). The wait is never shorter than the retry-after the failed
+// provider asked for; otherwise it doubles per consecutive rate limit
+// (1s, 2s, 4s…) capped at 30s. attempt counts prior fallback retries.
+const val PROVIDER_BACKOFF_BASE_MS = 1_000L
+const val PROVIDER_BACKOFF_MAX_MS = 30_000L
+
+fun backoffDelayMs(retryAfterSec: Int?, attempt: Int): Long {
+    val exponential = PROVIDER_BACKOFF_BASE_MS * (1L shl attempt.coerceIn(0, 10))
+    val retryAfterMs = (retryAfterSec ?: 0).coerceAtLeast(0) * 1_000L
+    return maxOf(exponential, retryAfterMs).coerceAtMost(PROVIDER_BACKOFF_MAX_MS)
+}
+
 // Try each provider in order. Skips blank keys, moves on when the
 // failure says fallback=true (429/error), stops when it says false (bad key).
-fun planWithFallback(command: String, candidates: List<NamedProvider>): FallbackResult {
+// Between tries the loop sleeps the backoff above (injectable for tests);
+// no sleep happens on a 401 stop or when nothing is left to try, and the
+// replay is never silent — see retryDisclosure.
+fun planWithFallback(
+    command: String,
+    candidates: List<NamedProvider>,
+    sleeper: (Long) -> Unit = { Thread.sleep(it) },
+): FallbackResult {
     val tried = mutableListOf<String>()
     var lastError: Exception? = null
-    for (candidate in candidates) {
+    var retries = 0
+    for ((index, candidate) in candidates.withIndex()) {
         if (candidate.apiKey.isBlank()) continue
         try {
             val result = candidate.provider.plan(command)
@@ -51,6 +72,8 @@ fun planWithFallback(command: String, candidates: List<NamedProvider>): Fallback
             if (!e.failure.fallback) throw e
             tried += candidate.name
             lastError = e
+            val hasNext = candidates.drop(index + 1).any { it.apiKey.isNotBlank() }
+            if (hasNext) sleeper(backoffDelayMs(e.failure.retryAfter, retries++))
         }
     }
     if (tried.isEmpty()) throw IllegalStateException("No provider with API key")
