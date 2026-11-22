@@ -134,7 +134,22 @@ class ToolRegistryTest {
         val names = (0 until schemas.length())
             .map { schemas.getJSONObject(it).getJSONObject("function").getString("name") }
             .toSet()
-        assertEquals(setOf("search_emails", "read_email", "getImportantEmails", "createSchedule", "save_memory", "search_memory"), names)
+        assertEquals(
+            setOf(
+                "search_emails",
+                "read_email",
+                "getImportantEmails",
+                "createSchedule",
+                "save_memory",
+                "search_memory",
+                "open_url",
+                "get_page_text",
+                "click",
+                "scroll",
+                "extract",
+            ),
+            names,
+        )
     }
 
     @Test

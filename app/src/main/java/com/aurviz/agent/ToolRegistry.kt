@@ -224,7 +224,12 @@ fun readEmailTool(gmailApi: GmailApi?): ToolDefinition =
  *  real seams. Gmail/Room plug in through GmailApi/ScheduleStore/
  *  MemoryStore; tests pass fakes. A null dependency means "not connected
  *  on this device", also a Failure. */
-fun defaultToolRegistry(gmailApi: GmailApi? = null, scheduleStore: ScheduleStore? = null, memoryStore: MemoryStore? = null): ToolRegistry {
+fun defaultToolRegistry(
+    gmailApi: GmailApi? = null,
+    scheduleStore: ScheduleStore? = null,
+    memoryStore: MemoryStore? = null,
+    webBridge: WebBridge? = null,
+): ToolRegistry {
     val registry = ToolRegistry()
 
     registry.register(searchEmailsTool(gmailApi))
@@ -349,5 +354,169 @@ fun defaultToolRegistry(gmailApi: GmailApi? = null, scheduleStore: ScheduleStore
         ),
     )
 
+    registerWebTools(registry, webBridge)
+
     return registry
 }
+
+/** Ticket 07/24: five foreground web Tools over the WebView bridge. Reads
+ *  and in-page interactions are LOW risk and need no Confirmation; the user
+ *  watches the foreground tab. A null bridge means the Browser tab has not
+ *  attached yet — a retryable Failure, never a hang. */
+fun registerWebTools(registry: ToolRegistry, webBridge: WebBridge?) {
+    fun webFailure(tool: String, e: WebException): ToolResult.Failure {
+        val where = if (e.failure.url.isNotBlank()) ": ${e.failure.url}" else ""
+        // "blocked" never clears on retry (same URL, same verdict), so say
+        // what is allowed; every bridge failure (timeout, load-failed,
+        // no-match, no-page) can clear and stays retryable.
+        if (e.failure.reason == "blocked") {
+            return ToolResult.Failure("$tool blocked: only http(s) URLs are allowed$where", retryable = false)
+        }
+        return ToolResult.Failure("$tool failed (${e.failure.reason})$where", retryable = true)
+    }
+
+    fun noBridge(): ToolResult.Failure =
+        ToolResult.Failure(
+            "browser is not ready yet — open the Browser tab and try again",
+            retryable = true,
+        )
+
+    registry.register(
+        ToolDefinition(
+            name = "open_url",
+            description = "Open a page in the foreground browser tab. Returns its title, readable text, and links.",
+            parameters = webParams("url", "The http(s) page URL to open, e.g. https://example.com"),
+            riskLevel = RiskLevel.LOW,
+            requiresConfirmation = false,
+            resultType = "page",
+            execute = { args ->
+                val bridge = webBridge ?: return@ToolDefinition noBridge()
+                val url = args["url"] as String
+                try {
+                    val page = openPage(bridge, url)
+                    ToolResult.Success(
+                        mapOf(
+                            "url" to page.url,
+                            "title" to page.title,
+                            "text" to page.text,
+                            "links" to page.links,
+                        ),
+                    )
+                } catch (e: WebException) {
+                    webFailure("open_url", e)
+                }
+            },
+        ),
+    )
+
+    registry.register(
+        ToolDefinition(
+            name = "get_page_text",
+            description = "Return the readable text of an http(s) page, without links.",
+            parameters = webParams("url", "The http(s) page URL to read, e.g. https://example.com"),
+            riskLevel = RiskLevel.LOW,
+            requiresConfirmation = false,
+            resultType = "page_text",
+            execute = { args ->
+                val bridge = webBridge ?: return@ToolDefinition noBridge()
+                val url = args["url"] as String
+                try {
+                    val page = openPage(bridge, url)
+                    ToolResult.Success(
+                        mapOf("url" to page.url, "title" to page.title, "text" to page.text),
+                    )
+                } catch (e: WebException) {
+                    webFailure("get_page_text", e)
+                }
+            },
+        ),
+    )
+
+    registry.register(
+        ToolDefinition(
+            name = "click",
+            description = "Click a CSS selector in the current foreground page. Returns the page after the click.",
+            parameters = webParams("selector", "CSS selector to click, e.g. a.buy"),
+            riskLevel = RiskLevel.LOW,
+            requiresConfirmation = false,
+            resultType = "page",
+            execute = { args ->
+                val bridge = webBridge ?: return@ToolDefinition noBridge()
+                val selector = args["selector"] as String
+                try {
+                    val page = parsePage("", bridge.click(selector))
+                    ToolResult.Success(
+                        mapOf("title" to page.title, "text" to page.text, "links" to page.links),
+                    )
+                } catch (e: WebException) {
+                    webFailure("click", e)
+                }
+            },
+        ),
+    )
+
+    registry.register(
+        ToolDefinition(
+            name = "scroll",
+            description = "Scroll the current foreground page vertically. Returns the page after scrolling.",
+            parameters =
+                JSONObject()
+                    .put("type", "object")
+                    .put(
+                        "properties",
+                        JSONObject().put(
+                            "px",
+                            JSONObject().put("type", "integer")
+                                .put("description", "Pixels to scroll; negative scrolls up."),
+                        ),
+                    )
+                    .put("required", JSONArray().put("px")),
+            riskLevel = RiskLevel.LOW,
+            requiresConfirmation = false,
+            resultType = "page",
+            execute = { args ->
+                val bridge = webBridge ?: return@ToolDefinition noBridge()
+                val px = (args["px"] as Number).toInt()
+                try {
+                    val page = parsePage("", bridge.scrollBy(px))
+                    ToolResult.Success(
+                        mapOf("title" to page.title, "text" to page.text, "links" to page.links),
+                    )
+                } catch (e: WebException) {
+                    webFailure("scroll", e)
+                }
+            },
+        ),
+    )
+
+    registry.register(
+        ToolDefinition(
+            name = "extract",
+            description = "Return the chunks of the current foreground page most relevant to the query.",
+            parameters = webParams("query", "What to look for on the current page, e.g. bread price"),
+            riskLevel = RiskLevel.LOW,
+            requiresConfirmation = false,
+            resultType = "extract",
+            execute = { args ->
+                val bridge = webBridge ?: return@ToolDefinition noBridge()
+                val query = args["query"] as String
+                try {
+                    val text = bridge.pageText()
+                    val chunks = relevantChunks(WebPage(url = "", title = "", text = text, links = emptyList()), query)
+                    ToolResult.Success(mapOf("query" to query, "chunks" to chunks))
+                } catch (e: WebException) {
+                    webFailure("extract", e)
+                }
+            },
+        ),
+    )
+}
+
+private fun webParams(name: String, description: String): JSONObject =
+    JSONObject()
+        .put("type", "object")
+        .put(
+            "properties",
+            JSONObject().put(name, JSONObject().put("type", "string").put("description", description)),
+        )
+        .put("required", JSONArray().put(name))
