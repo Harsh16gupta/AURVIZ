@@ -8,17 +8,24 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.room.Room
 import com.aurviz.agent.AppDb
+import com.aurviz.agent.AgentEvent
+import com.aurviz.agent.AgentLoop
+import com.aurviz.agent.AgentLoopResult
 import com.aurviz.agent.BuildConfig
+import com.aurviz.agent.ChatLlmProvider
+import com.aurviz.agent.ChatMessage
 import com.aurviz.agent.EmailDraft
+import com.aurviz.agent.FallbackResult
 import com.aurviz.agent.GMAIL_SCOPES
 import com.aurviz.agent.GmailException
 import com.aurviz.agent.GmailHttpApi
 import com.aurviz.agent.LoopbackReceiver
-import com.aurviz.agent.LlmProvider
+import com.aurviz.agent.LlmResult
 import com.aurviz.agent.MIGRATION_1_2
 import com.aurviz.agent.Memory
+import com.aurviz.agent.NamedProvider
 import com.aurviz.agent.Plan
-import com.aurviz.agent.PlannerOutcome
+import com.aurviz.agent.TimelineStep
 import com.aurviz.agent.RoomMemoryStore
 import com.aurviz.agent.RoomScheduleStore
 import com.aurviz.agent.TokenStore
@@ -35,6 +42,7 @@ import com.aurviz.agent.codeChallenge
 import com.aurviz.agent.composeEmail
 import com.aurviz.agent.createSchedule
 import com.aurviz.agent.defaultCandidates
+import com.aurviz.agent.defaultToolRegistry
 import com.aurviz.agent.deleteSchedule
 import com.aurviz.agent.formatSchedulePreview
 import com.aurviz.agent.forgetPreview
@@ -42,15 +50,15 @@ import com.aurviz.agent.listSchedules
 import com.aurviz.agent.newCodeVerifier
 import com.aurviz.agent.openPage
 import com.aurviz.agent.parseSchedule
-import com.aurviz.agent.planCommand
 import com.aurviz.agent.planWithFallback
 import com.aurviz.agent.refreshBatteryNeeded
 import com.aurviz.agent.scheduleTimingNote
 import com.aurviz.agent.readImportant
-import com.aurviz.agent.recallFor
 import com.aurviz.agent.registerRoutineAlarm
 import com.aurviz.agent.rememberFact
+import com.aurviz.agent.retryDisclosure
 import com.aurviz.agent.sendWithConfirm
+import com.aurviz.agent.toTimeline
 import com.aurviz.agent.ui.components.VoiceState as OrbState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -62,6 +70,72 @@ import kotlinx.coroutines.launch
 // Thin orchestrator over the tested domain logic (Planner, Email, Web,
 // WebViewBridge, MemoryStore, VoiceInput, LoopbackAuth). All decisions stay
 // in those files; this class only moves results into AgentUiState.
+
+// Ticket 11/24: pure loop-wiring helpers (no Android) for the AgentLoop
+// path below. JVM-tested in ViewModelLoopWiringTest; the ViewModel only
+// folds AgentEvents through them and copies the outputs into state.
+
+// Live timeline for one Task Execution (GLOSSARY): the Tool calls the
+// loop has made so far, how many finished, and the terminal error.
+fun loopTimeline(calls: List<ToolCall>, doneCount: Int, error: String?): List<TimelineStep> =
+    buildTimeline(Plan(calls), doneCount, error)
+
+// Accumulator the ViewModel keeps per run: each AgentEvent folds into it
+// so the existing timeline rows render StepStarted/ToolRunning/
+// NeedsApproval/StepDone/Failed live (ADR-0005).
+data class LoopUiProgress(
+    val calls: List<ToolCall> = emptyList(),
+    val doneCount: Int = 0,
+    val error: String? = null,
+    val pendingApproval: ToolCall? = null,
+) {
+    fun timeline(): List<TimelineStep> = loopTimeline(calls, doneCount, error)
+}
+
+fun LoopUiProgress.withEvent(event: AgentEvent): LoopUiProgress =
+    when (event) {
+        is AgentEvent.StepStarted -> this
+        is AgentEvent.ToolRunning -> copy(calls = calls + event.call)
+        is AgentEvent.NeedsApproval -> copy(pendingApproval = event.call)
+        is AgentEvent.StepDone -> copy(doneCount = (doneCount + 1).coerceAtMost(calls.size))
+        is AgentEvent.Failed -> copy(error = event.error)
+    }
+
+// Deterministic messages→prompt rendering for the single-shot fallback
+// seam below: assistant turns keep their Tool names, tool turns keep
+// their JSON results tagged with the matching tool_call_id (ADR-0005).
+fun renderLoopPrompt(messages: List<ChatMessage>): String =
+    messages.joinToString("\n") { message ->
+        when (message.role) {
+            "assistant" ->
+                ("[assistant] " + message.content.orEmpty() +
+                    message.toolCalls.joinToString(" ", prefix = " ") { it.name }).trim()
+            "tool" -> "[tool ${message.toolCallId}] ${message.content.orEmpty()}"
+            else -> message.content.orEmpty()
+        }
+    }
+
+// ChatLlmProvider over the single-shot planWithFallback seam: every loop
+// turn replays the rendered messages through the candidates in order and
+// unions every provider that saw the prompt, so the ViewModel copies
+// providersTried verbatim and the retry is never silent (ADR-0004).
+// The candidate list is built once per run: rebuilding it per turn would
+// also rebuild each provider's HTTP client.
+class FallbackChatLlm(
+    private val candidates: List<NamedProvider>,
+) : ChatLlmProvider {
+    val tried: MutableList<String> = mutableListOf()
+    var lastProvider: String? = null
+        private set
+
+    override fun chat(messages: List<ChatMessage>): LlmResult {
+        val fb = planWithFallback(renderLoopPrompt(messages), candidates)
+        for (name in fb.tried) if (name !in tried) tried += name
+        lastProvider = fb.providerName
+        return fb.result
+    }
+}
+
 class AgentViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _state = MutableStateFlow(AgentUiState())
@@ -129,7 +203,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
             lower.startsWith("schedule ") -> handleScheduleCreate(command.substring(9).trim())
             lower == "schedules" -> refreshSchedules(showLine = true)
             lower.startsWith("unschedule ") -> handleUnschedule(command.substring(11).trim())
-            else -> runRealPlan(command)
+            else -> runLoopCommand(command)
         }
     }
 
@@ -594,70 +668,80 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(batteryOptimizationNeeded = needsAsk) }
     }
 
-    // --- Real Plan (LLM with fallback; recall timed separately) ---
-
-    private fun runRealPlan(cmd: String) {
+    // --- Loop (AgentLoop for reads; ADR-0005 §3A) ---
+    // Replaces runRealPlan's single plan() call plus createSchedule-only
+    // execution: every command the keyword routes above don't catch runs
+    // the loop, whose AgentEvents fold into the timeline live. The
+    // schedule preview flows (handleScheduleCreate/approve/reject) stay.
+    private fun runLoopCommand(cmd: String) {
         _state.update {
             it.copy(
                 statusLine = "Command: $cmd\nAgent: thinking…",
                 timeline = emptyList(),
+                providerUsed = null,
+                providersTried = emptyList(),
             )
         }
         viewModelScope.launch(Dispatchers.IO) {
-            val recallT0 = System.currentTimeMillis()
-            val known = recallFor(roomStore, cmd).take(3)
-            val recallMs = System.currentTimeMillis() - recallT0
-            _state.update { it.copy(perf = it.perf.copy(recallMs = recallMs)) }
-            val knownLine = if (known.isEmpty()) "" else "\nKnown: " + known.joinToString("; ") { it.text }
-            _state.update { it.copy(statusLine = "Command: $cmd$knownLine\nAgent: thinking…") }
-            val effective =
-                if (known.isEmpty()) cmd else "Known: " + known.joinToString("; ") { it.text } + ". $cmd"
-            var used = ""
-            val provider = object : LlmProvider {
-                override fun plan(userText: String): com.aurviz.agent.LlmResult {
-                    val fb = planWithFallback(userText, defaultCandidates(BuildConfig.LLM_DEFAULT_PROVIDER))
-                    used = fb.providerName
-                    return fb.result
-                }
-            }
+            val runT0 = System.currentTimeMillis()
+            val chat = FallbackChatLlm(defaultCandidates(BuildConfig.LLM_DEFAULT_PROVIDER))
+            val registry = defaultToolRegistry(gmailApi = gmail, scheduleStore = scheduleStore, memoryStore = roomStore)
+            var progress = LoopUiProgress()
+            val loop =
+                AgentLoop(
+                    chat,
+                    registry,
+                    onEvent = { event ->
+                        progress = progress.withEvent(event)
+                        val snapshot = progress.timeline()
+                        val phase =
+                            when (event) {
+                                is AgentEvent.StepStarted -> "thinking…"
+                                is AgentEvent.ToolRunning -> "running ${event.call.name}…"
+                                is AgentEvent.NeedsApproval -> "needs approval: ${event.call.name}"
+                                is AgentEvent.StepDone -> "ran ${event.call.name}"
+                                is AgentEvent.Failed -> "failed: ${event.error}"
+                            }
+                        _state.update { it.copy(statusLine = "Command: $cmd\nAgent: $phase", timeline = snapshot) }
+                    },
+                )
             try {
-                val planT0 = System.currentTimeMillis()
-                val outcome = planCommand(effective, provider)
-                val planMs = System.currentTimeMillis() - planT0
-                when (outcome) {
-                    is PlannerOutcome.NeedsClarification -> {
+                when (val result = loop.run(cmd)) {
+                    is AgentLoopResult.Answered -> {
+                        val tried = chat.tried.toList()
+                        val used = chat.lastProvider
+                        val disclosure =
+                            AgentUiState(providerUsed = used, providersTried = tried).retryLine()
                         _state.update {
                             it.copy(
-                                statusLine = "Command: $cmd$knownLine\nAgent: ${outcome.question}",
-                                timeline = buildTimeline(Plan(emptyList()), doneCount = 0, error = null),
-                                perf = it.perf.copy(planMs = planMs),
+                                statusLine = "Command: $cmd\n${result.answer}" +
+                                    (disclosure?.let { d -> "\n$d" } ?: ""),
+                                timeline = result.toTimeline(),
+                                providerUsed = used,
+                                providersTried = tried,
+                                perf = it.perf.copy(planMs = System.currentTimeMillis() - runT0),
                             )
                         }
                     }
-                    is PlannerOutcome.Ready -> {
-                        val first = outcome.plan.steps.firstOrNull()
-                        if (first?.name == "createSchedule") {
-                            val when_ = first.arguments["when"] as? String ?: ""
-                            val task = first.arguments["task"] as? String ?: ""
-                            handleScheduleCreate("$when_ $task".trim())
-                            _state.update { it.copy(perf = it.perf.copy(planMs = planMs)) }
-                        } else {
-                            _state.update {
-                                it.copy(
-                                    statusLine = "Command: $cmd$knownLine\nRan on: $used",
-                                    timeline = buildTimeline(outcome.plan, doneCount = 0, error = null),
-                                    providerUsed = used,
-                                    perf = it.perf.copy(planMs = planMs),
-                                )
-                            }
+                    is AgentLoopResult.Failed -> {
+                        _state.update {
+                            it.copy(
+                                statusLine = "Command: $cmd\nFailed: ${result.error}",
+                                timeline = result.toTimeline(),
+                                providerUsed = chat.lastProvider,
+                                providersTried = chat.tried.toList(),
+                                perf = it.perf.copy(planMs = System.currentTimeMillis() - runT0),
+                            )
                         }
                     }
                 }
             } catch (e: Exception) {
                 _state.update {
                     it.copy(
-                        statusLine = "Command: $cmd$knownLine\nFailed: ${e.message}",
-                        timeline = emptyList(),
+                        statusLine = "Command: $cmd\nFailed: ${e.message}",
+                        timeline = progress.timeline(),
+                        providerUsed = chat.lastProvider,
+                        providersTried = chat.tried.toList(),
                     )
                 }
             }
