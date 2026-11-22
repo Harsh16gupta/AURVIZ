@@ -98,8 +98,7 @@ class ScheduleWorker(context: Context, params: WorkerParameters) : Worker(contex
 // doubles (ADR-0002). fireTime is the alarm's trigger instant, so a
 // double-delivered alarm claims the same schedule_runs key and the
 // second delivery skips instead of double-running.
-fun enqueueRoutineWork(context: Context, scheduleId: String, fireTimeMs: Long = System.currentTimeMillis()) {
-    val request =
+fun enqueueRoutineWork(context: Context, scheduleId: String, fireTimeMs: Long = System.currentTimeMillis()) {    val request =
         OneTimeWorkRequestBuilder<ScheduleWorker>()
             .setInputData(
                 Data.Builder()
@@ -115,6 +114,39 @@ fun enqueueRoutineWork(context: Context, scheduleId: String, fireTimeMs: Long = 
 
 fun cancelRoutineWork(context: Context, scheduleId: String) {
     WorkManager.getInstance(context).cancelUniqueWork(uniqueWorkName(scheduleId))
+}
+
+// Ticket #27 (hardening, ADR-0002): the re-arm Worker. Receivers never
+// touch the database on their own path; they enqueue this one-time
+// unique Worker (REPLACE), which loads every active routine and sets its
+// alarm again with days intact. Never periodic: each enqueue runs once
+// (tomorrow's re-arm is queued by the next fire, boot, or clock change).
+const val RESCHEDULE_WORK_NAME = "reschedule_all"
+
+class RescheduleWorker(context: Context, params: WorkerParameters) : Worker(context, params) {
+    override fun doWork(): Result {
+        val db =
+            Room.databaseBuilder(applicationContext, AppDb::class.java, "aurviz.db")
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .build()
+        try {
+            rescheduleAll(RoomScheduleStore(db.schedules())) { registerRoutineAlarm(applicationContext, it) }
+            return Result.success()
+        } catch (_: Exception) {
+            return Result.failure()
+        } finally {
+            try {
+                db.close()
+            } catch (_: Exception) {
+            }
+        }
+    }
+}
+
+fun enqueueRescheduleWork(context: Context) {
+    val request = OneTimeWorkRequestBuilder<RescheduleWorker>().build()
+    WorkManager.getInstance(context)
+        .enqueueUniqueWork(RESCHEDULE_WORK_NAME, ExistingWorkPolicy.REPLACE, request)
 }
 
 fun postScheduleNotification(context: Context, scheduleId: String, note: ScheduleNotification) {
