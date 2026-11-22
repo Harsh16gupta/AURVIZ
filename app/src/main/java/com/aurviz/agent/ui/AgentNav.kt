@@ -73,6 +73,7 @@ fun AgentNav(
     vm: AgentViewModel,
     onMicTap: () -> Unit,
     onOpenExactAlarmSettings: () -> Unit,
+    onOpenBatterySettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val navController = rememberNavController()
@@ -138,6 +139,8 @@ fun AgentNav(
                             onDismissPasteFallback = vm::dismissPasteFallback,
                             onOpenExactAlarmSettings = onOpenExactAlarmSettings,
                             onRefreshExactAlarm = vm::refreshExactAlarmFlag,
+                            onOpenBatterySettings = onOpenBatterySettings,
+                            onRefreshBattery = vm::refreshBatteryFlag,
                             onVoiceSettings = { showVoice = true },
                             onBack = { navController.navigate(Dests.COMMAND) },
                         )

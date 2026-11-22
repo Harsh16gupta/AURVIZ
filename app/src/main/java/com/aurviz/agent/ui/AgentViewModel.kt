@@ -44,6 +44,8 @@ import com.aurviz.agent.openPage
 import com.aurviz.agent.parseSchedule
 import com.aurviz.agent.planCommand
 import com.aurviz.agent.planWithFallback
+import com.aurviz.agent.refreshBatteryNeeded
+import com.aurviz.agent.scheduleTimingNote
 import com.aurviz.agent.readImportant
 import com.aurviz.agent.recallFor
 import com.aurviz.agent.registerRoutineAlarm
@@ -94,6 +96,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         refreshMemories()
         refreshSchedules()
         refreshExactAlarmFlag()
+        refreshBatteryFlag()
     }
 
     fun attachWebBridge(bridge: WebBridge) {
@@ -521,9 +524,9 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
             _state.update {
                 it.copy(
                     statusLine = if (exact) {
-                        "Schedule saved (${saved.id}). Exact alarm set."
+                        "Schedule saved (${saved.id}). ${scheduleTimingNote(true)}"
                     } else {
-                        "Schedule saved (${saved.id}), but exact alarms are off — allow them in Settings."
+                        "Schedule saved (${saved.id}). ${scheduleTimingNote(false)}"
                     },
                 )
             }
@@ -579,6 +582,16 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         val alarms = app.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         val needsAsk = Build.VERSION.SDK_INT >= 31 && !alarms.canScheduleExactAlarms()
         _state.update { it.copy(exactAlarmNeeded = needsAsk) }
+    }
+
+    fun refreshBatteryFlag() {
+        val app = getApplication<Application>()
+        val needsAsk = try {
+            refreshBatteryNeeded(app)
+        } catch (_: Exception) {
+            false
+        }
+        _state.update { it.copy(batteryOptimizationNeeded = needsAsk) }
     }
 
     // --- Real Plan (LLM with fallback; recall timed separately) ---

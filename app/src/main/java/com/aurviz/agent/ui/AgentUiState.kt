@@ -48,5 +48,6 @@ data class AgentUiState(
     val pasteFallbackVisible: Boolean = false,
     val loopbackHint: String = "",
     val exactAlarmNeeded: Boolean = false,
+    val batteryOptimizationNeeded: Boolean = false,
     val sending: Boolean = false,
 )

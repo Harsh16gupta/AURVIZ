@@ -67,6 +67,7 @@ class MainActivity : ComponentActivity() {
                     vm = vm,
                     onMicTap = ::onMicTapped,
                     onOpenExactAlarmSettings = ::openExactAlarmSettings,
+                    onOpenBatterySettings = ::openBatteryExemption,
                 )
             }
         }
@@ -74,8 +75,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Back from Settings: re-check the exact-alarm toggle without a restart.
-        if (::vm.isInitialized) vm.refreshExactAlarmFlag()
+        // Back from Settings: re-check the exact-alarm toggle and the battery
+        // exemption without a restart.
+        if (::vm.isInitialized) {
+            vm.refreshExactAlarmFlag()
+            vm.refreshBatteryFlag()
+        }
     }
 
     override fun onDestroy() {
@@ -86,6 +91,10 @@ class MainActivity : ComponentActivity() {
 
     private fun openExactAlarmSettings() {
         startActivity(Intent(android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM))
+    }
+
+    private fun openBatteryExemption() {
+        com.aurviz.agent.openBatteryExemption(this)
     }
 
     // What we ask the mic for: En+Hi hints, free-form speech, live partial
