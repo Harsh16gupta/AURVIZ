@@ -8,11 +8,11 @@ import org.junit.Test
 // Ticket 04/24 (ticket 17): send_email Tool. Sends are HIGH risk and gated
 // per call (ADR-0003): the gate lives in the registry, so the model has no
 // path around it — plain execute() always refuses without touching the
-// transport, and only executeWithApproval(approved=true) sends. Approval
-// travels out-of-band (never an LLM arg, or the model could forge it). A
-// no-op SendPolicy seam runs after the gate for the deterministic
-// pre-send check (ticket 12/25). Seams: ToolRegistry.execute /
-// executeWithApproval round-trips on fakes, domain executeSendEmail over
+// transport, and only the single gated path (executeGated) sends on the
+// UI's out-of-band decision (never an LLM arg, or the model could forge
+// it). The DefaultSendPolicy seam runs after the gate for the
+// deterministic pre-send check (ticket 12/25). Seams: ToolRegistry.execute /
+// executeGated round-trips on fakes, domain executeSendEmail over
 // GmailApi, pure MIME build on literal expected bytes. The fake transport
 // records sends; no test ever touches real mail.
 class EmailSendTest {
@@ -75,10 +75,18 @@ class EmailSendTest {
     }
 
     @Test
-    fun gatedExecuteRefusedLeavesTransportUntouched() {
+    fun gatedRejectLeavesTransportUntouched() {
         val fake = FakeSendGmail()
-        val result = registry(fake).executeWithApproval("send_email", sendArgs(), approved = false)
-        assertTrue(result is ToolResult.Failure)
+        val gated =
+            registry(fake).executeGated(ToolCall("c1", "send_email", sendArgs())) {
+                ApprovalDecision.Rejected
+            }
+        assertTrue(gated.result is ToolResult.Success)
+        assertEquals(
+            "cancelled_by_user",
+            ((gated.result as ToolResult.Success).data as Map<*, *>)["status"],
+        )
+        assertFalse(gated.approved)
         assertTrue(fake.sent.isEmpty())
     }
 
@@ -87,8 +95,12 @@ class EmailSendTest {
     @Test
     fun approvedSendBuildsExactMimeAndSendsOnce() {
         val fake = FakeSendGmail()
-        val result = registry(fake).executeWithApproval("send_email", sendArgs(), approved = true)
-        assertTrue(result is ToolResult.Success)
+        val gated =
+            registry(fake).executeGated(ToolCall("c1", "send_email", sendArgs())) {
+                ApprovalDecision.Approved
+            }
+        assertTrue(gated.result is ToolResult.Success)
+        assertTrue(gated.approved)
         assertEquals(1, fake.sent.size)
         val decoded = String(java.util.Base64.getUrlDecoder().decode(fake.sent[0]), Charsets.UTF_8)
         assertEquals(
@@ -104,9 +116,12 @@ class EmailSendTest {
     @Test
     fun approvedSendWithoutGmailFailsClosed() {
         val offline = defaultToolRegistry(gmailApi = null, scheduleStore = InMemoryScheduleStore())
-        val result = offline.executeWithApproval("send_email", sendArgs(), approved = true)
-        assertTrue(result is ToolResult.Failure)
-        assertTrue((result as ToolResult.Failure).error.contains("not connected"))
+        val gated =
+            offline.executeGated(ToolCall("c1", "send_email", sendArgs())) {
+                ApprovalDecision.Approved
+            }
+        assertTrue(gated.result is ToolResult.Failure)
+        assertTrue((gated.result as ToolResult.Failure).error.contains("not connected"))
     }
 
     @Test
@@ -133,21 +148,27 @@ class EmailSendTest {
     fun denyingPolicyBlocksApprovedSendWithoutTransportTouch() {
         val fake = FakeSendGmail()
         val gated = registry(fake, policy = DenyAllPolicy())
-        val result = gated.executeWithApproval("send_email", sendArgs(), approved = true)
-        assertTrue(result is ToolResult.Failure)
-        assertTrue((result as ToolResult.Failure).error.contains("evil-forward hold"))
+        val result =
+            gated.executeGated(ToolCall("c1", "send_email", sendArgs())) {
+                ApprovalDecision.Approved
+            }
+        assertTrue(result.result is ToolResult.Failure)
+        assertTrue((result.result as ToolResult.Failure).error.contains("evil-forward hold"))
         assertTrue(fake.sent.isEmpty())
     }
 
     @Test
     fun defaultPolicyAllowsSoGateAloneDecides() {
-        assertTrue(AllowAllSendPolicy.check(EmailDraft(listOf("a@x.com"), "Hi", "hello")) is SendPolicyVerdict.Allow)
+        assertTrue(DefaultSendPolicy().check(EmailDraft(listOf("a@x.com"), "Hi", "hello")) is SendPolicyVerdict.Allow)
     }
 
     @Test
     fun unknownToolOnGatedPathReturnsErrorResult() {
-        val result = registry(FakeSendGmail()).executeWithApproval("deleteEverything", emptyMap(), approved = true)
-        assertTrue(result is ToolResult.Failure)
-        assertTrue((result as ToolResult.Failure).error.contains("unknown tool"))
+        val gated =
+            registry(FakeSendGmail()).executeGated(ToolCall("c1", "deleteEverything", emptyMap())) {
+                ApprovalDecision.Approved
+            }
+        assertTrue(gated.result is ToolResult.Failure)
+        assertTrue((gated.result as ToolResult.Failure).error.contains("unknown tool"))
     }
 }

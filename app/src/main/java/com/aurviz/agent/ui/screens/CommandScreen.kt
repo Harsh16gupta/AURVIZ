@@ -2,6 +2,7 @@ package com.aurviz.agent.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
@@ -13,6 +14,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import com.aurviz.agent.StepState
 import com.aurviz.agent.TimelineStep
+import com.aurviz.agent.ToolCall
 import com.aurviz.agent.ui.AgentUiState
 import com.aurviz.agent.ui.retryLine
 import com.aurviz.agent.ui.components.Button
@@ -20,6 +22,7 @@ import com.aurviz.agent.ui.components.ButtonVariant
 import com.aurviz.agent.ui.components.Composer
 import com.aurviz.agent.ui.components.Markdown
 import com.aurviz.agent.ui.components.ScreenScaffold
+import com.aurviz.agent.ui.components.Section
 import com.aurviz.agent.ui.theme.Space
 import com.aurviz.agent.ui.components.Text
 import com.aurviz.agent.ui.components.ThinkingIndicator
@@ -37,6 +40,8 @@ fun CommandScreen(
     onMicTap: () -> Unit,
     onVoiceClick: () -> Unit,
     onOpenBrowser: () -> Unit,
+    onApprovePending: () -> Unit = {},
+    onRejectPending: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     ScreenScaffold(modifier) {
@@ -71,6 +76,20 @@ fun CommandScreen(
                 }
                 items(state.timeline, key = { it.title }) { step ->
                     TimelineRow(step)
+                }
+                // Ticket 12/25: the Confirmation gate's card. Shows the
+                // exact send the model asked for plus the unseen-recipient
+                // highlight; Approve runs it once through the gated path,
+                // Reject discards it with no send.
+                state.pendingApproval?.let { call ->
+                    item {
+                        ApprovalCardRow(
+                            call = call,
+                            unseen = state.pendingApprovalUnseen,
+                            onApprove = onApprovePending,
+                            onReject = onRejectPending,
+                        )
+                    }
                 }
                 if (state.timeline.any { it.state == StepState.FAILED }) {
                     item {
@@ -134,5 +153,43 @@ private fun TimelineRow(step: TimelineStep) {
         Text("$mark ${step.title}$suffix", color = color)
     } else {
         Markdown("$mark ${step.title}$suffix")
+    }
+}
+
+// Ticket 12/25: the gate's card for one suspended Tool call. Send cards
+// show the exact To/Subject/Body from the call plus the unseen-recipient
+// highlight; other gated calls get the same Approve/Reject shape with
+// their exact args. Rendering is exact strings — never a paraphrase.
+@Composable
+private fun ApprovalCardRow(
+    call: ToolCall,
+    unseen: List<String>,
+    onApprove: () -> Unit,
+    onReject: () -> Unit,
+) {
+    val unseenSet = unseen.map { it.trim().lowercase() }.toSet()
+    Section("Confirmation — ${call.name}") {
+        if (call.name == "send_email") {
+            val to = (call.arguments["to"] as? String).orEmpty()
+            val toUnseen = to.split(",").map { it.trim() }.filter { it.isNotEmpty() }.any { it.lowercase() in unseenSet }
+            Text("To: $to")
+            Text("Subject: ${(call.arguments["subject"] as? String).orEmpty()}")
+            Text("Body: ${(call.arguments["body"] as? String).orEmpty()}")
+            if (toUnseen) {
+                Text("New recipient — never emailed before.", color = Theme.colors.destructive)
+            }
+        } else {
+            call.arguments.entries.forEach { (key, value) ->
+                Text("$key: $value")
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(Space * 2)) {
+            Button(onClick = onApprove, modifier = Modifier.weight(1f)) {
+                Text("Approve & Send")
+            }
+            Button(onClick = onReject, variant = ButtonVariant.Secondary, modifier = Modifier.weight(1f)) {
+                Text("Reject")
+            }
+        }
     }
 }

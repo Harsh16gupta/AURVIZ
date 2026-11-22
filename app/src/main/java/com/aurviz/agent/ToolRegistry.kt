@@ -9,10 +9,11 @@ import org.json.JSONObject
 // Tools and invalid args return structured error results the model can
 // recover from ({ok:false, error, retryable}) instead of crashing.
 // Ticket 09/24: the Confirmation gate lives here, so the model has no
-// path around it. execute() refuses gated Tools outright (gate-refusal:
-// use executeGated); executeGated() suspends on the approver until it
-// returns approve, edited-approve, reject, or timeout, and reject/timeout
-// return {status:"cancelled_by_user"} without running the executor.
+// path around it. execute() refuses gated Tools outright (gate-refusal);
+// executeGated() is the single gated path: it suspends on the approver
+// until it returns approve, edited-approve, reject, or timeout, and
+// reject/timeout return {status:"cancelled_by_user"} without running
+// the executor.
 
 /** Sensitivity of one Tool call. Reads are LOW; state-changing but
  *  reversible calls (create_schedule) are MEDIUM; irreversible
@@ -58,11 +59,12 @@ data class ToolDefinition(
     val requiresConfirmation: Boolean,
     val resultType: String,
     val execute: (args: Map<String, Any?>) -> ToolResult,
-    // Ticket 04/24: gated entry for requiresConfirmation Tools. Plain
+    // Ticket 09/24: gated entry for requiresConfirmation Tools. Plain
     // execute() never sends (send_email's closure bakes approved=false);
-    // the confirmation UI / loop calls executeWithApproval with the user's
-    // decision, which travels out-of-band so the model cannot forge it as
-    // an arg. Null (e.g. schedule Tools) falls back to execute().
+    // the single gated path runs the Tool's approvedExecute entry
+    // (send_email's policy path) after the Confirmation UI's decision
+    // travels out-of-band, so the model cannot forge it as an arg. Null
+    // (e.g. schedule Tools) falls back to execute().
     val approvedExecute: ((args: Map<String, Any?>) -> ToolResult)? = null,
 )
 
@@ -220,32 +222,6 @@ class ToolRegistry {
         } catch (e: Exception) {
             ToolResult.Failure("tool '${definition.name}' failed: ${e.message}", retryable = false)
         }
-
-    /** Gated entry for requiresConfirmation Tools (ADR-0003). Unapproved
-     *  calls refuse without running anything; approved calls run the
-     *  Tool's approvedExecute entry (or execute() when it has none, e.g.
-     *  schedule Tools). The model's plain execute() path can never send.
-     */
-    fun executeWithApproval(name: String, args: Map<String, Any?>, approved: Boolean): ToolResult {
-        val definition = tools[name]
-            ?: return ToolResult.Failure(
-                "unknown tool: '$name'. Available tools: ${tools.keys.sorted().joinToString(", ")}",
-                retryable = true,
-            )
-        validateArgs(definition, args)?.let { return it }
-        if (definition.requiresConfirmation && !approved) {
-            return ToolResult.Failure(
-                "tool '$name' requires confirmation and was not approved; nothing ran",
-                retryable = false,
-            )
-        }
-        return try {
-            if (approved) definition.approvedExecute?.invoke(args) ?: definition.execute(args)
-            else definition.execute(args)
-        } catch (e: Exception) {
-            ToolResult.Failure("tool '$name' failed: ${e.message}", retryable = false)
-        }
-    }
 }
 
 /** Ticket 03/24 search_emails Tool: read-only Gmail search (ADR-0003:
@@ -335,9 +311,9 @@ fun readEmailTool(gmailApi: GmailApi?): ToolDefinition =
 
 /** Ticket 04/24 send_email Tool: irreversible send, HIGH risk, gated per
  *  call (ADR-0003). The plain execute() entry always refuses without
- *  touching the transport; only executeWithApproval(approved=true) builds
- *  the MIME from the exact To/Subject/Body args and sends, after the
- *  deterministic SendPolicy check. */
+ *  touching the transport; only the single gated path (executeGated)
+ *  builds the MIME from the exact To/Subject/Body args and sends, after
+ *  the deterministic SendPolicy check. */
 fun sendEmailTool(gmailApi: GmailApi?, policy: SendPolicy = AllowAllSendPolicy): ToolDefinition {
     fun draftFrom(args: Map<String, Any?>): EmailDraft =
         EmailDraft(
@@ -381,7 +357,7 @@ fun defaultToolRegistry(
     gmailApi: GmailApi? = null,
     scheduleStore: ScheduleStore? = null,
     memoryStore: MemoryStore? = null,
-    sendPolicy: SendPolicy = AllowAllSendPolicy,
+    sendPolicy: SendPolicy = DefaultSendPolicy(),
     webBridge: WebBridge? = null,
 ): ToolRegistry {
     val registry = ToolRegistry()

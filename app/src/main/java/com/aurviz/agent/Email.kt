@@ -269,8 +269,8 @@ fun sendWithConfirm(api: GmailApi, rawBase64Url: String, confirmed: Boolean): Bo
 // passes approved=false and refuses without touching the transport.
 //
 // The SendPolicy seam runs after the gate, before any transport touch:
-// no-op allow now; ticket 12/25 fills in the deterministic pre-send
-// check (recipient holds, injection screens).
+// DefaultSendPolicy holds malformed, bulk, and exfil-shaped sends
+// (ticket 12/25).
 sealed interface SendPolicyVerdict {
     data object Allow : SendPolicyVerdict
 
@@ -283,6 +283,50 @@ fun interface SendPolicy {
 
 object AllowAllSendPolicy : SendPolicy {
     override fun check(draft: EmailDraft): SendPolicyVerdict = SendPolicyVerdict.Allow
+}
+
+// Ticket 12/25: the deterministic pre-send check (ADR-0003, gaps §3E).
+// Runs after the Confirmation gate, before any transport touch, no
+// matter what the model said: even a gate Approved cannot send past a
+// Deny. Three narrow holds, each JVM-tested in ApprovalCardTest:
+// malformed recipients, bulk-recipient sends, and bulk forwards of
+// mailbox content (the evil-forward exfil shape: pasted "From:" lines
+// and "gmail:" source tags from tool results). Ordinary sends pass.
+class DefaultSendPolicy(
+    private val maxRecipients: Int = 5,
+    private val maxEmbeddedMails: Int = 3,
+) : SendPolicy {
+    override fun check(draft: EmailDraft): SendPolicyVerdict {
+        val to = draft.to.map { it.trim() }.filter { it.isNotEmpty() }
+        val malformed = to.firstOrNull { !isPlausibleEmail(it) }
+        if (malformed != null) {
+            return SendPolicyVerdict.Deny("recipient '$malformed' is not a plausible email address")
+        }
+        if (to.size > maxRecipients) {
+            return SendPolicyVerdict.Deny("bulk send to ${to.size} recipients (max $maxRecipients)")
+        }
+        if (embeddedMailCount(draft.body) >= maxEmbeddedMails) {
+            return SendPolicyVerdict.Deny("bulk forward of mailbox content")
+        }
+        return SendPolicyVerdict.Allow
+    }
+}
+
+/** One @ with non-blank local and domain parts, no spaces. A shape
+ *  hold, not deliverability proof. */
+fun isPlausibleEmail(address: String): Boolean {
+    if (" " in address) return false
+    val parts = address.split("@")
+    return parts.size == 2 && parts[0].isNotBlank() && "." in parts[1] && parts[1].trim('.').isNotBlank()
+}
+
+/** How many pasted mailbox messages a body carries: "From:" header
+ *  lines plus "gmail:" source tags from tool results. A single quoted
+ *  reply stays under the hold; forwarding the last 10 mails trips it. */
+fun embeddedMailCount(body: String): Int {
+    val fromLines = body.lines().count { it.trimStart().startsWith("From:", ignoreCase = true) }
+    val sourceTags = Regex("gmail:").findAll(body).count()
+    return fromLines + sourceTags
 }
 
 // Gated send: validates the draft, demands gate approval, runs the

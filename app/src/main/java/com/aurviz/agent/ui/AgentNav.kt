@@ -26,7 +26,9 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.aurviz.agent.knownAddressesFromInbox
 import com.aurviz.agent.ui.components.Icon
+import com.aurviz.agent.unseenRecipients
 import com.aurviz.agent.ui.components.IconButton
 import com.aurviz.agent.ui.components.ScreenScaffold
 import com.aurviz.agent.ui.theme.Space
@@ -102,6 +104,8 @@ fun AgentNav(
                             onMicTap = onMicTap,
                             onVoiceClick = { showVoice = true },
                             onOpenBrowser = { navController.navigate(Dests.BROWSER) },
+                            onApprovePending = vm::approvePendingSend,
+                            onRejectPending = vm::rejectPendingSend,
                         )
                     }
                     composable(Dests.BROWSER) {
@@ -174,6 +178,10 @@ fun AgentNav(
         )
         EmailConfirmationSheet(
             draft = state.pendingEmail,
+            unseen = unseenRecipients(
+                state.pendingEmail?.to.orEmpty(),
+                knownAddressesFromInbox(state.emails),
+            ),
             onApprove = vm::approveEmail,
             onReject = vm::rejectEmail,
         )

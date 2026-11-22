@@ -8,6 +8,7 @@ import com.aurviz.agent.Memory
 import com.aurviz.agent.ParsedSchedule
 import com.aurviz.agent.Schedule
 import com.aurviz.agent.TimelineStep
+import com.aurviz.agent.ToolCall
 import com.aurviz.agent.WebPage
 import com.aurviz.agent.retryDisclosure
 import com.aurviz.agent.ui.components.VoiceState as OrbState
@@ -45,6 +46,12 @@ data class AgentUiState(
     val pendingForget: List<Memory> = emptyList(),
     val pendingSchedule: ParsedSchedule? = null,
     val schedulePreview: String = "",
+    // Ticket 12/25: the loop's live Confirmation card (GLOSSARY
+    // Confirmation). NeedsApproval raises pendingApproval with the
+    // unseen flags computed at raise time; StepDone clears it.
+    // Approve/Reject resolve the suspended gate — nothing runs before.
+    val pendingApproval: ToolCall? = null,
+    val pendingApprovalUnseen: List<String> = emptyList(),
     val webPage: WebPage? = null,
     val webLoading: Boolean = false,
     val webError: String? = null,

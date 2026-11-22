@@ -11,10 +11,10 @@ import com.aurviz.agent.AppDb
 import com.aurviz.agent.AgentEvent
 import com.aurviz.agent.AgentLoop
 import com.aurviz.agent.AgentLoopResult
+import com.aurviz.agent.ApprovalDecision
 import com.aurviz.agent.BuildConfig
 import com.aurviz.agent.ChatLlmProvider
 import com.aurviz.agent.ChatMessage
-import com.aurviz.agent.EmailDraft
 import com.aurviz.agent.FallbackResult
 import com.aurviz.agent.GMAIL_SCOPES
 import com.aurviz.agent.GmailException
@@ -34,8 +34,8 @@ import com.aurviz.agent.TokenVault
 import com.aurviz.agent.ToolCall
 import com.aurviz.agent.WebBridge
 import com.aurviz.agent.WebException
+import com.aurviz.agent.approvalCardFor
 import com.aurviz.agent.buildAuthUrl
-import com.aurviz.agent.buildRawMessage
 import com.aurviz.agent.buildTimeline
 import com.aurviz.agent.cancelRoutineAlarm
 import com.aurviz.agent.cancelRoutineWork
@@ -47,6 +47,7 @@ import com.aurviz.agent.defaultToolRegistry
 import com.aurviz.agent.deleteSchedule
 import com.aurviz.agent.formatSchedulePreview
 import com.aurviz.agent.forgetPreview
+import com.aurviz.agent.knownAddressesFromInbox
 import com.aurviz.agent.listSchedules
 import com.aurviz.agent.newCodeVerifier
 import com.aurviz.agent.openPage
@@ -58,9 +59,9 @@ import com.aurviz.agent.readImportant
 import com.aurviz.agent.registerRoutineAlarm
 import com.aurviz.agent.rememberFact
 import com.aurviz.agent.retryDisclosure
-import com.aurviz.agent.sendWithConfirm
 import com.aurviz.agent.toTimeline
 import com.aurviz.agent.ui.components.VoiceState as OrbState
+import java.util.concurrent.LinkedBlockingQueue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -315,34 +316,30 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // Rebuilds the raw MIME from the EDITED fields, then sends once.
+    // Ticket 12/25: the sheet is the Confirmation, so this resolves the
+    // single gated path as Approved — the deterministic SendPolicy still
+    // runs before the transport, and a Deny surfaces instead of a send.
     fun approveEmail(to: String, subject: String, body: String) {
-        val draft = EmailDraft(to = listOf(to.trim()), subject = subject, body = body)
-        if (!draft.to.first().contains("@") || draft.body.isBlank()) {
-            _state.update { it.copy(statusLine = "Need a valid address and a message.") }
-            return
-        }
+        val call = ToolCall("ui_approve", "send_email", mapOf("to" to to.trim(), "subject" to subject, "body" to body))
         _state.update { it.copy(pendingEmail = null, sending = true, statusLine = "Sending…") }
         viewModelScope.launch(Dispatchers.IO) {
             val t0 = System.currentTimeMillis()
-            try {
-                val sent = sendWithConfirm(gmail, buildRawMessage(draft), confirmed = true)
-                val ms = System.currentTimeMillis() - t0
-                _state.update {
-                    it.copy(
-                        sending = false,
-                        statusLine = if (sent) "Sent ✓" else "Not sent.",
-                        timeline = buildTimeline(
-                            Plan(listOf(ToolCall("gmail", "sendEmail", mapOf("raw" to 12)))),
-                            doneCount = if (sent) 1 else 0,
-                            error = if (sent) null else "not confirmed",
-                        ),
-                        perf = it.perf.copy(toolMs = ms),
-                    )
-                }
-            } catch (e: Exception) {
-                _state.update {
-                    it.copy(sending = false, statusLine = "Send failed: ${e.message}", timeline = emptyList())
-                }
+            val registry = defaultToolRegistry(gmailApi = gmail, scheduleStore = scheduleStore, memoryStore = roomStore)
+            val gated = registry.executeGated(call) { ApprovalDecision.Approved }
+            val ms = System.currentTimeMillis() - t0
+            val sent = gated.result is com.aurviz.agent.ToolResult.Success
+            val error = (gated.result as? com.aurviz.agent.ToolResult.Failure)?.error
+            _state.update {
+                it.copy(
+                    sending = false,
+                    statusLine = if (sent) "Sent ✓" else (error ?: "Not sent."),
+                    timeline = buildTimeline(
+                        Plan(listOf(call.copy(arguments = gated.effectiveArgs))),
+                        doneCount = if (sent) 1 else 0,
+                        error = error,
+                    ),
+                    perf = it.perf.copy(toolMs = ms),
+                )
             }
         }
     }
@@ -697,6 +694,22 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
     // execution: every command the keyword routes above don't catch runs
     // the loop, whose AgentEvents fold into the timeline live. The
     // schedule preview flows (handleScheduleCreate/approve/reject) stay.
+    //
+    // Ticket 12/25: the loop's confirm hook suspends on the approval card.
+    // NeedsApproval publishes the exact call + unseen flags into state and
+    // blocks the loop thread until approvePendingSend/rejectPendingSend
+    // resolves it — the gate never auto-approves, and the deterministic
+    // SendPolicy still screens an approved send before the transport.
+    private var pendingDecisions: LinkedBlockingQueue<ApprovalDecision>? = null
+
+    fun approvePendingSend() {
+        pendingDecisions?.offer(ApprovalDecision.Approved)
+    }
+
+    fun rejectPendingSend() {
+        pendingDecisions?.offer(ApprovalDecision.Rejected)
+    }
+
     private fun runLoopCommand(cmd: String) {
         _state.update {
             it.copy(
@@ -713,6 +726,29 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                     defaultCandidates(BuildConfig.LLM_DEFAULT_PROVIDER, tokenVault.loadLlmKeys()),
                 )
             val registry = defaultToolRegistry(gmailApi = gmail, scheduleStore = scheduleStore, memoryStore = roomStore)
+            val decisions = LinkedBlockingQueue<ApprovalDecision>(1)
+            pendingDecisions = decisions
+            val confirm: (ToolCall) -> ApprovalDecision = { call ->
+                val known =
+                    try {
+                        knownAddressesFromInbox(gmail.listInbox())
+                    } catch (_: Exception) {
+                        knownAddressesFromInbox(_state.value.emails)
+                    }
+                val unseen = approvalCardFor(call, known)?.unseen.orEmpty()
+                _state.update {
+                    it.copy(
+                        pendingApproval = call,
+                        pendingApprovalUnseen = unseen,
+                        statusLine = "Command: $cmd\nAgent: needs approval: ${call.name}",
+                    )
+                }
+                try {
+                    decisions.take()
+                } catch (_: InterruptedException) {
+                    ApprovalDecision.TimedOut
+                }
+            }
             var progress = LoopUiProgress()
             val loop =
                 AgentLoop(
@@ -729,8 +765,17 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                                 is AgentEvent.StepDone -> "ran ${event.call.name}"
                                 is AgentEvent.Failed -> "failed: ${event.error}"
                             }
-                        _state.update { it.copy(statusLine = "Command: $cmd\nAgent: $phase", timeline = snapshot) }
+                        _state.update {
+                            it.copy(
+                                statusLine = "Command: $cmd\nAgent: $phase",
+                                timeline = snapshot,
+                                // The decision landed: drop the card.
+                                pendingApproval = if (event is AgentEvent.StepDone) null else it.pendingApproval,
+                                pendingApprovalUnseen = if (event is AgentEvent.StepDone) emptyList() else it.pendingApprovalUnseen,
+                            )
+                        }
                     },
+                    confirm = confirm,
                 )
             try {
                 when (val result = loop.run(cmd)) {
@@ -746,6 +791,8 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                                 timeline = result.toTimeline(),
                                 providerUsed = used,
                                 providersTried = tried,
+                                pendingApproval = null,
+                                pendingApprovalUnseen = emptyList(),
                                 perf = it.perf.copy(planMs = System.currentTimeMillis() - runT0),
                             )
                         }
@@ -757,6 +804,8 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                                 timeline = result.toTimeline(),
                                 providerUsed = chat.lastProvider,
                                 providersTried = chat.tried.toList(),
+                                pendingApproval = null,
+                                pendingApprovalUnseen = emptyList(),
                                 perf = it.perf.copy(planMs = System.currentTimeMillis() - runT0),
                             )
                         }
@@ -769,8 +818,12 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                         timeline = progress.timeline(),
                         providerUsed = chat.lastProvider,
                         providersTried = chat.tried.toList(),
+                        pendingApproval = null,
+                        pendingApprovalUnseen = emptyList(),
                     )
                 }
+            } finally {
+                if (pendingDecisions === decisions) pendingDecisions = null
             }
         }
     }

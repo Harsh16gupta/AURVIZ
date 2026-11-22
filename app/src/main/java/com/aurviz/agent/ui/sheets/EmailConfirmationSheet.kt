@@ -20,11 +20,14 @@ import com.aurviz.agent.ui.components.TextField
 import com.aurviz.agent.ui.theme.Theme
 
 // The Confirmation gate for the sendEmail Tool: editable Vela TextFields
-// pre-filled from the EmailDraft, then Approve & Send rebuilds the raw
-// MIME message from the EDITED fields before sendWithConfirm() runs.
+// pre-filled from the EmailDraft, then Approve & Send resolves the single
+// gated path (executeGated as Approved) with the EDITED fields — the
+// deterministic SendPolicy still screens before the transport. New
+// recipients carry the unseen highlight.
 @Composable
 fun EmailConfirmationSheet(
     draft: EmailDraft?,
+    unseen: List<String> = emptyList(),
     onApprove: (to: String, subject: String, body: String) -> Unit,
     onReject: () -> Unit,
     modifier: Modifier = Modifier,
@@ -45,6 +48,9 @@ fun EmailConfirmationSheet(
                     "Review and edit before approving — nothing sends until you tap Approve & Send.",
                     color = Theme.colors.onBackgroundMuted,
                 )
+                if (draft.to.any { it.trim().lowercase() in unseen.map { u -> u.trim().lowercase() }.toSet() }) {
+                    Text("New recipient — never emailed before.", color = Theme.colors.destructive)
+                }
                 TextField(value = to, onValueChange = { to = it }, label = "To")
                 TextField(value = subject, onValueChange = { subject = it }, label = "Subject")
                 TextField(value = body, onValueChange = { body = it }, label = "Message", minLines = 4)
