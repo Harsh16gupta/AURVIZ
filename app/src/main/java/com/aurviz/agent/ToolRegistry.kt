@@ -46,6 +46,12 @@ data class ToolDefinition(
     val requiresConfirmation: Boolean,
     val resultType: String,
     val execute: (args: Map<String, Any?>) -> ToolResult,
+    // Ticket 04/24: gated entry for requiresConfirmation Tools. Plain
+    // execute() never sends (send_email's closure bakes approved=false);
+    // the confirmation UI / loop calls executeWithApproval with the user's
+    // decision, which travels out-of-band so the model cannot forge it as
+    // an arg. Null (e.g. schedule Tools) falls back to execute().
+    val approvedExecute: ((args: Map<String, Any?>) -> ToolResult)? = null,
 )
 
 private fun schemaTypeMatches(expected: String, value: Any?): Boolean =
@@ -129,6 +135,32 @@ class ToolRegistry {
         validateArgs(definition, args)?.let { return it }
         return try {
             definition.execute(args)
+        } catch (e: Exception) {
+            ToolResult.Failure("tool '$name' failed: ${e.message}", retryable = false)
+        }
+    }
+
+    /** Gated entry for requiresConfirmation Tools (ADR-0003). Unapproved
+     *  calls refuse without running anything; approved calls run the
+     *  Tool's approvedExecute entry (or execute() when it has none, e.g.
+     *  schedule Tools). The model's plain execute() path can never send.
+     */
+    fun executeWithApproval(name: String, args: Map<String, Any?>, approved: Boolean): ToolResult {
+        val definition = tools[name]
+            ?: return ToolResult.Failure(
+                "unknown tool: '$name'. Available tools: ${tools.keys.sorted().joinToString(", ")}",
+                retryable = true,
+            )
+        validateArgs(definition, args)?.let { return it }
+        if (definition.requiresConfirmation && !approved) {
+            return ToolResult.Failure(
+                "tool '$name' requires confirmation and was not approved; nothing ran",
+                retryable = false,
+            )
+        }
+        return try {
+            if (approved) definition.approvedExecute?.invoke(args) ?: definition.execute(args)
+            else definition.execute(args)
         } catch (e: Exception) {
             ToolResult.Failure("tool '$name' failed: ${e.message}", retryable = false)
         }
@@ -220,15 +252,62 @@ fun readEmailTool(gmailApi: GmailApi?): ToolDefinition =
         },
     )
 
-/** Registry with the read/search Tools + schedule/memory Tools wired to
+/** Ticket 04/24 send_email Tool: irreversible send, HIGH risk, gated per
+ *  call (ADR-0003). The plain execute() entry always refuses without
+ *  touching the transport; only executeWithApproval(approved=true) builds
+ *  the MIME from the exact To/Subject/Body args and sends, after the
+ *  deterministic SendPolicy check. */
+fun sendEmailTool(gmailApi: GmailApi?, policy: SendPolicy = AllowAllSendPolicy): ToolDefinition {
+    fun draftFrom(args: Map<String, Any?>): EmailDraft =
+        EmailDraft(
+            to = listOf(args["to"] as String),
+            subject = args["subject"] as String,
+            body = args["body"] as String,
+        )
+    return ToolDefinition(
+        name = "send_email",
+        description = "Send one Gmail message to To with Subject and Body. " +
+            "Sensitive: runs only after per-call confirmation.",
+        parameters =
+            JSONObject()
+                .put("type", "object")
+                .put(
+                    "properties",
+                    JSONObject()
+                        .put("to", JSONObject().put("type", "string").put("description", "Recipient email address"))
+                        .put("subject", JSONObject().put("type", "string").put("description", "Message subject"))
+                        .put("body", JSONObject().put("type", "string").put("description", "Plain-text message body")),
+                )
+                .put("required", JSONArray().put("to").put("subject").put("body")),
+        // Irreversible outbound send; ADR-0003 gates every call.
+        riskLevel = RiskLevel.HIGH,
+        requiresConfirmation = true,
+        resultType = "send",
+        execute = { args ->
+            executeSendEmail(gmailApi, draftFrom(args), approved = false, policy = policy)
+        },
+        approvedExecute = { args ->
+            executeSendEmail(gmailApi, draftFrom(args), approved = true, policy = policy)
+        },
+    )
+}
+
+/** Registry with the read/search Tools + send Tool + schedule/memory Tools wired to
  *  real seams. Gmail/Room plug in through GmailApi/ScheduleStore/
  *  MemoryStore; tests pass fakes. A null dependency means "not connected
  *  on this device", also a Failure. */
-fun defaultToolRegistry(gmailApi: GmailApi? = null, scheduleStore: ScheduleStore? = null, memoryStore: MemoryStore? = null): ToolRegistry {
+fun defaultToolRegistry(
+    gmailApi: GmailApi? = null,
+    scheduleStore: ScheduleStore? = null,
+    memoryStore: MemoryStore? = null,
+    sendPolicy: SendPolicy = AllowAllSendPolicy,
+    webBridge: WebBridge? = null,
+): ToolRegistry {
     val registry = ToolRegistry()
 
     registry.register(searchEmailsTool(gmailApi))
     registry.register(readEmailTool(gmailApi))
+    registry.register(sendEmailTool(gmailApi, sendPolicy))
 
     val emailFn = demoToolSchema().getJSONObject("function")
     registry.register(
@@ -292,6 +371,34 @@ fun defaultToolRegistry(gmailApi: GmailApi? = null, scheduleStore: ScheduleStore
         ),
     )
 
+    val listFn = listSchedulesToolSchema().getJSONObject("function")
+    registry.register(
+        ToolDefinition(
+            name = listFn.getString("name"),
+            description = listFn.getString("description"),
+            parameters = listFn.getJSONObject("parameters"),
+            // Read-only; ADR-0003 gates only sensitive calls.
+            riskLevel = RiskLevel.LOW,
+            requiresConfirmation = false,
+            resultType = "schedules",
+            execute = { _ ->
+                val store = scheduleStore
+                    ?: return@ToolDefinition ToolResult.Failure("schedule store is not available", retryable = false)
+                ToolResult.Success(
+                    listSchedules(store).map { schedule ->
+                        mapOf(
+                            "id" to schedule.id,
+                            "instruction" to schedule.instruction,
+                            "hour" to schedule.hour,
+                            "minute" to schedule.minute,
+                            "days" to schedule.days?.toList(),
+                        )
+                    },
+                )
+            },
+        ),
+    )
+
     val saveMemoryFn = saveMemoryToolSchema().getJSONObject("function")
     registry.register(
         ToolDefinition(
@@ -349,5 +456,194 @@ fun defaultToolRegistry(gmailApi: GmailApi? = null, scheduleStore: ScheduleStore
         ),
     )
 
+    val cancelFn = cancelScheduleToolSchema().getJSONObject("function")
+    registry.register(
+        ToolDefinition(
+            name = cancelFn.getString("name"),
+            description = cancelFn.getString("description"),
+            parameters = cancelFn.getJSONObject("parameters"),
+            // State-changing (disarms alarms); ADR-0003 requires per-call Confirmation.
+            riskLevel = RiskLevel.MEDIUM,
+            requiresConfirmation = true,
+            resultType = "schedule",
+            execute = { args ->
+                val store = scheduleStore
+                    ?: return@ToolDefinition ToolResult.Failure("schedule store is not available", retryable = false)
+                val id = args["schedule_id"] as String
+                val existing = listSchedules(store).find { it.id == id }
+                    ?: return@ToolDefinition ToolResult.Failure(
+                        "unknown schedule id: '$id'. Use list_schedules to see saved routines.",
+                        retryable = true,
+                    )
+                deleteSchedule(store, existing.id)
+                ToolResult.Success(mapOf("id" to existing.id, "deleted" to true))
+            },
+        ),
+    )
+
+    registerWebTools(registry, webBridge)
+
     return registry
 }
+
+/** Ticket 07/24: five foreground web Tools over the WebView bridge. Reads
+ *  and in-page interactions are LOW risk and need no Confirmation; the user
+ *  watches the foreground tab. A null bridge means the Browser tab has not
+ *  attached yet — a retryable Failure, never a hang. */
+fun registerWebTools(registry: ToolRegistry, webBridge: WebBridge?) {
+    fun webFailure(tool: String, e: WebException): ToolResult.Failure {
+        val where = if (e.failure.url.isNotBlank()) ": ${e.failure.url}" else ""
+        // "blocked" never clears on retry (same URL, same verdict), so say
+        // what is allowed; every bridge failure (timeout, load-failed,
+        // no-match, no-page) can clear and stays retryable.
+        if (e.failure.reason == "blocked") {
+            return ToolResult.Failure("$tool blocked: only http(s) URLs are allowed$where", retryable = false)
+        }
+        return ToolResult.Failure("$tool failed (${e.failure.reason})$where", retryable = true)
+    }
+
+    fun noBridge(): ToolResult.Failure =
+        ToolResult.Failure(
+            "browser is not ready yet — open the Browser tab and try again",
+            retryable = true,
+        )
+
+    registry.register(
+        ToolDefinition(
+            name = "open_url",
+            description = "Open a page in the foreground browser tab. Returns its title, readable text, and links.",
+            parameters = webParams("url", "The http(s) page URL to open, e.g. https://example.com"),
+            riskLevel = RiskLevel.LOW,
+            requiresConfirmation = false,
+            resultType = "page",
+            execute = { args ->
+                val bridge = webBridge ?: return@ToolDefinition noBridge()
+                val url = args["url"] as String
+                try {
+                    val page = openPage(bridge, url)
+                    ToolResult.Success(
+                        mapOf(
+                            "url" to page.url,
+                            "title" to page.title,
+                            "text" to page.text,
+                            "links" to page.links,
+                        ),
+                    )
+                } catch (e: WebException) {
+                    webFailure("open_url", e)
+                }
+            },
+        ),
+    )
+
+    registry.register(
+        ToolDefinition(
+            name = "get_page_text",
+            description = "Return the readable text of an http(s) page, without links.",
+            parameters = webParams("url", "The http(s) page URL to read, e.g. https://example.com"),
+            riskLevel = RiskLevel.LOW,
+            requiresConfirmation = false,
+            resultType = "page_text",
+            execute = { args ->
+                val bridge = webBridge ?: return@ToolDefinition noBridge()
+                val url = args["url"] as String
+                try {
+                    val page = openPage(bridge, url)
+                    ToolResult.Success(
+                        mapOf("url" to page.url, "title" to page.title, "text" to page.text),
+                    )
+                } catch (e: WebException) {
+                    webFailure("get_page_text", e)
+                }
+            },
+        ),
+    )
+
+    registry.register(
+        ToolDefinition(
+            name = "click",
+            description = "Click a CSS selector in the current foreground page. Returns the page after the click.",
+            parameters = webParams("selector", "CSS selector to click, e.g. a.buy"),
+            riskLevel = RiskLevel.LOW,
+            requiresConfirmation = false,
+            resultType = "page",
+            execute = { args ->
+                val bridge = webBridge ?: return@ToolDefinition noBridge()
+                val selector = args["selector"] as String
+                try {
+                    val page = parsePage("", bridge.click(selector))
+                    ToolResult.Success(
+                        mapOf("title" to page.title, "text" to page.text, "links" to page.links),
+                    )
+                } catch (e: WebException) {
+                    webFailure("click", e)
+                }
+            },
+        ),
+    )
+
+    registry.register(
+        ToolDefinition(
+            name = "scroll",
+            description = "Scroll the current foreground page vertically. Returns the page after scrolling.",
+            parameters =
+                JSONObject()
+                    .put("type", "object")
+                    .put(
+                        "properties",
+                        JSONObject().put(
+                            "px",
+                            JSONObject().put("type", "integer")
+                                .put("description", "Pixels to scroll; negative scrolls up."),
+                        ),
+                    )
+                    .put("required", JSONArray().put("px")),
+            riskLevel = RiskLevel.LOW,
+            requiresConfirmation = false,
+            resultType = "page",
+            execute = { args ->
+                val bridge = webBridge ?: return@ToolDefinition noBridge()
+                val px = (args["px"] as Number).toInt()
+                try {
+                    val page = parsePage("", bridge.scrollBy(px))
+                    ToolResult.Success(
+                        mapOf("title" to page.title, "text" to page.text, "links" to page.links),
+                    )
+                } catch (e: WebException) {
+                    webFailure("scroll", e)
+                }
+            },
+        ),
+    )
+
+    registry.register(
+        ToolDefinition(
+            name = "extract",
+            description = "Return the chunks of the current foreground page most relevant to the query.",
+            parameters = webParams("query", "What to look for on the current page, e.g. bread price"),
+            riskLevel = RiskLevel.LOW,
+            requiresConfirmation = false,
+            resultType = "extract",
+            execute = { args ->
+                val bridge = webBridge ?: return@ToolDefinition noBridge()
+                val query = args["query"] as String
+                try {
+                    val text = bridge.pageText()
+                    val chunks = relevantChunks(WebPage(url = "", title = "", text = text, links = emptyList()), query)
+                    ToolResult.Success(mapOf("query" to query, "chunks" to chunks))
+                } catch (e: WebException) {
+                    webFailure("extract", e)
+                }
+            },
+        ),
+    )
+}
+
+private fun webParams(name: String, description: String): JSONObject =
+    JSONObject()
+        .put("type", "object")
+        .put(
+            "properties",
+            JSONObject().put(name, JSONObject().put("type", "string").put("description", description)),
+        )
+        .put("required", JSONArray().put(name))

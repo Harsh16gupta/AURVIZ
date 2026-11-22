@@ -1,5 +1,9 @@
 package com.aurviz.agent
 
+import java.time.LocalTime
+import java.time.ZoneId
+import java.time.ZonedDateTime
+
 // Session 3 Scheduling: parse-preview + CRUD + firing decision + result note.
 // Pure decision logic, JVM-testable. Room (ScheduleRepository), WorkManager,
 // AlarmManager, and notifications plug in later through ScheduleStore;
@@ -109,6 +113,25 @@ fun dueSchedules(store: ScheduleStore, now: FakeClock): List<Schedule> =
             schedule.minute == now.minute &&
             (schedule.days == null || now.dayOfWeek in schedule.days)
     }
+
+// --- Seam C2: next wall-clock fire in a zone (for re-arm). ---
+// Pure decision logic: the next datetime in `zone` whose wall-clock time
+// is hour:minute on an allowed day, strictly after `now`. A timezone
+// change keeps the same wall-clock time but moves the instant, so re-arm
+// must recompute in the new zone (DST plays no role: the zones we care
+// about, e.g. Asia/Kolkata, have no DST). Null days = every day; an
+// explicitly empty set never fires and returns null.
+fun nextFireTime(schedule: Schedule, zone: ZoneId, now: ZonedDateTime): ZonedDateTime? {
+    val zonedNow = now.withZoneSameInstant(zone)
+    val time = LocalTime.of(schedule.hour, schedule.minute)
+    for (offset in 0..7) {
+        val date = zonedNow.toLocalDate().plusDays(offset.toLong())
+        if (schedule.days != null && date.dayOfWeek.value !in schedule.days) continue
+        val candidate = ZonedDateTime.of(date, time, zone)
+        if (candidate.isAfter(zonedNow)) return candidate
+    }
+    return null
+}
 
 // One routine = one background job: stable name per schedule id,
 // so re-saving never creates a double.
