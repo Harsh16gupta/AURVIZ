@@ -623,7 +623,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     is PlannerOutcome.Ready -> {
                         val first = outcome.plan.steps.firstOrNull()
-                        if (first?.name == "createSchedule") {
+                        if (first?.name == "create_schedule") {
                             val when_ = first.arguments["when"] as? String ?: ""
                             val task = first.arguments["task"] as? String ?: ""
                             handleScheduleCreate("$when_ $task".trim())
