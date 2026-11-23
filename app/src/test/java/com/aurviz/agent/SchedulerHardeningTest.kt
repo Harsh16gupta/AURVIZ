@@ -194,6 +194,18 @@ class SchedulerHardeningTest {
     }
 
     @Test
+    fun resumeRearmsPersistedSchedulesToCurrentGrant() {
+        // Revocation cancels existing exact alarms with no callback here:
+        // every resume must re-register persisted Schedules (exact vs
+        // inexact follows the current grant inside registerRoutineAlarm).
+        val activity = File(moduleDir(), "src/main/java/com/aurviz/agent/MainActivity.kt").readText()
+        assertTrue(activity.contains("reconcileAlarmsAfterResume"))
+        val vm = File(moduleDir(), "src/main/java/com/aurviz/agent/ui/AgentViewModel.kt").readText()
+        assertTrue(vm.contains("fun reconcileAlarmsAfterResume"))
+        assertTrue(vm.contains("registerRoutineAlarm(app, schedule)"))
+    }
+
+    @Test
     fun noPeriodicWorkAnywhereInMainSource() {
         val banned = listOf("PeriodicWorkRequest", "enqueueUniquePeriodicWork", "setPeriodic(")
         val hits = mutableListOf<String>()

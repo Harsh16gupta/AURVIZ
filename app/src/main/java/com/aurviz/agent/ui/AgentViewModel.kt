@@ -807,6 +807,28 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(exactAlarmNeeded = needsAsk) }
     }
 
+    // Revocation/grant reconciliation (ADR-0002): Android cancels existing
+    // exact alarms when the user revokes the permission. Re-register every
+    // persisted Schedule so the alarm mode matches the current grant —
+    // exact when allowed, inexact otherwise — then refresh the flags.
+    // Called on every resume (covers start + back-from-Settings grant).
+    fun reconcileAlarmsAfterResume() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val app = getApplication<Application>()
+                for (schedule in listSchedules(scheduleStore)) {
+                    try {
+                        registerRoutineAlarm(app, schedule)
+                    } catch (_: Exception) {
+                    }
+                }
+            } catch (_: Exception) {
+            }
+            refreshExactAlarmFlag()
+            refreshBatteryFlag()
+        }
+    }
+
     fun refreshBatteryFlag() {
         val app = getApplication<Application>()
         val needsAsk = try {

@@ -75,11 +75,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Back from Settings: re-check the exact-alarm toggle and the battery
-        // exemption without a restart.
+        // Back from Settings (grant or revocation): re-arm every persisted
+        // Schedule to the current permission and refresh the flags.
         if (::vm.isInitialized) {
-            vm.refreshExactAlarmFlag()
-            vm.refreshBatteryFlag()
+            vm.reconcileAlarmsAfterResume()
         }
     }
 
