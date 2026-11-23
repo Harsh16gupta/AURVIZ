@@ -219,3 +219,22 @@ Every case where the AI was wrong and how it was caught. Add an entry with file:
   "Draft DeepSeek Re-wiring Plan" variant appeared in the worktree that
   neither HEAD nor `6036d0e` contains; restored HEAD's version and
   excluded it from the commit (HANDOFF is scratch, not source of truth).
+
+## 2026-11-24 — Issue #66 T1 foreground judge for sends (`main`, `e99a897`)
+
+- **Bulk-count test first drafted against the wrong seam.** Assumed a
+  6-address `to` string through `executeGated` would reach
+  `DefaultSendPolicy`'s `maxRecipients` branch
+  (`app/src/main/java/com/aurviz/agent/Email.kt:308`), but `draftFrom`
+  wraps `to` as a single-element list
+  (`app/src/main/java/com/aurviz/agent/ToolRegistry.kt:326`), so any
+  multi-address string denies earlier as malformed — the count branch is
+  reachable only via direct `EmailDraft` construction. Wrote the test at
+  that level instead (`DefaultSendPolicy.check` Deny plus
+  `executeSendEmail(..., approved = true)` Failure, zero sends;
+  `app/src/test/java/com/aurviz/agent/ApprovalCardTest.kt:158`).
+- Tests: 2 new (`policyBlocksHeaderInjectionEvenWhenGateApproved`,
+  `policyBlocksBulkRecipientCountEvenWhenApproved`). Full
+  `:app:testDebugUnitTest` green (344 tests, 0 failures). No red-green
+  cycle: the guards pre-existed (`Email.kt:373-378`, `Email.kt:303-314`),
+  so the tests pin behavior rather than drive new code.

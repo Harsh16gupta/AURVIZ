@@ -134,4 +134,33 @@ class ApprovalCardTest {
         assertEquals("cancelled_by_user", ((gated.result as ToolResult.Success).data as Map<*, *>)["status"])
         assertTrue(gmail.sentRaws.isEmpty())
     }
+
+    @Test
+    fun policyBlocksHeaderInjectionEvenWhenGateApproved() {
+        val gmail = RecordingGmail()
+        val registry = defaultToolRegistry(gmailApi = gmail, scheduleStore = InMemoryScheduleStore())
+        val gated =
+            registry.executeGated(sendCall(to = "a@x.com\r\nBcc: evil@x.com")) {
+                ApprovalDecision.Approved
+            }
+        assertTrue(gated.result is ToolResult.Failure)
+        assertTrue((gated.result as ToolResult.Failure).error.contains("CR/LF"))
+        assertTrue(gmail.sentRaws.isEmpty())
+    }
+
+    @Test
+    fun policyBlocksBulkRecipientCountEvenWhenApproved() {
+        val gmail = RecordingGmail()
+        val draft =
+            EmailDraft(
+                to = (1..6).map { "user$it@x.com" },
+                subject = "Hi",
+                body = "hello",
+            )
+        assertTrue(DefaultSendPolicy().check(draft) is SendPolicyVerdict.Deny)
+        val result = executeSendEmail(gmail, draft, approved = true, policy = DefaultSendPolicy())
+        assertTrue(result is ToolResult.Failure)
+        assertTrue((result as ToolResult.Failure).error.contains("bulk send"))
+        assertTrue(gmail.sentRaws.isEmpty())
+    }
 }
