@@ -320,4 +320,41 @@ class AgentLoopTest {
         val rows = result.toTimeline()
         assertEquals(StepState.FAILED, rows.last().state)
     }
+
+    @Test
+    fun secondCallInBatchDoesNotStartAfterTotalTimeout() {
+        // A slow first Tool/Confirmation must not let the second call in the
+        // same batch start after the deadline. Partial steps are kept.
+        val times = mutableListOf(0L, 0L, 0L, 0L, 2_000L)
+        var idx = 0
+        val nowMs = {
+            val v = times[minOf(idx, times.lastIndex)]
+            idx++
+            v
+        }
+        val llm =
+            FakeLlmProvider(
+                listOf(
+                    LlmResult(
+                        toolCalls =
+                            listOf(
+                                ToolCall("c1", "getImportantEmails", mapOf("max_results" to 5)),
+                                ToolCall("c2", "getImportantEmails", mapOf("max_results" to 5)),
+                            ),
+                        content = null,
+                    ),
+                ),
+            )
+        val result =
+            AgentLoop(
+                llm,
+                registry(),
+                totalTimeoutMs = 1_000L,
+                nowMs = nowMs,
+            ).run("check mail")
+        assertTrue(result is AgentLoopResult.Failed)
+        assertTrue((result as AgentLoopResult.Failed).error.contains("total timeout"))
+        assertEquals(1, result.steps.size)
+        assertEquals("c1", result.steps[0].call.id)
+    }
 }

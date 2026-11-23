@@ -16,6 +16,12 @@ import java.util.concurrent.LinkedBlockingQueue
 // a fresh single-slot queue; resolve() only offers when the queue is empty
 // (one-shot) and the ids match.
 class ApprovalGate {
+    companion object {
+        // Bounded Confirmation wait: the card never blocks the loop forever.
+        // Matches the loop total budget; the confirmer maps expiry to
+        // TimedOut (cancelled_by_user), never an auto-approve.
+        const val APPROVAL_TIMEOUT_MS = 300_000L
+    }
     private val lock = Any()
     private var nextRunId = 0L
     private var activeRunId: Long? = null

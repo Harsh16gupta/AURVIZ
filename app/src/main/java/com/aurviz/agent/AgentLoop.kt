@@ -149,7 +149,13 @@ class AgentLoop(
                     if (call.id != null) call else call.copy(id = "call_s${stepIndex}_$callIndex")
                 }
             messages += ChatMessage(role = "assistant", content = turn.content, toolCalls = calls)
-            for (call in calls) {
+            for ((callIndex, call) in calls.withIndex()) {
+                // Total-budget check before each subsequent call in the batch:
+                // a slow first Tool or Confirmation must not let another call
+                // start after the deadline. Partial steps are kept.
+                if (callIndex > 0 && nowMs() - startMs >= totalTimeoutMs) {
+                    return failed("total timeout after ${totalTimeoutMs}ms at step $stepIndex")
+                }
                 onEvent(AgentEvent.ToolRunning(call))
                 if (registry.requiresConfirmation(call.name)) {
                     onEvent(AgentEvent.NeedsApproval(call))

@@ -866,6 +866,11 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         approvalGate.resolve(runId, expectedCallId, ApprovalDecision.Approved)
     }
 
+    fun approvePendingSendEdited(expectedCallId: String, args: Map<String, Any?>) {
+        val runId = currentRunId ?: return
+        approvalGate.resolve(runId, expectedCallId, ApprovalDecision.ApprovedWithEdit(args))
+    }
+
     fun rejectPendingSend(expectedCallId: String) {
         val runId = currentRunId ?: return
         approvalGate.resolve(runId, expectedCallId, ApprovalDecision.Rejected)
@@ -901,7 +906,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
             val confirm: (ToolCall) -> ApprovalDecision = { call ->
                 val callId = call.id.orEmpty()
                 val gate = approvalGate.openGate(runId, callId)
-                if (gate == null) {
+                if (gate == null || callId.isEmpty()) {
                     ApprovalDecision.Rejected
                 } else {
                     val known =
@@ -918,8 +923,12 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                             statusLine = "Command: $cmd\nAgent: needs approval: ${call.name}",
                         )
                     }
+                    // Bounded wait: expiry becomes TimedOut (cancelled_by_user),
+                    // never an auto-approve. Interrupt also maps to TimedOut
+                    // so cancellation never releases the Tool.
                     try {
-                        gate.take()
+                        gate.poll(ApprovalGate.APPROVAL_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+                            ?: ApprovalDecision.TimedOut
                     } catch (_: InterruptedException) {
                         ApprovalDecision.TimedOut
                     }

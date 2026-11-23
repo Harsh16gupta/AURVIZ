@@ -105,6 +105,7 @@ fun AgentNav(
                             onVoiceClick = { showVoice = true },
                             onOpenBrowser = { navController.navigate(Dests.BROWSER) },
                             onApprovePending = vm::approvePendingSend,
+                            onApproveEdited = vm::approvePendingSendEdited,
                             onRejectPending = vm::rejectPendingSend,
                         )
                     }
