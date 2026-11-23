@@ -1,6 +1,6 @@
 package com.aurviz.agent
 
-// Ticket 12/25: the approval card model (ADR-0003, gaps §3C). The
+// Ticket 12/25: the Confirmation card model (ADR-0003, gaps §3C). The
 // preview card is the Confirmation gate's UI: it shows the exact
 // To/Subject/Body the model asked to send — never a paraphrase — and
 // highlights recipients not seen before, so the user approves the real

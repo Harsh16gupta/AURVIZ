@@ -288,3 +288,40 @@ Every case where the AI was wrong and how it was caught. Add an entry with file:
 - Note: the bounded exact-match exception contradicts ADR-0002 ("never
   executed") and ADR-0003 ("never holds the send tool") — flagged in
   `ScheduledRun.kt` per AGENTS.md; the amendment lands in #70, not here.
+
+## 2026-11-24 — Issue #70 T5 terminology, receipts, and decision record close-out (`main`)
+
+- **Gate-refusal string capitalized under an old assertion.** Canonicalizing
+  `ToolRegistry.kt:166` to "requires Confirmation: confirm, edit, or reject…"
+  broke `directExecuteRefusesGatedToolWithoutRunning`
+  (`app/src/test/java/com/aurviz/agent/ConfirmationGateTest.kt:130,135`),
+  which asserted lowercase `contains("confirmation")`. Caught on the first
+  full-suite run (1 failure / 399); updated the assertion to the canonical
+  `contains("Confirmation")` instead of reverting the string. Suite green
+  after: 399 tests, 0 failures.
+- **Case-sensitive receipt assert in the new test.** `scheduledAttemptIsHeld`
+  (`app/src/test/java/com/aurviz/agent/ConfirmationReceiptTest.kt`) asserted
+  `detail.contains("nothing ran yet")` against "Nothing ran yet." — failed
+  on the capital N. Fixed with `lowercase()` before contains; 11/11 green.
+- **Tree again held foreign uncommitted work beyond the handoff list**
+  (ticket-1/2 paths, same set as #67 plus mid-session additions). Verified
+  #70 in isolation by stashing those paths and restoring them untouched —
+  the #70 commit holds only the files below. Residual known drift, logged
+  not silently kept: code-internal `ApprovalDecision` / `ApprovalGate` /
+  `NeedsApproval` / `ApprovalCard` / `approvalCardFor` identifiers stay
+  (rename would churn ~15 test files against concurrent edits);
+  user-visible + docs + comments now read Confirmation/PendingApproval.
+  Follow-ups outside this ticket: `ScheduleWork.kt:222` "Approval needed"
+  notification (foreign-modified file), Confirmation-card/held-list UI
+  wiring to `receiptFor*` (ViewModel concurrently modified), a GLOSSARY
+  Receipt term (GLOSSARY has pre-existing uncommitted mods — untouched).
+- Tests: new `ConfirmationReceiptTest` (11 tests: allowed ×3, card/edited
+  approved, denied ×3 with reason, held ×2, all-five explainer). `RedTeamTest`
+  +4 (evil-forward via the real `runScheduledRoutine`, evil-with-consent
+  still held, memory-poisoning hold → HELD receipt, foreground deny → DENIED
+  receipt). Full `:app:testDebugUnitTest` green (399 tests, 0 failures).
+  No Compose changes, so no `assembleDebug` per the ticket rule.
+- ADR-0003 amended with the bounded exact-match exception (creation-time
+  consent record, fire-time revalidation, drift defers); ADR-0002 given a
+  one-line pointer to it. Both replace the absolute "never executes"
+  wording instead of silently overriding it.

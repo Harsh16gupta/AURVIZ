@@ -33,7 +33,7 @@ class PendingApprovalTest {
         scheduleId = scheduleId,
         toolName = "send_email",
         arguments = mapOf("to" to to, "subject" to "Hi", "body" to "hello"),
-        reason = "scheduled run: sensitive tool held for user approval, never executed",
+        reason = "scheduled run: sensitive tool held for an in-app Confirmation decision, never executed",
     )
 
     private fun registry(gmail: RecordingGmail, schedules: InMemoryScheduleStore = InMemoryScheduleStore()) =
@@ -130,7 +130,7 @@ class PendingApprovalTest {
                     scheduleId = "sched_9",
                     toolName = "create_schedule",
                     arguments = mapOf("task" to "check emails", "when" to "every morning at 9am"),
-                    reason = "scheduled run: sensitive tool held for user approval, never executed",
+                    reason = "scheduled run: sensitive tool held for an in-app Confirmation decision, never executed",
                 ),
             )
         val first = approvePendingApproval(store, saved.id, registry(gmail, schedules))
@@ -170,7 +170,7 @@ class PendingApprovalTest {
         assertEquals(ScheduleRunStatus.BLOCKED_WRITE, outcome.run.status)
         assertTrue(gmail.sentRaws.isEmpty())
         val held = approvals.list().single()
-        assertTrue(outcome.notification.text.contains("approval"))
+        assertTrue(outcome.notification.text.contains("Confirmation"))
 
         val approved = approvePendingApproval(approvals, held.id, registry(gmail))
         assertTrue(approved is PendingApprovalOutcome.Executed)

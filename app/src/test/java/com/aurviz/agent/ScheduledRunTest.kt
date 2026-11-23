@@ -146,7 +146,7 @@ class ScheduledRunTest {
         assertEquals("sched_1", approval.scheduleId)
         assertEquals("x@y.z", approval.arguments["to"])
         assertTrue(approval.reason.contains("never executed"))
-        assertTrue(outcome.notification.text.contains("approval"))
+        assertTrue(outcome.notification.text.contains("Confirmation"))
     }
 
     @Test
@@ -344,7 +344,7 @@ class ScheduledRunTest {
                     scheduleId = "sched_7",
                     toolName = "send_email",
                     arguments = mapOf("to" to "x@y.z"),
-                    reason = "scheduled run: sensitive tool held for user approval, never executed",
+                    reason = "scheduled run: sensitive tool held for an in-app Confirmation decision, never executed",
                 ),
             )
         assertEquals("send_email", saved.toolName)
@@ -478,12 +478,12 @@ class ScheduledRunTest {
         assertTrue(outcome is ScheduledRunOutcome.Ran)
         outcome as ScheduledRunOutcome.Ran
         assertEquals(ScheduleRunStatus.BLOCKED_WRITE, outcome.run.status)
-        // Held for approval with the exact attempted args; transport untouched.
+        // Held for a Confirmation decision with the exact attempted args; transport untouched.
         assertEquals(1, outcome.blocked.size)
         assertEquals("send_email", outcome.blocked.single().toolName)
         assertEquals("x@evil.com", outcome.blocked.single().arguments["to"])
         assertEquals(1, approvals.list().size)
         assertTrue(gmail.sentRaws.isEmpty())
-        assertTrue(outcome.notification.text.contains("need your approval"))
+        assertTrue(outcome.notification.text.contains("need your Confirmation"))
     }
 }

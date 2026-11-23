@@ -113,7 +113,7 @@ class ScheduledConsentTest {
         assertEquals(2, approvals.list().size)
     }
 
-    // --- Exact match runs, no approval row. ---
+    // --- Exact match runs, no held row. ---
 
     @Test
     fun exactMatchConsentRunsOnceWithNoApprovalRow() {

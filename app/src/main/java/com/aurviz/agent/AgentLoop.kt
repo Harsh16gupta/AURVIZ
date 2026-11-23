@@ -15,8 +15,8 @@ import org.json.JSONObject
 // Boundaries (AGENTS.md): the Agent orchestrates; Tool implementations
 // stay in the registry. The Confirmation gate for requiresConfirmation
 // Tools lives in the registry (executeGated) and the loop routes every
-// call through it, suspending on the confirm hook (approve, edited-
-// approve, reject, or timeout); real UI suspension wires in with ticket 24.
+// call through it, suspending on the confirm hook (confirmed,
+// confirmed-with-edits, reject, or timeout); real UI suspension wires in with ticket 24.
 
 // One turn of the conversation. Roles: "user" for the command,
 // "assistant" for LLM turns (carrying its Tool calls), "tool" for one
@@ -63,7 +63,7 @@ sealed interface AgentEvent {
         // Gated Tools report reject/timeout as Success(cancelled_by_user)
         // with approved=false: consumers must check approved, not just the
         // result shape. effectiveArgs are the args that actually ran
-        // (edited-approve changes them) — consumers must read these, never
+        // (edited-confirm changes them) — consumers must read these, never
         // the original call arguments.
         val approved: Boolean,
         val effectiveArgs: Map<String, Any?>,

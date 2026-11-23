@@ -4,7 +4,7 @@ package com.aurviz.agent
 // Preference (GLOSSARY Preference). A send to an allowed recipient skips
 // the Confirmation card; everything else still asks. The store only
 // records the grant — the deterministic SendPolicy still runs inside
-// executeGated after any approval, so policy denial always wins over
+// executeGated after any Confirmation decision, so policy denial always wins over
 // allow-always, and bulk/evil-forward never leak through. The eligibility
 // rule requires exactly one plausible recipient: multi-address sends are
 // never eligible, and there is no blanket allow-all (empty and wildcard
@@ -55,7 +55,7 @@ class InMemoryAllowAlwaysStore : AllowAlwaysStore {
 fun normalizeAllowAlways(address: String): String = address.trim().lowercase()
 
 /** Recipients of one send_email call, split and cleaned for the
- *  eligibility check. The card derivation (approvalCardFor) renders the
+ *  eligibility check. The Confirmation card derivation (approvalCardFor) renders the
  *  same split for the unseen flag. */
 fun allowAlwaysRecipients(args: Map<String, Any?>): List<String> =
     (args["to"] as? String).orEmpty().split(",").map { it.trim() }.filter { it.isNotEmpty() }

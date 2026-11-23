@@ -10,8 +10,9 @@ import org.json.JSONObject
 // recover from ({ok:false, error, retryable}) instead of crashing.
 // Ticket 09/24: the Confirmation gate lives here, so the model has no
 // path around it. execute() refuses gated Tools outright (gate-refusal);
-// executeGated() is the single gated path: it suspends on the approver
-// until it returns approve, edited-approve, reject, or timeout, and
+// executeGated() is the single gated path: it suspends on the confirmer
+// until it returns a Confirmation decision (confirmed, confirmed-with-edits,
+// reject, or timeout), and
 // reject/timeout return {status:"cancelled_by_user"} without running
 // the executor.
 
@@ -163,7 +164,7 @@ class ToolRegistry {
         validateArgs(definition, args)?.let { return it }
         if (definition.requiresConfirmation) {
             return ToolResult.Failure(
-                "tool '$name' requires confirmation: approve, edit, or reject it through executeGated first",
+                "tool '$name' requires Confirmation: confirm, edit, or reject it through executeGated first",
                 retryable = false,
             )
         }
@@ -172,7 +173,7 @@ class ToolRegistry {
 
     /** Gated entry point (ticket 09/24): the only path that runs a
      *  requiresConfirmation Tool on the model's behalf. Invalid args fail
-     *  before the approver is consulted; edited args are revalidated
+     *  before the confirmer is consulted; edited args are revalidated
      *  before they run. Reject and timeout return Success
      *  {status:"cancelled_by_user"} (timeout adds a reason) so the model
      *  recovers and the loop continues or ends cleanly. Approved calls run

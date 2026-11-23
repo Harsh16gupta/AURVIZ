@@ -266,7 +266,7 @@ fun sendWithConfirm(api: GmailApi, rawBase64Url: String, confirmed: Boolean): Bo
 
 // --- Ticket 04/24: gated send executor + deterministic policy seam. ---
 // ADR-0003: send_email is HIGH risk; the Confirmation gate lives in the
-// ToolRegistry, so the model has no path around it. Approval travels
+// ToolRegistry, so the model has no path around it. The Confirmation decision travels
 // out-of-band (the `approved` flag comes from the gate, never from LLM
 // args, or the model could forge it). Plain registry execute() always
 // passes approved=false and refuses without touching the transport.
@@ -291,7 +291,7 @@ object AllowAllSendPolicy : SendPolicy {
 // Ticket 12/25: the deterministic pre-send check (ADR-0003, gaps §3E).
 // Runs after the Confirmation gate, before any transport touch, no
 // matter what the model said: even a gate Approved cannot send past a
-// Deny. Three narrow holds, each JVM-tested in ApprovalCardTest:
+// Deny. Three narrow holds, each JVM-tested at the Confirmation card level (ApprovalCardTest):
 // malformed recipients, bulk-recipient sends, and bulk forwards of
 // mailbox content (the evil-forward exfil shape: pasted "From:" lines
 // and "gmail:" source tags from tool results). Ordinary sends pass.
@@ -338,7 +338,7 @@ fun embeddedMailCount(body: String): Int {
 fun headerValueHasNewline(value: String): Boolean = value.any { it == '\r' || it == '\n' }
 
 // Gated send: validates the draft, rejects header newlines, demands gate
-// approval, runs the deterministic policy check, then sends exactly one
+// Confirmation, runs the deterministic policy check, then sends exactly one
 // MIME message built from the approved To/Subject/Body. Never throws:
 // every failure comes back as a structured Failure the model can react
 // to, and the transport is untouched unless every check passes.

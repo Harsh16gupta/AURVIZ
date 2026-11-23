@@ -80,7 +80,7 @@ data class AgentUiState(
     val pendingApprovalProposalId: String? = null,
     // Ticket 15/28: writes a scheduled run held for the user (GLOSSARY
     // Confirmation for unattended runs, ADR-0002). Each row renders its
-    // approval card in-app; approving runs the held call exactly once,
+    // Confirmation card in-app; approving runs the held call exactly once,
     // rejecting drops it untouched.
     val pendingApprovals: List<PendingApproval> = emptyList(),
     val pendingApprovalUnseen: List<String> = emptyList(),

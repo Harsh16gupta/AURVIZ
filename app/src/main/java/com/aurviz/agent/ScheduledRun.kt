@@ -4,7 +4,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 // Ticket 17/24: scheduled-run deferral seam (ADR-0002, gaps §3E). A
-// scheduled run has no user present, so its Confirmation never approves:
+// scheduled run has no user present, so its Confirmation gate never confirms:
 // the loop runs on the read-only allowlist (GLOSSARY Schedule — the
 // scheduled registry never holds the send tool) and any sensitive attempt
 // the model still makes (send_email, schedule writes) becomes a
@@ -14,7 +14,7 @@ import org.json.JSONObject
 // below is the JVM-testable seam.
 //
 // Ticket 15/28: the row carries a stable id (Room pid / in-memory
-// counter) so the in-app screen can approve or reject one row. take() is
+// counter) so the in-app screen can confirm or reject one row. take() is
 // the atomic claim: it removes and returns the row, or null when another
 // approval already claimed it. approvePendingApproval claims first and
 // only then runs the held call through the registry's single gated path
@@ -58,14 +58,14 @@ class InMemoryPendingApprovalStore : PendingApprovalStore {
 // One in-app decision on a held write: Executed carries the held call
 // plus the gated result (Success or a structured Failure the screen can
 // show); Rejected means the row was dropped untouched; AlreadyHandled
-// means a previous approve/reject already claimed the row.
+// means a previous confirm/reject decision already claimed the row.
 sealed interface PendingApprovalOutcome {
     data class Executed(val approval: PendingApproval, val result: ToolResult) : PendingApprovalOutcome
     data object Rejected : PendingApprovalOutcome
     data object AlreadyHandled : PendingApprovalOutcome
 }
 
-// In-app approve: claim the row first so a concurrent double-approve
+// In-app confirm: claim the row first so a concurrent double-confirm
 // loses here, before any transport touch; then run the exact held
 // arguments through the single gated path as Approved. The deterministic
 // policy screen still applies (a Deny comes back as Executed Failure),
@@ -103,7 +103,7 @@ fun rejectPendingApproval(
 val SCHEDULED_SENSITIVE_TOOLS = setOf("send_email", "create_schedule", "cancel_schedule")
 
 // --- Ticket #67: bounded creation-time consent for scheduled sends. ---
-// Granted when the user approves a Schedule whose routine sends exactly one
+// Granted when the user confirms a Schedule whose routine sends exactly one
 // templated email (exact recipient set + subject/body template + owning
 // Schedule id). Fire-time re-validates the exact match plus the
 // deterministic SendPolicy with no human present: exact match runs, any
@@ -208,7 +208,7 @@ fun isConsentedSend(
     return consentPolicyAllows(call.arguments, policy)
 }
 
-// One unattended run: the loop with a never-approving Confirmation hook,
+// One unattended run: the loop with a never-confirming Confirmation hook,
 // then every sensitive attempt the model made is held as a PendingApproval
 // row. Reads run normally; sends and schedule writes never execute.
 fun runScheduled(
@@ -230,7 +230,7 @@ fun runScheduled(
                     scheduleId = scheduleId,
                     toolName = step.call.name,
                     arguments = step.call.arguments,
-                    reason = "scheduled run: sensitive tool held for user approval, never executed",
+                    reason = "scheduled run: sensitive tool held for an in-app Confirmation decision, never executed",
                 ),
             )
         }
@@ -248,10 +248,10 @@ fun runScheduled(
 
 // ADR-0002: scheduled runs see reads only. A scheduled send_email or
 // schedule/memory write is never executed: the loop records a
-// PendingApproval row and the user approves in-app.
+// PendingApproval row and the user confirms in-app.
 // getImportantEmails is a read-only legacy fetch (ADR-0003: reads are
 // ungated), so it stays ungated here too — otherwise a read would be
-// held as an approval row.
+// held as a Confirmation row.
 val SCHEDULED_RUN_ALLOWLIST: Set<String> =
     setOf(
         "search_emails",
@@ -420,7 +420,7 @@ fun scheduledRegistry(
 
 private fun blockedScheduledTool(name: String): ToolResult =
     ToolResult.Failure(
-        "tool '$name' never runs in scheduled runs: recorded for approval instead; nothing ran",
+        "tool '$name' never runs in scheduled runs: recorded for a Confirmation decision instead; nothing ran",
         retryable = false,
     )
 
@@ -459,7 +459,7 @@ class HeadlessChatLlm(
 }
 
 // What the summary note says: the loop's answer (or its error), plus
-// how many attempted writes are waiting for approval, plus the retry
+// how many attempted writes are waiting for a Confirmation decision, plus the retry
 // disclosure when private context was replayed across providers (ADR-0004).
 // Total failure still discloses who saw the prompt — the line names the
 // tried hosts instead of going silent when no provider answered.
@@ -471,7 +471,7 @@ fun scheduledSummary(
     providerUsed: String? = null,
 ): String {
     val base = answer ?: error.orEmpty()
-    val withBlocked = if (blockedCount > 0) "$base (${blockedCount} request(s) need your approval)" else base
+    val withBlocked = if (blockedCount > 0) "$base (${blockedCount} request(s) need your Confirmation)" else base
     if (providersTried.size <= 1) return withBlocked
     val retryBit =
         if (providerUsed != null) " (retried on $providerUsed; tried ${providersTried.joinToString(", ")})"
@@ -511,7 +511,7 @@ sealed interface ScheduledRunOutcome {
 
 // One headless run: claim the idempotency key first (double-fires stop
 // here, before any LLM call), run the AgentLoop on the read-only view
-// with a headless confirmer (no UI exists to approve: every write is
+// with a headless confirmer (no UI exists to confirm: every write is
 // rejected and recorded), then store the run and build the note.
 // A stale RUNNING row (process death between claim and finish) is reclaimed
 // after STALE_RUN_TTL_MS instead of skipping forever; a fresh RUNNING row
@@ -568,7 +568,7 @@ fun runScheduledRoutine(
                     scheduleId = schedule.id,
                     toolName = call.name,
                     arguments = call.arguments,
-                    reason = "scheduled run: sensitive tool held for user approval, never executed",
+                    reason = "scheduled run: sensitive tool held for an in-app Confirmation decision, never executed",
                 ),
             )
         }

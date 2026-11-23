@@ -127,12 +127,12 @@ class ConfirmationGateTest {
         val registry = registry(gmail)
         val sendRefused = registry.execute("send_email", sendArgs())
         assertTrue(sendRefused is ToolResult.Failure)
-        assertTrue((sendRefused as ToolResult.Failure).error.contains("confirmation"))
+        assertTrue((sendRefused as ToolResult.Failure).error.contains("Confirmation"))
         assertFalse(sendRefused.retryable)
 
         val scheduleRefused = registry.execute("create_schedule", mapOf("task" to "x", "when" to "at 9am"))
         assertTrue(scheduleRefused is ToolResult.Failure)
-        assertTrue((scheduleRefused as ToolResult.Failure).error.contains("confirmation"))
+        assertTrue((scheduleRefused as ToolResult.Failure).error.contains("Confirmation"))
         assertTrue(gmail.sentRaws.isEmpty())
     }
 
