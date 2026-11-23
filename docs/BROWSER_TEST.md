@@ -39,3 +39,30 @@ Type each into the Browser tab and press Open; record the visible `webError`/sta
 Also tap a non-web link from the Extracted panel (e.g. a `file:` href) — it routes through the same `openWeb` decision and must refuse the same way.
 
 Result of the on-device settings audit + typed-URL matrix in *this* environment: **NOT RUN — no device attached.** The tables above are the method, not a result.
+
+## On-device result — Realme RMX3771, Android 15 (2026-11-23)
+
+Build: current `main` with NG-5 (`557f727`), installed via
+`./gradlew :app:installDebug`. Driven over adb (Browser tab via tap flow;
+keyboard dismissed with ESC before tapping Open — a covered Open button
+silently swallows the tap). Verdicts read back from the UI hierarchy.
+
+- **T1 `https://example.com` → LOADED.** Real "Example Domain" page rendered
+  in the WebView. Happy path unchanged.
+- **T2 `http://example.com/path?q=1` → policy ALLOWED, render blocked by the
+  platform.** No refusal (correct: http passes the allowlist); the WebView
+  shows `net::ERR_CLEARTEXT_NOT_PERMITTED` (app does not set
+  `usesCleartextTraffic`). Pre-existing behavior — the old `openWeb` loaded
+  http into the same WebView, so NG-5 changed nothing here. "Loads as
+  before" = routes as before.
+- **T3 `file:///etc/passwd` → REFUSED.** `Not opening: Only http:// and
+  https:// addresses open here — "file:///etc/passwd" was not loaded.`
+- **T4 `javascript:alert(1)` → REFUSED** with the same explanation shape.
+- **T5 `example.com` (bare host) → REFUSED.** No silent `https://` upgrade
+  (the old behavior); matches the Tool layer.
+
+Settings audit (file/content access off, mixed-content pinned) is code-set
+in `WebViewHolder.obtain` and has no remote-readable surface — unit +
+code-confirmed only, same as before. Note: a phone-call screen ("Arjun")
+took the foreground mid-run; no call UI was touched, testing continued in
+Aurviz after bringing it back.
