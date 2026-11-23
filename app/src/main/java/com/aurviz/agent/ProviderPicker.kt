@@ -1,5 +1,7 @@
 package com.aurviz.agent
 
+import org.json.JSONArray
+
 // T4: picker + auto-fallback. Pure decision logic, JVM-testable.
 // The screen (picker UI) and real HTTP stay in thin wiring below.
 
@@ -64,6 +66,40 @@ fun planWithFallback(
         if (candidate.apiKey.isBlank()) continue
         try {
             val result = candidate.provider.plan(command)
+            tried += candidate.name
+            return FallbackResult(result, candidate.name, tried.toList())
+        } catch (e: LlmException) {
+            if (!e.failure.fallback) throw e
+            tried += candidate.name
+            lastError = e
+            val hasNext = candidates.drop(index + 1).any { it.apiKey.isNotBlank() }
+            if (hasNext) sleeper(backoffDelayMs(e.failure.retryAfter, retries++))
+        }
+    }
+    if (tried.isEmpty()) throw IllegalStateException("No provider with API key")
+    throw lastError ?: IllegalStateException("No provider with API key")
+}
+
+// Structured fallback (ADR-0005): same try-order, disclosure, and backoff
+// as planWithFallback, but the loop's messages ride intact. Providers
+// implementing StructuredLlmProvider get the real roles; legacy plan-only
+// doubles get the flattened string so scripted tests keep working.
+fun planWithFallbackMessages(
+    messages: List<ChatMessage>,
+    candidates: List<NamedProvider>,
+    tools: JSONArray = allToolSchemas(),
+    sleeper: (Long) -> Unit = { Thread.sleep(it) },
+): FallbackResult {
+    val tried = mutableListOf<String>()
+    var lastError: Exception? = null
+    var retries = 0
+    for ((index, candidate) in candidates.withIndex()) {
+        if (candidate.apiKey.isBlank()) continue
+        try {
+            val structured = candidate.provider as? StructuredLlmProvider
+            val result =
+                structured?.chatMessages(messages, tools)
+                    ?: candidate.provider.plan(flattenChatMessages(messages))
             tried += candidate.name
             return FallbackResult(result, candidate.name, tried.toList())
         } catch (e: LlmException) {

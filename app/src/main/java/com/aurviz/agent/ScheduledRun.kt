@@ -269,7 +269,7 @@ class HeadlessChatLlm(
     private val candidates: List<NamedProvider>,
 ) : ChatLlmProvider {
     override fun chat(messages: List<ChatMessage>): LlmResult =
-        planWithFallback(renderScheduledPrompt(messages), candidates).result
+        planWithFallbackMessages(messages, candidates).result
 }
 
 // What the summary note says: the loop's answer (or its error), plus

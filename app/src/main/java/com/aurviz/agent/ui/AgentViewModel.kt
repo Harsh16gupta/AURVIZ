@@ -60,7 +60,7 @@ import com.aurviz.agent.listSchedules
 import com.aurviz.agent.newCodeVerifier
 import com.aurviz.agent.openPage
 import com.aurviz.agent.parseSchedule
-import com.aurviz.agent.planWithFallback
+import com.aurviz.agent.planWithFallbackMessages
 import com.aurviz.agent.refreshBatteryNeeded
 import com.aurviz.agent.scheduleTimingNote
 import com.aurviz.agent.readImportant
@@ -142,7 +142,7 @@ class FallbackChatLlm(
         private set
 
     override fun chat(messages: List<ChatMessage>): LlmResult {
-        val fb = planWithFallback(renderLoopPrompt(messages), candidates)
+        val fb = planWithFallbackMessages(messages, candidates)
         for (name in fb.tried) if (name !in tried) tried += name
         lastProvider = fb.providerName
         return fb.result

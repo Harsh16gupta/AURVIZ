@@ -120,6 +120,78 @@ fun buildToolsRequestBody(model: String, userText: String, tools: JSONArray, sys
         .put("tool_choice", "auto")
 }
 
+// ADR-0005: structured wire format. The loop's messages list rides intact:
+// system (framing + delimited memories), user (bare command), assistant
+// turns carrying tool_calls, and role:"tool" results matched by
+// tool_call_id. Untrusted mail/page/memory text travels only inside tool
+// results and the system memories section — never concatenated into a
+// single user string, so the role boundary survives on the wire.
+fun chatMessageToJson(message: ChatMessage): JSONObject {
+    val json = JSONObject().put("role", message.role)
+    when (message.role) {
+        "assistant" -> {
+            if (message.content != null) json.put("content", message.content)
+            else json.put("content", JSONObject.NULL)
+            if (message.toolCalls.isNotEmpty()) {
+                val calls = JSONArray()
+                for (call in message.toolCalls) {
+                    val argsJson = JSONObject()
+                    for ((k, v) in call.arguments) {
+                        when (v) {
+                            null -> argsJson.put(k, JSONObject.NULL)
+                            is Number, is Boolean, is String -> argsJson.put(k, v)
+                            else -> argsJson.put(k, v.toString())
+                        }
+                    }
+                    val fn = JSONObject().put("name", call.name).put("arguments", argsJson.toString())
+                    val raw = JSONObject().put("type", "function").put("function", fn)
+                    if (call.id != null) raw.put("id", call.id)
+                    calls.put(raw)
+                }
+                json.put("tool_calls", calls)
+            }
+        }
+        "tool" -> {
+            json.put("content", message.content.orEmpty())
+            if (message.toolCallId != null) json.put("tool_call_id", message.toolCallId)
+        }
+        else -> json.put("content", message.content.orEmpty())
+    }
+    return json
+}
+
+fun buildChatRequestBody(model: String, messages: List<ChatMessage>, tools: JSONArray): JSONObject {
+    val wire = JSONArray()
+    for (message in messages) wire.put(chatMessageToJson(message))
+    return JSONObject()
+        .put("model", model)
+        .put("messages", wire)
+        .put("tools", tools)
+        .put("tool_choice", "auto")
+}
+
+// Legacy single-string fallback for providers that only implement plan().
+// Production HTTP (OpenAiChatProvider) never uses this; it exists so
+// scripted LlmProvider doubles in tests keep working through the messages
+// fallback seam.
+fun flattenChatMessages(messages: List<ChatMessage>): String =
+    messages.joinToString("\n") { message ->
+        when (message.role) {
+            "system" -> "[system] ${message.content.orEmpty()}"
+            "assistant" ->
+                ("[assistant] " + message.content.orEmpty() +
+                    message.toolCalls.joinToString(" ", prefix = " ") { it.name }).trim()
+            "tool" -> "[tool ${message.toolCallId}] ${message.content.orEmpty()}"
+            else -> message.content.orEmpty()
+        }
+    }
+
+// Structured provider seam: chatMessages sends the real roles. plan()
+// stays for single-shot callers and legacy test doubles.
+interface StructuredLlmProvider : LlmProvider {
+    fun chatMessages(messages: List<ChatMessage>, tools: JSONArray): LlmResult
+}
+
 fun parseToolCalls(response: JSONObject): LlmResult {
     val message = response.getJSONArray("choices").getJSONObject(0).getJSONObject("message")
     val calls = mutableListOf<ToolCall>()
@@ -170,11 +242,10 @@ class OpenAiChatProvider(
     private val apiKey: String,
     private val model: String,
     private val client: OkHttpClient = llmHttpClient(),
-) : LlmProvider {
-    override fun plan(userText: String): LlmResult {
+) : StructuredLlmProvider {
+    override fun chatMessages(messages: List<ChatMessage>, tools: JSONArray): LlmResult {
         val url = baseUrl.trimEnd('/') + "/chat/completions"
-        val json =
-            buildToolsRequestBody(model, userText, allToolSchemas(), buildSystemPrompt()).toString()
+        val json = buildChatRequestBody(model, messages, tools).toString()
         val request =
             Request.Builder()
                 .url(url)
@@ -192,6 +263,19 @@ class OpenAiChatProvider(
             }
             return parseToolCalls(JSONObject(text))
         }
+    }
+
+    override fun plan(userText: String): LlmResult {
+        // Legacy single-shot path: same shape as before (system framing +
+        // bare user text over the full advertised set) via the structured
+        // body. The loop's chat path uses chatMessages() so roles survive.
+        return chatMessages(
+            listOf(
+                ChatMessage(role = "system", content = buildSystemPrompt()),
+                ChatMessage(role = "user", content = userText),
+            ),
+            allToolSchemas(),
+        )
     }
 }
 
