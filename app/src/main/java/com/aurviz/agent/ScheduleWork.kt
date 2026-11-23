@@ -54,7 +54,7 @@ class ScheduleWorker(context: Context, params: WorkerParameters) : Worker(contex
         val fireTime = inputData.getLong(FIRE_TIME_KEY, 0L).takeIf { it > 0 } ?: System.currentTimeMillis()
         val db =
             Room.databaseBuilder(applicationContext, AppDb::class.java, "aurviz.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .build()
         try {
             val scheduleStore = RoomScheduleStore(db.schedules())
@@ -148,7 +148,7 @@ class RescheduleWorker(context: Context, params: WorkerParameters) : Worker(cont
     override fun doWork(): Result {
         val db =
             Room.databaseBuilder(applicationContext, AppDb::class.java, "aurviz.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .build()
         try {
             rescheduleAll(RoomScheduleStore(db.schedules())) { registerRoutineAlarm(applicationContext, it) }

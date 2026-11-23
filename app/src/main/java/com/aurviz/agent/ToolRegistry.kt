@@ -507,8 +507,8 @@ fun defaultToolRegistry(
                 val store = memoryStore
                     ?: return@ToolDefinition ToolResult.Failure("memory store is not available", retryable = false)
                 val query = args["query"] as String
-                val max = (args["max_results"] as Number?)?.toInt()?.coerceAtLeast(0)
-                val hits = recallFor(store, query).let { if (max != null) it.take(max) else it }
+                val max = (args["max_results"] as Number?)?.toInt()?.coerceAtLeast(0) ?: 5
+                val hits = recallFor(store, query).take(max)
                 ToolResult.Success(
                     hits.map { memory ->
                         mapOf(

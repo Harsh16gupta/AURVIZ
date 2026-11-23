@@ -39,6 +39,22 @@ interface MemoryStore {
 
     // Ticket #31: record a recall so recency (lastUsed) and useCount learn.
     fun markUsed(id: String, nowMs: Long = System.currentTimeMillis())
+
+    // Offline FTS candidate lookup. The default is the same prefix-term
+    // model over the listed rows (keeps InMemoryStore working with no
+    // database); RoomMemoryStore overrides it with a SQLite FTS MATCH over
+    // the memoriesFts index instead of scanning the table.
+    fun searchFts(ftsQuery: String): List<Memory> {
+        val words = ftsQuery.split(" ").map { it.removeSuffix("*") }.filter { it.isNotBlank() }.toSet()
+        return list()
+            .mapIndexed { index, memory ->
+                val haystack = memory.text.lowercase().split(Regex("[^a-z0-9]+")).filter { it.isNotBlank() }.toSet()
+                val matched = words.count { term -> haystack.any { it.startsWith(term) } }
+                Triple(memory, matched, index)
+            }
+            .filter { (_, matched, _) -> matched == words.size && words.isNotEmpty() }
+            .map { (memory, _, _) -> memory }
+    }
 }
 
 class InMemoryStore : MemoryStore {
@@ -97,7 +113,7 @@ fun forgetPreview(store: MemoryStore, query: String): List<Memory> =
 // embeddings (those are ticket #32); set online=false to force the
 // offline FTS fallback path explicitly.
 fun recallFor(store: MemoryStore, query: String, online: Boolean = true): List<Memory> =
-    rankMemories(store.list(), query, online = online)
+    rankMemories(store, query, online = online)
 
 // Shared boost ordering: most matched terms first, then higher
 // importance, then more recent activity, then later insertion.
@@ -110,10 +126,11 @@ private fun boostComparator(): Comparator<Triple<Memory, Int, Int>> =
 private fun memoryTokens(text: String): Set<String> =
     text.lowercase().split(Regex("[^a-z0-9]+")).filter { it.isNotBlank() }.toSet()
 
-private fun rankMemories(memories: List<Memory>, query: String, online: Boolean): List<Memory> {
+private fun rankMemories(store: MemoryStore, query: String, online: Boolean): List<Memory> {
     val words = memoryTokens(query)
     if (words.isEmpty()) return emptyList()
-    if (!online) return ftsRecall(memories, words)
+    if (!online) return ftsRecall(store, words)
+    val memories = store.list()
     return memories
         .mapIndexed { index, memory ->
             Triple(memory, memoryTokens(memory.text).intersect(words).size, index)
@@ -129,16 +146,31 @@ private fun rankMemories(memories: List<Memory>, query: String, online: Boolean)
 fun toFtsQuery(query: String): String =
     memoryTokens(query).joinToString(" ") { "$it*" }
 
-private fun ftsRecall(memories: List<Memory>, words: Set<String>): List<Memory> =
-    memories
-        .mapIndexed { index, memory ->
+private fun ftsRecall(store: MemoryStore, words: Set<String>): List<Memory> {
+    if (words.isEmpty()) return emptyList()
+    // Real FTS MATCH candidates from the store's index (Room) or the same
+    // prefix-term model over listed rows (in-memory default) — then the
+    // shared boost ranking below.
+    val candidates =
+        try {
+            store.searchFts(words.joinToString(" ") { "$it*" })
+        } catch (_: Exception) {
+            emptyList()
+        }
+    val candidateIds = candidates.map { it.id }.toSet()
+    val scored =
+        store.list().mapIndexed { index, memory ->
             val haystack = memoryTokens(memory.text)
             val matched = words.count { term -> haystack.any { it.startsWith(term) } }
             Triple(memory, matched, index)
         }
-        .filter { (_, matched, _) -> matched == words.size }
+    return scored
+        .filter { (memory, matched, _) ->
+            matched == words.size && (candidateIds.isEmpty() || memory.id in candidateIds)
+        }
         .sortedWith(boostComparator())
         .map { (memory, _, _) -> memory }
+}
 
 // Ticket 16/29: memories travel in a delimited system section, never
 // concatenated into the user message (ADR-0005). The loop renders this

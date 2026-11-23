@@ -26,6 +26,7 @@ import com.aurviz.agent.LlmResult
 import com.aurviz.agent.MIGRATION_1_2
 import com.aurviz.agent.MIGRATION_2_3
 import com.aurviz.agent.MIGRATION_3_4
+import com.aurviz.agent.MIGRATION_4_5
 import com.aurviz.agent.Memory
 import com.aurviz.agent.NamedProvider
 import com.aurviz.agent.PendingApproval
@@ -66,7 +67,6 @@ import com.aurviz.agent.FallbackExhausted
 import com.aurviz.agent.planWithFallbackMessages
 import com.aurviz.agent.refreshBatteryNeeded
 import com.aurviz.agent.scheduleTimingNote
-import com.aurviz.agent.readImportant
 import com.aurviz.agent.recallFor
 import com.aurviz.agent.registerRoutineAlarm
 import com.aurviz.agent.rejectPendingApproval
@@ -173,7 +173,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
 
     private val db: AppDb =
         Room.databaseBuilder(application, AppDb::class.java, "aurviz.db")
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
             .build()
     private val roomStore = RoomMemoryStore(db.memories())
     private val scheduleStore = RoomScheduleStore(db.schedules())
@@ -228,13 +228,14 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
             lower.startsWith("remember ") -> handleRemember(command.substring(9).trim())
             lower.startsWith("forget ") -> handleForgetPreview(command.substring(7).trim())
             lower.startsWith("email ") -> handleEmailSend(command.substring(6).trim())
-            lower == "check mail" || lower == "check email" ||
-                lower == "check important emails" || lower == "check emails" -> handleEmailRead()
             lower == "disconnect gmail" -> revokeGmail()
             lower.startsWith("open ") -> openWeb(command.substring(5).trim())
             lower.startsWith("schedule ") -> handleScheduleCreate(command.substring(9).trim())
             lower == "schedules" -> refreshSchedules(showLine = true)
             lower.startsWith("unschedule ") -> handleUnschedule(command.substring(11).trim())
+            // Reads (including "check mail") run the end-to-end loop like
+            // every other command: the read Tools are ungated, so the loop
+            // fetches and summarizes without a Confirmation card.
             else -> runLoopCommand(command)
         }
     }
@@ -375,39 +376,6 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
 
     fun rejectEmail() {
         _state.update { it.copy(pendingEmail = null, statusLine = "Not sent.") }
-    }
-
-    private fun handleEmailRead() {
-        if (!tokens.isConnected()) {
-            _state.update { it.copy(statusLine = "Connect Gmail first (Settings).") }
-            return
-        }
-        _state.update { it.copy(statusLine = "Checking mailbox…") }
-        viewModelScope.launch(Dispatchers.IO) {
-            val t0 = System.currentTimeMillis()
-            try {
-                val found = readImportant(gmail, max = 5)
-                val ms = System.currentTimeMillis() - t0
-                _state.update {
-                    it.copy(
-                        statusLine = if (found.isEmpty()) {
-                            "Inbox zero — nothing unread."
-                        } else {
-                            "Important:\n" + found.joinToString("\n") { e -> "• ${e.from}: ${e.subject}" }
-                        },
-                        emails = found,
-                        timeline = buildTimeline(
-                            Plan(listOf(ToolCall("gmail", "getImportantEmails", mapOf("max_results" to 5)))),
-                            doneCount = 1,
-                            error = null,
-                        ),
-                        perf = it.perf.copy(toolMs = ms),
-                    )
-                }
-            } catch (e: Exception) {
-                _state.update { it.copy(statusLine = "Read failed: ${e.message}", timeline = emptyList()) }
-            }
-        }
     }
 
     fun startSignIn() {
@@ -971,7 +939,8 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 // Ticket 16/29: memories ride in the loop's delimited system
                 // section via recallFor — never concatenated into the command.
-                val memories = recallFor(roomStore, cmd)
+                // Top 5 only, matching the benchmarked prompt budget.
+                val memories = recallFor(roomStore, cmd).take(5)
                 when (val result = loop.run(cmd, memories)) {
                     is AgentLoopResult.Answered -> {
                         val tried = chat.tried.toList()

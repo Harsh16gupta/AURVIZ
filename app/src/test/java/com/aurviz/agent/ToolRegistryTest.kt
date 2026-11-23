@@ -270,4 +270,23 @@ class ToolRegistryTest {
         assertTrue(result.error.contains("query"))
         assertTrue(result.retryable)
     }
+
+    @Test
+    fun searchMemoryDefaultsToFiveResults() {
+        val store = InMemoryStore()
+        val registry =
+            defaultToolRegistry(
+                gmailApi = FakeGmail(),
+                scheduleStore = InMemoryScheduleStore(),
+                memoryStore = store,
+            )
+        for (i in 1..8) {
+            registry.execute("save_memory", mapOf("text" to "shared fact number $i boss", "source" to "you told me"))
+        }
+        val found = registry.execute("search_memory", mapOf("query" to "shared fact boss"))
+        assertTrue(found is ToolResult.Success)
+        @Suppress("UNCHECKED_CAST")
+        val rows = (found as ToolResult.Success).data as List<Map<String, Any?>>
+        assertEquals(5, rows.size)
+    }
 }
