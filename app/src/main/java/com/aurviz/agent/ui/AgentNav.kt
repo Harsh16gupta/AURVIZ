@@ -107,6 +107,8 @@ fun AgentNav(
                             onApprovePending = vm::approvePendingSend,
                             onApproveEdited = vm::approvePendingSendEdited,
                             onRejectPending = vm::rejectPendingSend,
+                            onCancelRun = vm::cancelRun,
+                            onSelectProvider = vm::setSelectedProvider,
                         )
                     }
                     composable(Dests.BROWSER) {

@@ -27,6 +27,7 @@ import com.aurviz.agent.MIGRATION_1_2
 import com.aurviz.agent.MIGRATION_2_3
 import com.aurviz.agent.MIGRATION_3_4
 import com.aurviz.agent.MIGRATION_4_5
+import com.aurviz.agent.EmailSummary
 import com.aurviz.agent.Memory
 import com.aurviz.agent.NamedProvider
 import com.aurviz.agent.PendingApproval
@@ -41,6 +42,7 @@ import com.aurviz.agent.TokenVault
 import com.aurviz.agent.ToolCall
 import com.aurviz.agent.ToolResult
 import com.aurviz.agent.WebBridge
+import com.aurviz.agent.WebPage
 import com.aurviz.agent.WebException
 import com.aurviz.agent.BrowserRoute
 import com.aurviz.agent.allToolSchemas
@@ -77,9 +79,12 @@ import com.aurviz.agent.rememberFact
 import com.aurviz.agent.retryDisclosure
 import com.aurviz.agent.toTimeline
 import com.aurviz.agent.ui.components.VoiceState as OrbState
+import com.aurviz.agent.ui.components.ConfirmationStatus
 import com.aurviz.agent.ui.components.UiPrefs
 import com.aurviz.agent.ui.theme.ThemeMode
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -218,6 +223,8 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
             it.copy(
                 themeMode = UiPrefs.themeMode(appCtx),
                 hapticsEnabled = UiPrefs.hapticsEnabled(appCtx),
+                selectedProvider = UiPrefs.selectedProvider(appCtx),
+                confirmSendEmail = UiPrefs.confirmSendEmail(appCtx),
             )
         }
         refreshLlmKeyFlags()
@@ -239,6 +246,149 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(hapticsEnabled = on) }
     }
 
+    fun setSelectedProvider(name: String?) {
+        UiPrefs.setSelectedProvider(getApplication<Application>().applicationContext, name)
+        _state.update { it.copy(selectedProvider = name) }
+    }
+
+    fun setConfirmSendEmail(on: Boolean) {
+        UiPrefs.setConfirmSendEmail(getApplication<Application>().applicationContext, on)
+        _state.update { it.copy(confirmSendEmail = on) }
+    }
+
+    private fun effectiveProvider(): String =
+        state.value.selectedProvider ?: BuildConfig.LLM_DEFAULT_PROVIDER
+
+    // The currently running loop/command coroutine — cancelRun() stops it.
+    private var activeJob: Job? = null
+    private var interactionSeq = 0L
+
+    // Confirmation receipt fields stamped while a Task Execution is still
+    // in flight (approve/reject lands before the run completes). Folded
+    // into the InteractionRecord when the run is recorded.
+    private var pendingConfirmTitle: String? = null
+    private var pendingConfirmDetail: String? = null
+    private var pendingConfirmStatus: ConfirmationStatus? = null
+
+    private fun nextInteractionId(): String = "in_${System.currentTimeMillis()}_${interactionSeq++}"
+
+    // Appends a completed InteractionRecord for the active command and
+    // clears the in-flight state. Keeps the latest 50. Must be called
+    // after the terminal _state update so statusLine/timeline are final.
+    private fun recordCompleted(
+        command: String? = state.value.activeCommand,
+        recalled: List<String> = state.value.activeRecalledMemories,
+        responseText: String = state.value.statusLine,
+        steps: List<TimelineStep> = state.value.timeline,
+        emails: List<EmailSummary> = state.value.emails,
+        webPage: WebPage? = state.value.webPage,
+        failed: Boolean = false,
+        confirmTitle: String? = pendingConfirmTitle,
+        confirmDetail: String? = pendingConfirmDetail,
+        confirmStatus: ConfirmationStatus? = pendingConfirmStatus,
+    ) {
+        val cmd = command ?: return
+        val entry = InteractionRecord(
+            id = nextInteractionId(),
+            command = cmd,
+            recalledMemories = recalled,
+            steps = steps,
+            responseText = responseText,
+            emails = emails,
+            webPage = webPage,
+            providerUsed = state.value.providerUsed,
+            retryNotice = state.value.retryLine(),
+            confirmationTitle = confirmTitle,
+            confirmationDetail = confirmDetail,
+            confirmationStatus = confirmStatus,
+            failed = failed,
+        )
+        pendingConfirmTitle = null
+        pendingConfirmDetail = null
+        pendingConfirmStatus = null
+        _state.update { s ->
+            s.copy(
+                interactions = (s.interactions + entry).takeLast(50),
+                activeCommand = null,
+                activeRecalledMemories = emptyList(),
+            )
+        }
+    }
+
+    // Attaches a Confirmation receipt to the in-flight run: stashes it
+    // for the final record and patches the latest matching record if one
+    // is already in the feed, so the card stays visible in its settled
+    // 18dp state instead of disappearing.
+    private fun stampConfirmation(title: String?, detail: String?, status: ConfirmationStatus) {
+        pendingConfirmTitle = title
+        pendingConfirmDetail = detail
+        pendingConfirmStatus = status
+        val cmd = state.value.activeCommand
+        _state.update { s ->
+            val idx = if (cmd != null) s.interactions.indexOfLast { it.command == cmd } else -1
+            if (idx < 0) return@update s
+            val updated = s.interactions.toMutableList()
+            val rec = updated[idx]
+            updated[idx] = rec.copy(
+                confirmationTitle = title,
+                confirmationDetail = detail,
+                confirmationStatus = status,
+            )
+            s.copy(interactions = updated)
+        }
+    }
+
+    private fun confirmationTextFor(call: ToolCall, args: Map<String, Any?> = call.arguments): Pair<String, String> {
+        return if (call.name == "send_email") {
+            val to = (args["to"] as? String).orEmpty()
+            val subject = (args["subject"] as? String).orEmpty()
+            val body = (args["body"] as? String).orEmpty()
+            "Send email to $to" to "To: $to\nSubject: $subject\n$body"
+        } else {
+            "Run ${call.name}" to args.entries.joinToString("\n") { (k, v) -> "$k: $v" }
+        }
+    }
+
+    fun cancelRun() {
+        state.value.pendingApprovalProposalId?.let { proposalId ->
+            if (state.value.pendingApproval?.id != null) {
+                approvalGate.resolve(proposalId, ApprovalDecision.Rejected)
+            }
+        }
+        activeJob?.cancel()
+        activeJob = null
+        currentRunId?.let { approvalGate.finishRun(it) }
+        currentRunId = null
+        val cmd = state.value.activeCommand
+        _state.update {
+            it.copy(
+                agentRunning = false,
+                sending = false,
+                pendingApproval = null,
+                pendingApprovalProposalId = null,
+                pendingApprovalUnseen = emptyList(),
+                activeCommand = null,
+                activeRecalledMemories = emptyList(),
+                statusLine = "Stopped.",
+            )
+        }
+        if (cmd != null) {
+            val entry = InteractionRecord(
+                id = nextInteractionId(),
+                command = cmd,
+                recalledMemories = emptyList(),
+                steps = state.value.timeline,
+                responseText = "Task Execution stopped by user.",
+                providerUsed = state.value.providerUsed,
+                failed = false,
+            )
+            _state.update { s -> s.copy(interactions = (s.interactions + entry).takeLast(50)) }
+        }
+        pendingConfirmTitle = null
+        pendingConfirmDetail = null
+        pendingConfirmStatus = null
+    }
+
     fun attachWebBridge(bridge: WebBridge) {
         webBridge = bridge
     }
@@ -256,7 +406,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         val command = raw.trim()
         if (command.isBlank()) return
         lastCommand = command
-        _state.update { it.copy(inputText = "") }
+        _state.update { it.copy(inputText = "", activeCommand = command, activeRecalledMemories = emptyList()) }
         val lower = command.lowercase()
         when {
             lower.startsWith("remember ") -> handleRemember(command.substring(9).trim())
@@ -297,6 +447,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                     perf = it.perf.copy(recallMs = recallMs),
                 )
             }
+            recordCompleted(responseText = "Saved: $fact")
         }
     }
 
@@ -316,6 +467,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                     perf = it.perf.copy(recallMs = ms),
                 )
             }
+            recordCompleted()
         }
     }
 
@@ -327,11 +479,13 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
             victims.forEach { roomStore.delete(it.id) }
             refreshMemories()
             _state.update { it.copy(statusLine = "Deleted ${victims.size}.") }
+            recordCompleted(responseText = "Deleted ${victims.size}.")
         }
     }
 
     fun rejectForget() {
         _state.update { it.copy(pendingForget = emptyList(), statusLine = "Kept.") }
+        recordCompleted(responseText = "Kept.")
     }
 
     fun deleteMemory(id: String) {
@@ -385,8 +539,9 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
     // runs before the transport, and a Deny surfaces instead of a send.
     fun approveEmail(to: String, subject: String, body: String) {
         val call = ToolCall("ui_approve", "send_email", mapOf("to" to to.trim(), "subject" to subject, "body" to body))
-        _state.update { it.copy(pendingEmail = null, sending = true, statusLine = "Sending…") }
-        viewModelScope.launch(Dispatchers.IO) {
+        _state.update { it.copy(pendingEmail = null, sending = true, statusLine = "Sending…", activeCommand = it.activeCommand ?: "email $to") }
+        var emailJob: Job? = null
+        emailJob = viewModelScope.launch(Dispatchers.IO) {
             val t0 = System.currentTimeMillis()
             val registry = defaultToolRegistry(gmailApi = gmail, scheduleStore = scheduleStore, memoryStore = roomStore)
             val gated = registry.executeGated(call) { ApprovalDecision.Approved }
@@ -405,11 +560,28 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                     perf = it.perf.copy(toolMs = ms),
                 )
             }
+            recordCompleted(
+                responseText = if (sent) "Sent ✓" else (error ?: "Not sent."),
+                failed = !sent,
+                confirmTitle = "Send email to ${to.trim()}",
+                confirmDetail = "To: ${to.trim()}\nSubject: $subject\n$body",
+                confirmStatus = ConfirmationStatus.Approved,
+            )
+            if (activeJob === emailJob) activeJob = null
         }
+        activeJob = emailJob
     }
 
     fun rejectEmail() {
+        val draft = state.value.pendingEmail
         _state.update { it.copy(pendingEmail = null, statusLine = "Not sent.") }
+        val detail = draft?.let { "To: ${it.to.joinToString()}\nSubject: ${it.subject}\n${it.body}" }
+        recordCompleted(
+            responseText = "Not sent.",
+            confirmTitle = draft?.let { "Send email to ${it.to.joinToString()}" },
+            confirmDetail = detail,
+            confirmStatus = ConfirmationStatus.Denied,
+        )
     }
 
     fun startSignIn() {
@@ -536,6 +708,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                 statusLine = "Gmail disconnected.",
             )
         }
+        recordCompleted(responseText = "Gmail disconnected.")
     }
 
     private fun refreshGmailStatus() {
@@ -607,6 +780,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                         ),
                     )
                 }
+                recordCompleted(responseText = "Not opening: ${route.reason}", failed = true)
                 return
             }
             is BrowserRoute.Load -> {
@@ -622,7 +796,8 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         _state.update { it.copy(statusLine = "Opening $finalUrl…", webLoading = true, webError = null) }
-        viewModelScope.launch(Dispatchers.IO) {
+        var webJob: Job? = null
+        webJob = viewModelScope.launch(Dispatchers.IO) {
             val t0 = System.currentTimeMillis()
             try {
                 val page = openPage(bridge, finalUrl)
@@ -640,6 +815,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                         perf = it.perf.copy(toolMs = ms),
                     )
                 }
+                recordCompleted(responseText = page.title.ifBlank { finalUrl })
             } catch (e: WebException) {
                 _state.update {
                     it.copy(
@@ -653,8 +829,11 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                         ),
                     )
                 }
+                recordCompleted(responseText = "Open failed: ${e.failure.reason} ($finalUrl)", failed = true)
             }
+            if (activeJob === webJob) activeJob = null
         }
+        activeJob = webJob
     }
 
     // --- Schedules (preview-gated save, same gate as email send) ---
@@ -668,6 +847,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                     pendingSchedule = null,
                 )
             }
+            recordCompleted(failed = true)
             return
         }
         _state.update {
@@ -677,6 +857,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                 statusLine = formatSchedulePreview(parsed),
             )
         }
+        recordCompleted(responseText = formatSchedulePreview(parsed))
     }
 
     fun approveSchedule() {
@@ -687,20 +868,19 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
             val exact = registerRoutineAlarm(getApplication<Application>(), saved)
             refreshSchedules()
             refreshExactAlarmFlag()
-            _state.update {
-                it.copy(
-                    statusLine = if (exact) {
-                        "Schedule saved (${saved.id}). ${scheduleTimingNote(true)}"
-                    } else {
-                        "Schedule saved (${saved.id}). ${scheduleTimingNote(false)}"
-                    },
-                )
+            val line = if (exact) {
+                "Schedule saved (${saved.id}). ${scheduleTimingNote(true)}"
+            } else {
+                "Schedule saved (${saved.id}). ${scheduleTimingNote(false)}"
             }
+            _state.update { it.copy(statusLine = line) }
+            recordCompleted(responseText = line)
         }
     }
 
     fun rejectSchedule() {
         _state.update { it.copy(pendingSchedule = null, statusLine = "Schedule discarded.") }
+        recordCompleted(responseText = "Schedule discarded.")
     }
 
     // --- Pending approvals (held scheduled-run writes, ticket 15/28) ---
@@ -811,6 +991,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
             val known = listSchedules(scheduleStore).any { it.id == id }
             if (!known) {
                 _state.update { it.copy(statusLine = "No Schedule $id.") }
+                recordCompleted(responseText = "No Schedule $id.", failed = true)
                 return@launch
             }
             deleteSchedule(scheduleStore, id)
@@ -818,6 +999,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
             cancelRoutineAlarm(getApplication(), id)
             refreshSchedules()
             _state.update { it.copy(statusLine = "Schedule $id stopped.") }
+            recordCompleted(responseText = "Schedule $id stopped.")
         }
     }
 
@@ -826,22 +1008,24 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
     private fun refreshSchedules(showLine: Boolean = false) {
         viewModelScope.launch(Dispatchers.IO) {
             val all = listSchedules(scheduleStore)
+            val line = if (showLine) {
+                if (all.isEmpty()) {
+                    "No Schedules yet."
+                } else {
+                    "Schedules:\n" + all.joinToString("\n") { r ->
+                        "• ${r.id}: ${r.instruction} at ${r.hour}:${"%02d".format(r.minute)}"
+                    }
+                }
+            } else {
+                null
+            }
             _state.update {
                 it.copy(
                     schedules = all,
-                    statusLine = if (showLine) {
-                        if (all.isEmpty()) {
-                            "No Schedules yet."
-                        } else {
-                            "Schedules:\n" + all.joinToString("\n") { r ->
-                                "• ${r.id}: ${r.instruction} at ${r.hour}:${"%02d".format(r.minute)}"
-                            }
-                        }
-                    } else {
-                        it.statusLine
-                    },
+                    statusLine = line ?: it.statusLine,
                 )
             }
+            if (line != null) recordCompleted(responseText = line)
         }
     }
 
@@ -910,14 +1094,26 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
     private var currentRunId: Long? = null
 
     fun approvePendingSend(proposalId: String) {
+        state.value.pendingApproval?.let { call ->
+            val (title, detail) = confirmationTextFor(call)
+            stampConfirmation(title, detail, ConfirmationStatus.Approved)
+        }
         approvalGate.resolve(proposalId, ApprovalDecision.Approved)
     }
 
     fun approvePendingSendEdited(proposalId: String, args: Map<String, Any?>) {
+        state.value.pendingApproval?.let { call ->
+            val (title, detail) = confirmationTextFor(call, args)
+            stampConfirmation(title, detail, ConfirmationStatus.Approved)
+        }
         approvalGate.resolve(proposalId, ApprovalDecision.ApprovedWithEdit(args))
     }
 
     fun rejectPendingSend(proposalId: String) {
+        state.value.pendingApproval?.let { call ->
+            val (title, detail) = confirmationTextFor(call)
+            stampConfirmation(title, detail, ConfirmationStatus.Denied)
+        }
         approvalGate.resolve(proposalId, ApprovalDecision.Rejected)
     }
 
@@ -942,12 +1138,13 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                 agentRunning = true,
             )
         }
-        viewModelScope.launch(Dispatchers.IO) {
+        var runJob: Job? = null
+        runJob = viewModelScope.launch(Dispatchers.IO) {
             val runT0 = System.currentTimeMillis()
             val registry = defaultToolRegistry(gmailApi = gmail, scheduleStore = scheduleStore, memoryStore = roomStore)
             val chat =
                 FallbackChatLlm(
-                    defaultCandidates(BuildConfig.LLM_DEFAULT_PROVIDER, tokenVault.loadLlmKeys()),
+                    defaultCandidates(effectiveProvider(), tokenVault.loadLlmKeys()),
                     // Ticket 39 (minimal): the model sees this run's
                     // registry view — every Tool it can call, gated or not.
                     registry.toolSchemas(),
@@ -1024,6 +1221,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                 // section via recallFor — never concatenated into the command.
                 // Top 5 only, matching the benchmarked prompt budget.
                 val memories = recallFor(roomStore, cmd).take(5)
+                _state.update { it.copy(activeRecalledMemories = memories.map { m -> m.text }) }
                 when (val result = loop.run(cmd, memories)) {
                     is AgentLoopResult.Answered -> {
                         val tried = chat.tried.toList()
@@ -1043,6 +1241,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                                 perf = it.perf.copy(planMs = System.currentTimeMillis() - runT0),
                             )
                         }
+                        recordCompleted(responseText = result.answer)
                     }
                     is AgentLoopResult.Failed -> {
                         _state.update {
@@ -1057,8 +1256,11 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                                 perf = it.perf.copy(planMs = System.currentTimeMillis() - runT0),
                             )
                         }
+                        recordCompleted(responseText = "Failed: ${result.error}", failed = true)
                     }
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _state.update {
                     it.copy(
@@ -1071,9 +1273,11 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                         pendingApprovalUnseen = emptyList(),
                     )
                 }
+                recordCompleted(responseText = "Failed: ${e.message}", failed = true)
             } finally {
                 approvalGate.finishRun(runId)
                 if (currentRunId == runId) currentRunId = null
+                if (activeJob === runJob) activeJob = null
                 _state.update {
                     it.copy(
                         agentRunning = false,
@@ -1084,6 +1288,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
+        activeJob = runJob
     }
 
     // --- Voice (transcript only; onRmsChanged never reaches here) ---

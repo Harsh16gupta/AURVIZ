@@ -9,11 +9,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.aurviz.agent.ui.theme.Image
 import com.aurviz.agent.ui.theme.Icons
 import com.aurviz.agent.ui.theme.Space
@@ -53,12 +55,13 @@ fun UserMessage(
         if (text.isNotEmpty()) {
             Text(
                 text,
-                color = Theme.colors.onSurface,
+                style = Theme.typography.body.copy(fontSize = 16.sp, lineHeight = 24.sp),
+                color = Theme.colors.bubbleUserInk,
                 modifier =
-                    Modifier.widthIn(max = 300.dp)
-                        .clip(Theme.shapes.medium)
-                        .background(Theme.colors.surface)
-                        .padding(horizontal = Space * 4, vertical = Space * 2.5f),
+                    Modifier.widthIn(max = 320.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Theme.colors.bubbleUser)
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
             )
         }
     }
