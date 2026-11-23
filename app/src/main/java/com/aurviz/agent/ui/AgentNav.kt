@@ -123,6 +123,8 @@ fun AgentNav(
                             onApproveSchedule = vm::approveSchedule,
                             onRejectSchedule = vm::rejectSchedule,
                             onUnschedule = vm::unschedule,
+                            onApproveHeldWrite = vm::approveHeldWrite,
+                            onRejectHeldWrite = vm::rejectHeldWrite,
                             onBack = { navController.navigate(Dests.COMMAND) },
                         )
                     }

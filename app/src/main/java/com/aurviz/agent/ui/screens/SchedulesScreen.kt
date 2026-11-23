@@ -13,6 +13,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.aurviz.agent.ToolCall
+import com.aurviz.agent.approvalCardFor
+import com.aurviz.agent.knownAddressesFromInbox
 import com.aurviz.agent.ui.AgentUiState
 import com.aurviz.agent.ui.components.Button
 import com.aurviz.agent.ui.components.ButtonVariant
@@ -38,6 +41,8 @@ fun SchedulesScreen(
     onApproveSchedule: () -> Unit,
     onRejectSchedule: () -> Unit,
     onUnschedule: (String) -> Unit,
+    onApproveHeldWrite: (String) -> Unit,
+    onRejectHeldWrite: (String) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -103,6 +108,53 @@ fun SchedulesScreen(
                                 modifier = Modifier.size(20.dp),
                                 tint = Theme.colors.destructive,
                             )
+                        }
+                    }
+                }
+            }
+        }
+        // Ticket 15/28: writes a scheduled run held for the user (ADR-0002).
+        // Send rows reuse the approval-card model (exact To/Subject/Body
+        // plus unseen highlights); other writes show the exact held
+        // arguments. Approve runs the held call exactly once.
+        Section("Approvals") {
+            if (state.pendingApprovals.isEmpty()) {
+                Text(
+                    "Nothing waiting — blocked routine writes appear here.",
+                    color = Theme.colors.onBackgroundMuted,
+                    style = Theme.typography.caption,
+                )
+            } else {
+                val known = knownAddressesFromInbox(state.emails)
+                state.pendingApprovals.forEach { held ->
+                    val card = approvalCardFor(ToolCall(held.id, held.toolName, held.arguments), known)
+                    Text("${held.toolName} (from routine ${held.scheduleId})")
+                    if (card != null) {
+                        Text("To: ${card.to.joinToString { it.address }}")
+                        if (card.unseen.isNotEmpty()) {
+                            Text(
+                                "New recipient — never emailed before.",
+                                color = Theme.colors.destructive,
+                            )
+                        }
+                        Text("Subject: ${card.subject}")
+                        Text(card.body)
+                    } else {
+                        held.arguments.forEach { (key, value) ->
+                            Text("$key: $value")
+                        }
+                    }
+                    Text(
+                        held.reason,
+                        color = Theme.colors.onBackgroundMuted,
+                        style = Theme.typography.caption,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(Space * 2)) {
+                        Button(onClick = { onApproveHeldWrite(held.id) }) {
+                            Text("Approve")
+                        }
+                        Button(onClick = { onRejectHeldWrite(held.id) }, variant = ButtonVariant.Secondary) {
+                            Text("Reject")
                         }
                     }
                 }

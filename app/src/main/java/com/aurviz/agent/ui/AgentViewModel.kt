@@ -24,18 +24,24 @@ import com.aurviz.agent.LlmKeys
 import com.aurviz.agent.LlmResult
 import com.aurviz.agent.MIGRATION_1_2
 import com.aurviz.agent.MIGRATION_2_3
+import com.aurviz.agent.MIGRATION_3_4
 import com.aurviz.agent.Memory
 import com.aurviz.agent.NamedProvider
+import com.aurviz.agent.PendingApproval
+import com.aurviz.agent.PendingApprovalOutcome
 import com.aurviz.agent.Plan
+import com.aurviz.agent.RoomPendingApprovalStore
 import com.aurviz.agent.TimelineStep
 import com.aurviz.agent.RoomMemoryStore
 import com.aurviz.agent.RoomScheduleStore
 import com.aurviz.agent.TokenStore
 import com.aurviz.agent.TokenVault
 import com.aurviz.agent.ToolCall
+import com.aurviz.agent.ToolResult
 import com.aurviz.agent.WebBridge
 import com.aurviz.agent.WebException
 import com.aurviz.agent.approvalCardFor
+import com.aurviz.agent.approvePendingApproval
 import com.aurviz.agent.buildAuthUrl
 import com.aurviz.agent.buildTimeline
 import com.aurviz.agent.cancelRoutineAlarm
@@ -59,6 +65,7 @@ import com.aurviz.agent.scheduleTimingNote
 import com.aurviz.agent.readImportant
 import com.aurviz.agent.recallFor
 import com.aurviz.agent.registerRoutineAlarm
+import com.aurviz.agent.rejectPendingApproval
 import com.aurviz.agent.rememberFact
 import com.aurviz.agent.retryDisclosure
 import com.aurviz.agent.toTimeline
@@ -149,7 +156,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
 
     private val db: AppDb =
         Room.databaseBuilder(application, AppDb::class.java, "aurviz.db")
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
             .build()
     private val roomStore = RoomMemoryStore(db.memories())
     private val scheduleStore = RoomScheduleStore(db.schedules())
@@ -176,6 +183,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         refreshGmailStatus()
         refreshMemories()
         refreshSchedules()
+        refreshPendingApprovals()
         refreshExactAlarmFlag()
         refreshBatteryFlag()
     }
@@ -634,6 +642,71 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
 
     fun rejectSchedule() {
         _state.update { it.copy(pendingSchedule = null, statusLine = "Schedule discarded.") }
+    }
+
+    // --- Pending approvals (held scheduled-run writes, ticket 15/28) ---
+    // The Worker records blocked writes as PendingApproval rows plus a
+    // notification (ADR-0002); this screen is where the user approves or
+    // rejects them. Approve claims the row and runs the exact held
+    // arguments through the single gated path, so a double-tap executes
+    // exactly once (AlreadyHandled on the second tap). Approved schedule
+    // writes also arm/disarm their alarms like the foreground preview path.
+
+    fun refreshPendingApprovals() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val all = RoomPendingApprovalStore(db.approvals()).list()
+            _state.update { it.copy(pendingApprovals = all) }
+        }
+    }
+
+    fun approveHeldWrite(id: String) {
+        _state.update { it.copy(statusLine = "Running approved write…") }
+        viewModelScope.launch(Dispatchers.IO) {
+            val registry = defaultToolRegistry(gmailApi = gmail, scheduleStore = scheduleStore, memoryStore = roomStore)
+            when (val outcome = approvePendingApproval(RoomPendingApprovalStore(db.approvals()), id, registry)) {
+                is PendingApprovalOutcome.Executed -> {
+                    if (outcome.result is ToolResult.Success) {
+                        syncAlarmsForApproved(outcome.approval, outcome.result)
+                        _state.update { it.copy(statusLine = "Approved — ran ${outcome.approval.toolName} ✓") }
+                    } else {
+                        val error = (outcome.result as ToolResult.Failure).error
+                        _state.update { it.copy(statusLine = "Approved but failed: $error") }
+                    }
+                }
+                is PendingApprovalOutcome.Rejected ->
+                    _state.update { it.copy(statusLine = "Rejected — nothing ran.") }
+                is PendingApprovalOutcome.AlreadyHandled ->
+                    _state.update { it.copy(statusLine = "Already handled.") }
+            }
+            refreshPendingApprovals()
+            refreshSchedules()
+        }
+    }
+
+    fun rejectHeldWrite(id: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            when (rejectPendingApproval(RoomPendingApprovalStore(db.approvals()), id)) {
+                is PendingApprovalOutcome.Rejected ->
+                    _state.update { it.copy(statusLine = "Rejected — nothing ran.") }
+                else -> _state.update { it.copy(statusLine = "Already handled.") }
+            }
+            refreshPendingApprovals()
+        }
+    }
+
+    private fun syncAlarmsForApproved(approval: PendingApproval, result: ToolResult.Success) {
+        val app = getApplication<Application>()
+        when (approval.toolName) {
+            "create_schedule" -> {
+                val newId = (result.data as? Map<*, *>)?.get("id") as? String ?: return
+                listSchedules(scheduleStore).find { it.id == newId }?.let { registerRoutineAlarm(app, it) }
+            }
+            "cancel_schedule" -> {
+                val target = approval.arguments["schedule_id"] as? String ?: return
+                cancelRoutineWork(app, target)
+                cancelRoutineAlarm(app, target)
+            }
+        }
     }
 
     private fun handleUnschedule(raw: String) {
