@@ -232,131 +232,6 @@ class ToolRegistry {
         }
 }
 
-/** Ticket 03/24 search_emails Tool: read-only Gmail search (ADR-0003:
- *  no Confirmation gate on reads). Every row carries its mailbox source
- *  tag for the injection defences. max is optional, default 10. */
-fun searchEmailsTool(gmailApi: GmailApi?): ToolDefinition =
-    ToolDefinition(
-        name = "search_emails",
-        description = "Search the Gmail mailbox with Gmail query syntax " +
-            "(e.g. from:boss subject:plan). Read-only; returns matching rows.",
-        parameters =
-            JSONObject()
-                .put("type", "object")
-                .put(
-                    "properties",
-                    JSONObject()
-                        .put("query", JSONObject().put("type", "string").put("description", "Gmail search query, e.g. from:boss is:unread"))
-                        .put("max", JSONObject().put("type", "integer").put("description", "Max rows to return (1-25, default 10)")),
-                )
-                .put("required", JSONArray().put("query")),
-        // Read-only fetch; ADR-0003 gates only sensitive calls.
-        riskLevel = RiskLevel.LOW,
-        requiresConfirmation = false,
-        resultType = "emails",
-        execute = { args ->
-            val api = gmailApi
-                ?: return@ToolDefinition ToolResult.Failure("gmail is not connected", retryable = false)
-            val query = (args["query"] as? String)?.trim().orEmpty()
-            if (query.isEmpty()) {
-                return@ToolDefinition ToolResult.Failure(
-                    "query must not be blank for tool 'search_emails'",
-                    retryable = true,
-                )
-            }
-            val max = ((args["max"] as? Number)?.toInt() ?: 10).coerceIn(1, 25)
-            val rows = searchEmails(api, query, max)
-            ToolResult.Success(
-                rows.map { row ->
-                    mapOf(
-                        "id" to row.id,
-                        "from" to row.from,
-                        "subject" to row.subject,
-                        "snippet" to row.snippet,
-                        "source" to emailSource(row.id),
-                    )
-                },
-            )
-        },
-    )
-
-/** Ticket 03/24 read_email Tool: read one message with its body.
- *  Read-only (ADR-0003: ungated); the result carries its mailbox
- *  source tag for the injection defences. */
-fun readEmailTool(gmailApi: GmailApi?): ToolDefinition =
-    ToolDefinition(
-        name = "read_email",
-        description = "Read one Gmail message with its body. Read-only; returns the message.",
-        parameters =
-            JSONObject()
-                .put("type", "object")
-                .put(
-                    "properties",
-                    JSONObject()
-                        .put("id", JSONObject().put("type", "string").put("description", "Gmail message id from search_emails")),
-                )
-                .put("required", JSONArray().put("id")),
-        // Read-only fetch; ADR-0003 gates only sensitive calls.
-        riskLevel = RiskLevel.LOW,
-        requiresConfirmation = false,
-        resultType = "email",
-        execute = { args ->
-            val api = gmailApi
-                ?: return@ToolDefinition ToolResult.Failure("gmail is not connected", retryable = false)
-            val detail = readEmail(api, args["id"] as String)
-            ToolResult.Success(
-                mapOf(
-                    "id" to detail.id,
-                    "from" to detail.from,
-                    "subject" to detail.subject,
-                    "snippet" to detail.snippet,
-                    "body" to detail.body,
-                    "source" to detail.source,
-                ),
-            )
-        },
-    )
-
-/** Ticket 04/24 send_email Tool: irreversible send, HIGH risk, gated per
- *  call (ADR-0003). The plain execute() entry always refuses without
- *  touching the transport; only the single gated path (executeGated)
- *  builds the MIME from the exact To/Subject/Body args and sends, after
- *  the deterministic SendPolicy check. */
-fun sendEmailTool(gmailApi: GmailApi?, policy: SendPolicy = AllowAllSendPolicy): ToolDefinition {
-    fun draftFrom(args: Map<String, Any?>): EmailDraft =
-        EmailDraft(
-            to = listOf(args["to"] as String),
-            subject = args["subject"] as String,
-            body = args["body"] as String,
-        )
-    return ToolDefinition(
-        name = "send_email",
-        description = "Send one Gmail message to To with Subject and Body. " +
-            "Sensitive: runs only after per-call confirmation.",
-        parameters =
-            JSONObject()
-                .put("type", "object")
-                .put(
-                    "properties",
-                    JSONObject()
-                        .put("to", JSONObject().put("type", "string").put("description", "Recipient email address"))
-                        .put("subject", JSONObject().put("type", "string").put("description", "Message subject"))
-                        .put("body", JSONObject().put("type", "string").put("description", "Plain-text message body")),
-                )
-                .put("required", JSONArray().put("to").put("subject").put("body")),
-        // Irreversible outbound send; ADR-0003 gates every call.
-        riskLevel = RiskLevel.HIGH,
-        requiresConfirmation = true,
-        resultType = "send",
-        execute = { args ->
-            executeSendEmail(gmailApi, draftFrom(args), approved = false, policy = policy)
-        },
-        approvedExecute = { args ->
-            executeSendEmail(gmailApi, draftFrom(args), approved = true, policy = policy)
-        },
-    )
-}
-
 /** Registry with the read/search Tools + send Tool + schedule/memory Tools wired to
  *  real seams. Gmail/Room plug in through GmailApi/ScheduleStore/
  *  MemoryStore; tests pass fakes. A null dependency means "not connected
@@ -371,9 +246,11 @@ fun defaultToolRegistry(
 ): ToolRegistry {
     val registry = ToolRegistry()
 
-    registry.register(searchEmailsTool(gmailApi))
-    registry.register(readEmailTool(gmailApi))
-    registry.register(sendEmailTool(gmailApi, sendPolicy))
+    // Ticket 72 (part of #71): Gmail adapter owns search/read/send; each
+    // entry registers explicitly into the kernel, in adapter order.
+    for (tool in gmailTools(gmailApi, sendPolicy)) {
+        registry.register(tool)
+    }
 
     val emailFn = demoToolSchema().getJSONObject("function")
     registry.register(

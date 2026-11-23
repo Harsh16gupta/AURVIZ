@@ -2,6 +2,30 @@
 
 Every case where the AI was wrong and how it was caught. Add an entry with file:line evidence before moving on.
 
+## 2026-11-24 — Issue #72 Gmail adapter extraction (`main`)
+
+- **Foreign uncommitted work broke the build, not the ticket.** First
+  targeted run failed in `AgentViewModel.kt:1044+` (unresolved
+  `ScheduleSideEffect`/`scheduleId`) from concurrent uncommitted
+  schedule-path edits — the same foreign-tree condition logged under
+  #67/#70. Verified #72 in isolation by stashing the seven foreign
+  tracked paths and parking the four foreign untracked files in /tmp,
+  then restoring them untouched — the commit holds only
+  `GmailTools.kt`, `ToolRegistry.kt`, `GmailToolsTest.kt`, and this log.
+- **No behavior drift by construction.** The three Tool builders moved
+  verbatim from `ToolRegistry.kt:238-358` to `GmailTools.kt:10-112`;
+  `defaultToolRegistry` now registers the `gmailTools()` list
+  (`ToolRegistry.kt:234-238`) instead of three direct calls. Existing
+  pins unchanged: `RedTeamTest.evilForwardForegroundYieldsCardNeverSend`
+  (injected forward yields a Confirmation card, never a send),
+  `EmailSendTest.plainExecuteRefusesWithoutGateApproval` (gate-refusal),
+  `EmailSearchReadTest` source-tag rows.
+- Tests: new `GmailToolsTest` (6 tests: adapter order, risk/gate flags,
+  search+read through the kernel seam, per-call Confirmation
+  refuse/reject/approve, offline non-retryable Failure, schema view).
+  Full `:app:testDebugUnitTest` green (405 tests, 0 failures; 399 at
+  #70 + 6 new). Secret scan clean on all touched files.
+
 ## 2026-11-23 — Issue #51 session context V1 (`agent/session-context-51`)
 
 - **ViewModel missed import broke compile.** First build failed with
