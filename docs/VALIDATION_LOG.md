@@ -2,6 +2,51 @@
 
 Every case where the AI was wrong and how it was caught. Add an entry with file:line evidence before moving on.
 
+## 2026-11-24 — Issue #73 Schedule adapter extraction (`main`)
+
+- **Second edit mangled a line it should have deleted.** While removing
+  the leftover cancel block, an intermediate edit changed
+  `ToolRegistry.kt:351` to `name = cancelFn.getString("name"),
+  description = ...` on one line instead of deleting the block. Caught on
+  re-read before compiling; the follow-up edit deleted
+  `ToolRegistry.kt:348-370` outright, leaving only
+  `registerWebTools(registry, webBridge, backgroundWebLoader)` after the
+  memory blocks. Post-edit read verified the seam.
+- **Test asserted on the wrong receiver.** First `ScheduleToolsTest`
+  draft wrote `gated.error` after `gated.result as ToolResult.Failure`
+  (`ScheduleToolsTest.kt:134-136`), which fails compile since `GatedExecution`
+  carries no `error`. Fixed to `val failure = gated.result as
+  ToolResult.Failure` before asserting `contains("sched_999")`,
+  `contains("list_schedules")`, and `retryable`.
+- **No behavior drift by construction.** The three Tool builders moved
+  verbatim from `ToolRegistry.kt:285-344,403-426` to `ScheduleTools.kt`
+  (`createScheduleTool`, `listSchedulesTool`, `cancelScheduleTool` plus the
+  `scheduleTools()` list); `defaultToolRegistry` now registers the
+  `scheduleTools()` list (`ToolRegistry.kt:285-289`) instead of three
+  direct calls. Existing pins unchanged: `ScheduleWriteConfirmTest`
+  (reject/timeout disarm nothing), `SchedulerHardeningTest`
+  (cron/timezone edges), `ScheduledConsentTest`/`ScheduledRunTest`
+  (read-only allowlist, held writes).
+- **Foreign uncommitted work parked, not committed.** Same condition as
+  #67/#70/#72: seven tracked schedule-path edits plus four untracked
+  files stashed/parked in /tmp before the red step and restored untouched
+  after — the commit holds only `ScheduleTools.kt`, `ToolRegistry.kt`,
+  `ScheduleToolsTest.kt`, and this log.
+- Tests: new `ScheduleToolsTest` (7 tests: adapter order, risk/gate
+  flags, CRUD through the kernel seam, per-call Confirmation
+  refuse/reject/timeout/approve plus cancel-reject/approve, unknown-id
+  guidance, offline non-retryable Failure, schema view). Full
+  `:app:testDebugUnitTest` green (412 tests, 0 failures; 405 at #72 + 7
+  new). Secret scan clean on all touched files.
+- **Review notes (code-review skill, this ticket).** Standards: 1 minor —
+  `arms alarms` / `routine` comments carried verbatim from the registry;
+  GLOSSARY canonical is Schedule. Kept verbatim per the #71
+  behavior-preserving-move rule and #72 precedent; schema descriptions
+  live in `LlmProvider.kt`, out of scope until #75. Spec: no gaps, no
+  creep; one cosmetic — advertised `toolSchemas()` order is now
+  create/list/cancel contiguously (cancel previously registered after the
+  memory Tools); executors identical, no order-sensitive test pins order.
+
 ## 2026-11-24 — Issue #72 Gmail adapter extraction (`main`)
 
 - **Foreign uncommitted work broke the build, not the ticket.** First

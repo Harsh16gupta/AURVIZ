@@ -282,66 +282,11 @@ fun defaultToolRegistry(
         ),
     )
 
-    val scheduleFn = scheduleToolSchema().getJSONObject("function")
-    registry.register(
-        ToolDefinition(
-            name = scheduleFn.getString("name"),
-            description = scheduleFn.getString("description"),
-            parameters = scheduleFn.getJSONObject("parameters"),
-            // State-changing (arms alarms); ADR-0003 requires per-call Confirmation.
-            riskLevel = RiskLevel.MEDIUM,
-            requiresConfirmation = true,
-            resultType = "schedule",
-            execute = { args ->
-                val store = scheduleStore
-                    ?: return@ToolDefinition ToolResult.Failure("schedule store is not available", retryable = false)
-                val task = args["task"] as String
-                val whenText = args["when"] as String
-                val parsed = parseSchedule("$task $whenText")
-                    ?: return@ToolDefinition ToolResult.Failure(
-                        "could not understand a time in 'when': '$whenText'",
-                        retryable = true,
-                    )
-                val saved = createSchedule(store, task, parsed.hour, parsed.minute, parsed.days)
-                ToolResult.Success(
-                    mapOf(
-                        "id" to saved.id,
-                        "instruction" to saved.instruction,
-                        "hour" to saved.hour,
-                        "minute" to saved.minute,
-                    ),
-                )
-            },
-        ),
-    )
-
-    val listFn = listSchedulesToolSchema().getJSONObject("function")
-    registry.register(
-        ToolDefinition(
-            name = listFn.getString("name"),
-            description = listFn.getString("description"),
-            parameters = listFn.getJSONObject("parameters"),
-            // Read-only; ADR-0003 gates only sensitive calls.
-            riskLevel = RiskLevel.LOW,
-            requiresConfirmation = false,
-            resultType = "schedules",
-            execute = { _ ->
-                val store = scheduleStore
-                    ?: return@ToolDefinition ToolResult.Failure("schedule store is not available", retryable = false)
-                ToolResult.Success(
-                    listSchedules(store).map { schedule ->
-                        mapOf(
-                            "id" to schedule.id,
-                            "instruction" to schedule.instruction,
-                            "hour" to schedule.hour,
-                            "minute" to schedule.minute,
-                            "days" to schedule.days?.toList(),
-                        )
-                    },
-                )
-            },
-        ),
-    )
+    // Ticket 73 (part of #71): Schedule adapter owns create/list/cancel;
+    // each entry registers explicitly into the kernel, in adapter order.
+    for (tool in scheduleTools(scheduleStore)) {
+        registry.register(tool)
+    }
 
     val saveMemoryFn = saveMemoryToolSchema().getJSONObject("function")
     registry.register(
@@ -396,31 +341,6 @@ fun defaultToolRegistry(
                         )
                     },
                 )
-            },
-        ),
-    )
-
-    val cancelFn = cancelScheduleToolSchema().getJSONObject("function")
-    registry.register(
-        ToolDefinition(
-            name = cancelFn.getString("name"),
-            description = cancelFn.getString("description"),
-            parameters = cancelFn.getJSONObject("parameters"),
-            // State-changing (disarms alarms); ADR-0003 requires per-call Confirmation.
-            riskLevel = RiskLevel.MEDIUM,
-            requiresConfirmation = true,
-            resultType = "schedule",
-            execute = { args ->
-                val store = scheduleStore
-                    ?: return@ToolDefinition ToolResult.Failure("schedule store is not available", retryable = false)
-                val id = args["schedule_id"] as String
-                val existing = listSchedules(store).find { it.id == id }
-                    ?: return@ToolDefinition ToolResult.Failure(
-                        "unknown schedule id: '$id'. Use list_schedules to see saved routines.",
-                        retryable = true,
-                    )
-                deleteSchedule(store, existing.id)
-                ToolResult.Success(mapOf("id" to existing.id, "deleted" to true))
             },
         ),
     )
