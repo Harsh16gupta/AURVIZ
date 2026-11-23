@@ -112,3 +112,27 @@ Every case where the AI was wrong and how it was caught. Add an entry with file:
 - **Capability bring-forward (39/40).** `FallbackChatLlm`/`HeadlessChatLlm` take the run's advertised `tools` (default `allToolSchemas()` keeps existing tests green); foreground passes `registry.toolSchemas()`, worker passes `scheduledRegistry(full).toolSchemas()` so scheduled reads (search/read/list/get_page_text) are actually visible to the model. Wire-tested in `ChatRolesWireTest.advertisedToolsComeFromTheRegistryView`.
 - **Re-verify:** 336 tests / 30 suites, 0 failures; `:app:assembleRelease` APK built; `:app:lintDebug` 0 errors (24 warnings — 3 ModifierParameter pre-existing incl. untouched files); marker + secret scans clean. Device checks still outstanding (no adb device): API-30 expedited, Android 12+ revoke/grant, v4→v5 upgrade, #37 profiler.
 - **Caught own mistake:** two `edit` calls silently dropped a doc comment / test header (oldString matched across a Unicode dash boundary); repaired and re-read before committing. `edit` with multi-line oldString needs a post-edit read check — done for all fixes above.
+
+## 2026-11-23 — 3-bracket landing (PRs #47/#48/#49/#50, closes #38)
+
+- **#48 merged into the wrong base.** `gh pr merge 48` landed bracket B into
+  `merge/A-reviewed-core` (`946dbc1`, parents `aeb2234`+`f251cf2`) instead of
+  main — its base was the A branch. Caught on re-verify: `git log
+  origin/main` showed only `aafba48` (#47) while
+  `origin/merge/A-reviewed-core` sat at `946dbc1`. Fixed without rewriting any
+  `merge/*` SHA: opened `main ← merge/A-reviewed-core` (#50) and merged it
+  (`e1c79b5`), so main holds A+B; #49's diff then shrank to the C-only
+  28 commits (`git rev-list --count origin/main..origin/merge/C-deltas`).
+  Never mark a stacked landing done before `git log origin/main` shows the
+  content.
+- **#38 needed no close — GitHub auto-closed it as MERGED.** Once #49 landed
+  (`25809c7`), every commit on `integration/agent-loop` was contained in
+  main, so GitHub marked #38 merged (`mergeCommit 25809c7`) and rejected the
+  manual close. The superseding comment (links to #47/#48/#49/#50) was posted
+  first. End state verified: `origin/main` =
+  `25809c7` (#49) → `e1c79b5` (#50) → `946dbc1` (#48) → `aafba48` (#47).
+- **Device-test discipline that mattered:** `am force-stop` cancels alarms
+  (`pi_cancelled`) and voids a kill test — swipe-kill only; one B2 attempt
+  was lost to this and re-run. Fires kept ≥3 min apart (Doze quota).
+- Follow-ups live outside the stack: #46 (needs ADR ruling, untouched), #51
+  (session-scoped conversational context + "myself" grounding).
