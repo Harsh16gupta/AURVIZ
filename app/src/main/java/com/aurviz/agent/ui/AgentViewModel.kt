@@ -115,6 +115,16 @@ fun LoopUiProgress.withEvent(event: AgentEvent): LoopUiProgress =
         is AgentEvent.Failed -> copy(error = event.error)
     }
 
+// Bound the Confirmation wait by the Task Execution's remaining budget
+// (ADR-0005 gaps §3H): the card never outlives the run, so expiry lands
+// as TimedOut instead of blocking an already-dead budget. Zero remaining
+// returns immediately (TimedOut) instead of opening a hopeless wait.
+fun approvalWaitMs(
+    elapsedMs: Long,
+    totalBudgetMs: Long,
+    maxWaitMs: Long = ApprovalGate.APPROVAL_TIMEOUT_MS,
+): Long = minOf(maxWaitMs, totalBudgetMs - elapsedMs).coerceAtLeast(0L)
+
 // Deterministic messages→prompt rendering for the single-shot fallback
 // seam below: the system prompt (framing + delimited memories) stays
 // first, assistant turns keep their Tool names, tool turns keep their
@@ -897,10 +907,13 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                         )
                     }
                     // Bounded wait: expiry becomes TimedOut (cancelled_by_user),
-                    // never an auto-approve. Interrupt also maps to TimedOut
-                    // so cancellation never releases the Tool.
+                    // never an auto-approve. The wait is capped by the run's
+                    // remaining total budget, so a slow first Tool cannot park
+                    // the card past the deadline. Interrupt also maps to
+                    // TimedOut so cancellation never releases the Tool.
                     try {
-                        ticket.queue.poll(ApprovalGate.APPROVAL_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+                        val waitMs = approvalWaitMs(System.currentTimeMillis() - runT0, AgentLoop.DEFAULT_TOTAL_TIMEOUT_MS)
+                        ticket.queue.poll(waitMs, java.util.concurrent.TimeUnit.MILLISECONDS)
                             ?: ApprovalDecision.TimedOut
                     } catch (_: InterruptedException) {
                         ApprovalDecision.TimedOut
