@@ -15,8 +15,8 @@ class LlmKeysTest {
     @Test
     fun userKeysRoundTripThroughVault() {
         val vault = vault()
-        vault.saveLlmKeys(LlmKeys(geminiKey = "user-gemini", groqKey = "user-groq"))
-        assertEquals(LlmKeys(geminiKey = "user-gemini", groqKey = "user-groq"), vault.loadLlmKeys())
+        vault.saveLlmKeys(LlmKeys(geminiKey = "user-gemini", groqKey = "user-groq", deepseekKey = "user-deepseek", metaKey = "user-meta"))
+        assertEquals(LlmKeys(geminiKey = "user-gemini", groqKey = "user-groq", deepseekKey = "user-deepseek", metaKey = "user-meta"), vault.loadLlmKeys())
     }
 
     @Test

@@ -39,7 +39,7 @@ fun SettingsScreen(
     onRevokeGmail: () -> Unit,
     onPasteLink: (String) -> Unit,
     onDismissPasteFallback: () -> Unit,
-    onSaveLlmKeys: (String, String) -> Unit,
+    onSaveLlmKeys: (String, String, String, String) -> Unit,
     onClearLlmKeys: () -> Unit,
     onOpenExactAlarmSettings: () -> Unit,
     onRefreshExactAlarm: () -> Unit,
@@ -58,12 +58,16 @@ fun SettingsScreen(
     // Key fields always start empty: saved keys are never read back into UI.
     var geminiKey by remember { mutableStateOf("") }
     var groqKey by remember { mutableStateOf("") }
+    var deepseekKey by remember { mutableStateOf("") }
+    var metaKey by remember { mutableStateOf("") }
 
     DisposableEffect(Unit) {
         onDispose {
             pasted = ""
             geminiKey = ""
             groqKey = ""
+            deepseekKey = ""
+            metaKey = ""
         }
     }
 
@@ -165,12 +169,36 @@ fun SettingsScreen(
                 onValueChange = { groqKey = it },
                 label = "Paste Groq API key",
             )
+            OptionRow(
+                "DeepSeek",
+                onClick = {},
+                description = "DeepSeek flash provider.",
+                value = if (state.deepseekKeySet) "Set" else "Not set",
+            )
+            TextField(
+                value = deepseekKey,
+                onValueChange = { deepseekKey = it },
+                label = "Paste DeepSeek API key",
+            )
+            OptionRow(
+                "Meta",
+                onClick = {},
+                description = "Meta Muse Spark provider.",
+                value = if (state.metaKeySet) "Set" else "Not set",
+            )
+            TextField(
+                value = metaKey,
+                onValueChange = { metaKey = it },
+                label = "Paste Meta API key",
+            )
             Row(horizontalArrangement = Arrangement.spacedBy(Space * 2)) {
                 Button(
                     onClick = {
-                        onSaveLlmKeys(geminiKey, groqKey)
+                        onSaveLlmKeys(geminiKey, groqKey, deepseekKey, metaKey)
                         geminiKey = ""
                         groqKey = ""
+                        deepseekKey = ""
+                        metaKey = ""
                     },
                 ) {
                     Text("Save keys")
@@ -180,6 +208,8 @@ fun SettingsScreen(
                         onClearLlmKeys()
                         geminiKey = ""
                         groqKey = ""
+                        deepseekKey = ""
+                        metaKey = ""
                     },
                     variant = ButtonVariant.Secondary,
                 ) {

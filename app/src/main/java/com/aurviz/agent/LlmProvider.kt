@@ -236,7 +236,7 @@ fun llmHttpClient(): OkHttpClient =
         .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
         .build()
 
-/** OpenAI-shape chat/completions client. Covers Gemini compat and Groq. */
+/** OpenAI-shape chat/completions client. Covers Gemini compat, Groq, DeepSeek, and Meta. */
 class OpenAiChatProvider(
     private val baseUrl: String,
     private val apiKey: String,
@@ -283,10 +283,16 @@ class OpenAiChatProvider(
 object Providers {
     const val GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
     const val GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+    val DEEPSEEK_BASE_URL: String
+        get() = BuildConfig.DEEPSEEK_BASE_URL.ifBlank { "https://api.deepseek.com" }
+    val META_BASE_URL: String
+        get() = BuildConfig.META_BASE_URL.ifBlank { "https://api.meta.ai/v1" }
 
     fun default(): LlmProvider =
         when (BuildConfig.LLM_DEFAULT_PROVIDER) {
             "groq" -> OpenAiChatProvider(GROQ_BASE_URL, BuildConfig.GROQ_API_KEY, BuildConfig.GROQ_MODEL)
+            "deepseek" -> OpenAiChatProvider(DEEPSEEK_BASE_URL, BuildConfig.DEEPSEEK_API_KEY, BuildConfig.DEEPSEEK_MODEL)
+            "meta" -> OpenAiChatProvider(META_BASE_URL, BuildConfig.META_API_KEY, BuildConfig.META_MODEL)
             else -> OpenAiChatProvider(GEMINI_BASE_URL, BuildConfig.GEMINI_API_KEY, BuildConfig.GEMINI_MODEL)
         }
 }

@@ -3,11 +3,17 @@
 # empty API keys, and release users enter keys in Settings (stored encrypted
 # in TokenVault on-device).
 # sdk.dir=/Users/YOU/Library/Android/sdk
-LLM_DEFAULT_PROVIDER=gemini
+LLM_DEFAULT_PROVIDER=deepseek
 GEMINI_API_KEY=
 GEMINI_MODEL=gemini-2.5-flash
 GROQ_API_KEY=
 GROQ_MODEL=llama-3.1-8b-instant
+DEEPSEEK_API_KEY=
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_MODEL=deepseek-flash
+META_API_KEY=
+META_BASE_URL=https://api.meta.ai/v1
+META_MODEL=muse-spark-1.3
 # Gmail OAuth (Desktop-app client, PKCE + loopback). Required for sign-in.
 GOOGLE_OAUTH_CLIENT_ID=
 GOOGLE_OAUTH_CLIENT_SECRET=
