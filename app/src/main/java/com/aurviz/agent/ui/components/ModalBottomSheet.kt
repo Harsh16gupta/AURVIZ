@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -44,7 +45,9 @@ fun ModalBottomSheet(
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
         Box(
-            Modifier.fillMaxSize(),
+            Modifier
+                .fillMaxSize()
+                .background(Theme.colors.scrim),
             contentAlignment = Alignment.BottomCenter,
         ) {
             Column(
@@ -59,9 +62,9 @@ fun ModalBottomSheet(
                     Box(
                         Modifier.align(Alignment.CenterHorizontally)
                             .padding(top = Space * 2)
-                            .size(width = 36.dp, height = 4.dp)
+                            .size(width = 36.dp, height = 5.dp)
                             .clip(Theme.shapes.fullyRounded)
-                            .background(Theme.colors.border),
+                            .background(Theme.colors.onBackground.copy(alpha = 0.14f)),
                     )
                     Box(
                         Modifier.fillMaxWidth()
@@ -91,6 +94,7 @@ fun ModalBottomSheet(
                             .heightIn(max = 560.dp)
                             .verticalScroll(rememberScrollState())
                             // Editable Confirmation fields must clear the keyboard.
+                            .navigationBarsPadding()
                             .imePadding()
                             .padding(
                                 start = Space * 4,

@@ -13,6 +13,7 @@ import com.aurviz.agent.ToolCall
 import com.aurviz.agent.WebPage
 import com.aurviz.agent.retryDisclosure
 import com.aurviz.agent.ui.components.VoiceState as OrbState
+import com.aurviz.agent.ui.theme.ThemeMode
 
 // One snapshot of everything the Compose screens render.
 // The ViewModel owns this; screens only read it and forward events.
@@ -84,6 +85,8 @@ data class AgentUiState(
     // Composer sends nothing so a second command cannot replace the open
     // Confirmation card's gate.
     val agentRunning: Boolean = false,
+    val themeMode: ThemeMode = ThemeMode.SYSTEM,
+    val hapticsEnabled: Boolean = true,
 )
 
 // Ticket 11/24: visible retry line for CommandScreen, rendered from the

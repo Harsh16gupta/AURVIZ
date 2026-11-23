@@ -77,6 +77,8 @@ import com.aurviz.agent.rememberFact
 import com.aurviz.agent.retryDisclosure
 import com.aurviz.agent.toTimeline
 import com.aurviz.agent.ui.components.VoiceState as OrbState
+import com.aurviz.agent.ui.components.UiPrefs
+import com.aurviz.agent.ui.theme.ThemeMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -211,6 +213,13 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         tokenVault.loadInto(tokens)
+        val appCtx = application.applicationContext
+        _state.update {
+            it.copy(
+                themeMode = UiPrefs.themeMode(appCtx),
+                hapticsEnabled = UiPrefs.hapticsEnabled(appCtx),
+            )
+        }
         refreshLlmKeyFlags()
         refreshGmailStatus()
         refreshMemories()
@@ -218,6 +227,16 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         refreshPendingApprovals()
         refreshExactAlarmFlag()
         refreshBatteryFlag()
+    }
+
+    fun setThemeMode(mode: ThemeMode) {
+        UiPrefs.setThemeMode(getApplication<Application>().applicationContext, mode)
+        _state.update { it.copy(themeMode = mode) }
+    }
+
+    fun setHapticsEnabled(on: Boolean) {
+        UiPrefs.setHapticsEnabled(getApplication<Application>().applicationContext, on)
+        _state.update { it.copy(hapticsEnabled = on) }
     }
 
     fun attachWebBridge(bridge: WebBridge) {

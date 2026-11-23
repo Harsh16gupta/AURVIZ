@@ -13,12 +13,21 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModelProvider
 import com.aurviz.agent.ui.AgentNav
 import com.aurviz.agent.ui.AgentViewModel
 import com.aurviz.agent.ui.WebViewHolder
+import com.aurviz.agent.ui.components.LocalHaptics
+import com.aurviz.agent.ui.components.rememberAurvizHaptics
+import com.aurviz.agent.ui.theme.ThemeMode
 import com.aurviz.agent.ui.theme.VelaTheme
+import com.aurviz.agent.ui.theme.themeColors
 
 // Compose harness. All decisions (which language, what an error means,
 // voice-vs-typed) live in VoiceInput.kt and are unit-tested; this file only
@@ -62,13 +71,44 @@ class MainActivity : ComponentActivity() {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 41)
         }
         setContent {
-            VelaTheme {
-                AgentNav(
-                    vm = vm,
-                    onMicTap = ::onMicTapped,
-                    onOpenExactAlarmSettings = ::openExactAlarmSettings,
-                    onOpenBatterySettings = ::openBatteryExemption,
+            val state by vm.state.collectAsState()
+            val systemDark = isSystemInDarkTheme()
+            val isDark = when (state.themeMode) {
+                ThemeMode.DARK -> true
+                ThemeMode.LIGHT -> false
+                ThemeMode.SYSTEM -> systemDark
+            }
+            SideEffect {
+                enableEdgeToEdge(
+                    statusBarStyle = if (isDark) {
+                        SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+                    } else {
+                        SystemBarStyle.light(
+                            android.graphics.Color.TRANSPARENT,
+                            android.graphics.Color.TRANSPARENT,
+                        )
+                    },
+                    navigationBarStyle = if (isDark) {
+                        SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+                    } else {
+                        SystemBarStyle.light(
+                            android.graphics.Color.TRANSPARENT,
+                            android.graphics.Color.TRANSPARENT,
+                        )
+                    },
                 )
+            }
+            VelaTheme(colors = themeColors(isDark)) {
+                CompositionLocalProvider(
+                    LocalHaptics provides rememberAurvizHaptics(state.hapticsEnabled),
+                ) {
+                    AgentNav(
+                        vm = vm,
+                        onMicTap = ::onMicTapped,
+                        onOpenExactAlarmSettings = ::openExactAlarmSettings,
+                        onOpenBatterySettings = ::openBatteryExemption,
+                    )
+                }
             }
         }
     }
