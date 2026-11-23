@@ -184,3 +184,23 @@ Every case where the AI was wrong and how it was caught. Add an entry with file:
   changes):** EchoLeak-variant cases pin 3 sinks — no send execution, no
   exfil link in rendered answer text, no exfil data in scheduled
   summary/notification. Dummy markers only (`evil.example`, RFC-2606).
+
+## 2026-11-23 — review-findings landing (from `6036d0e` onto main)
+
+- **Two of four hunks ported as-is** (`ChatTimeline.kt` NG-3 slot-drop
+  comment, `RedTeamTest.kt` headless→scheduled comment wording) — blob
+  hashes match the reference exactly (`1ed434b`, `3276ee4`).
+- **`RegistrySchemasRequestTest.kt` hunk dropped: file is deleted in
+  main.** Bracket C folded its coverage into `ChatRolesWireTest`
+  (NG-1, `213f367`); `grep RegistrySchemasRequest app/src` is empty, so
+  the test-rename has no target. Kept deleted (`git rm`). Surviving
+  `headless*` test names (`ChatRolesWireTest.kt:88`,
+  `ScheduledRunTest.kt:361`) and `HeadlessChatLlm` stay — renaming those
+  is a wider terminology job, out of scope here.
+- **Stale `VALIDATION_LOG.md` hunk dropped, not ported.** It claims
+  `TokenVault`/`LlmKeys` carry Gemini/Groq only — false since the
+  DeepSeek re-wire (`7e8f558`). Replaced by this entry.
+- **Unexplained `HANDOFF.md` worktree edit discarded.** A
+  "Draft DeepSeek Re-wiring Plan" variant appeared in the worktree that
+  neither HEAD nor `6036d0e` contains; restored HEAD's version and
+  excluded it from the commit (HANDOFF is scratch, not source of truth).
