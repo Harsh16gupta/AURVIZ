@@ -329,11 +329,16 @@ fun embeddedMailCount(body: String): Int {
     return fromLines + sourceTags
 }
 
-// Gated send: validates the draft, demands gate approval, runs the
-// deterministic policy check, then sends exactly one MIME message built
-// from the approved To/Subject/Body. Never throws: every failure comes
-// back as a structured Failure the model can react to, and the transport
-// is untouched unless every check passes.
+/** Header values must not carry CR/LF: a smuggled newline in To or
+ *  Subject would split the MIME into attacker-chosen headers on the wire.
+ *  The body rides after the blank line, so its newlines are content. */
+fun headerValueHasNewline(value: String): Boolean = value.any { it == '\r' || it == '\n' }
+
+// Gated send: validates the draft, rejects header newlines, demands gate
+// approval, runs the deterministic policy check, then sends exactly one
+// MIME message built from the approved To/Subject/Body. Never throws:
+// every failure comes back as a structured Failure the model can react
+// to, and the transport is untouched unless every check passes.
 fun executeSendEmail(
     api: GmailApi?,
     draft: EmailDraft,
@@ -359,6 +364,12 @@ fun executeSendEmail(
     if (draft.body.isBlank()) {
         return ToolResult.Failure(
             "missing required argument 'body' for tool 'send_email'",
+            retryable = true,
+        )
+    }
+    if (to.any(::headerValueHasNewline) || headerValueHasNewline(draft.subject)) {
+        return ToolResult.Failure(
+            "header value must not contain CR/LF; nothing was sent",
             retryable = true,
         )
     }
