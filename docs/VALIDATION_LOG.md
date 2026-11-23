@@ -2,6 +2,45 @@
 
 Every case where the AI was wrong and how it was caught. Add an entry with file:line evidence before moving on.
 
+## 2026-11-24 — Issue #74 Memory + Web adapter extraction (`main`)
+
+- **No behavior drift by construction.** The two Memory builders moved
+  verbatim from `ToolRegistry.kt:291-346` to `MemoryTools.kt:10-62`
+  (`saveMemoryTool`, `searchMemoryTool` plus the `memoryTools()` list);
+  the five Web builders moved verbatim from `ToolRegistry.kt:353-552`
+  to `WebTools.kt:14-140` (`openUrlTool`, `getPageTextTool` with its
+  background fallback, `clickTool`, `scrollTool`, `extractTool` plus the
+  `webTools()` list and the `registerWebTools` wrapper). `defaultToolRegistry`
+  now registers the `memoryTools()` list (`ToolRegistry.kt:293-295`) and the
+  `webTools()` list (`ToolRegistry.kt:301-303`) instead of inline blocks.
+  Existing pins unchanged: `MemoryTest` (save dedupe, ranked recall,
+  FTS fallback), `WebToolsTest` (five schemas, allowlist, timeout/
+  load-failed retryable), `WebBackgroundTest` (headless serves scheduled
+  runs, foreground bridge wins), `ScheduledRunTest`/`ScheduledConsentTest`
+  (read-only allowlist, held writes).
+- **Foreign uncommitted work parked, not committed.** Same condition as
+  #67/#70/#72/#73: seven tracked schedule-path edits plus four untracked
+  files stashed/parked in /tmp before the test step and restored untouched
+  after — the commit holds only `MemoryTools.kt`, `WebTools.kt`,
+  `ToolRegistry.kt`, `MemoryToolsTest.kt`, `WebAdapterTest.kt`, and this log.
+- Tests: new `MemoryToolsTest` (7 tests: adapter order, LOW/ungated flags,
+  save+ranked recall through the kernel seam, blank-source default,
+  max_results trim, offline non-retryable Failure, schema view) and new
+  `WebAdapterTest` (9 tests: adapter order, LOW/ungated flags, open+text
+  and click/scroll/extract through the kernel seam, background fallback
+  serving scheduled runs, foreground-only retryable failures otherwise,
+  missing bridge+loader retryable Failure, blocked non-retryable, schema
+  view). Full `:app:testDebugUnitTest` green (428 tests, 0 failures;
+  412 at #73 + 16 new). Secret scan clean on all touched files.
+- **Review follow-up (code-review skill).** Standards: no hard violations;
+  one judgement-call smell (Speculative Generality on a `registerWebTools`
+  back-compat wrapper kept in the new file) — removed, so the default
+  builder registers the `webTools()` list directly like the other three
+  adapters; full suite re-run green (428, 0 failures). Spec: the "kernel
+  still owns domain logic" finding points at the legacy `demoToolSchema`
+  email block (`ToolRegistry.kt:255-283`), which #71 explicitly defers to
+  the standalone deletion in #76 — out of scope here, not a #74 gap.
+
 ## 2026-11-24 — Issue #73 Schedule adapter extraction (`main`)
 
 - **Second edit mangled a line it should have deleted.** While removing
