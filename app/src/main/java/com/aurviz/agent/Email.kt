@@ -34,8 +34,11 @@ data class EmailSummary(
 )
 
 // Read the mailbox: important first, then the rest, at most max rows.
-fun readImportant(api: GmailApi, max: Int): List<EmailSummary> =
-    (api.listInbox().filter { it.important } + api.listInbox().filter { !it.important }).take(max)
+// Single inbox scan: one partition pass, both groups stable.
+fun readImportant(api: GmailApi, max: Int): List<EmailSummary> {
+    val (important, rest) = api.listInbox().partition { it.important }
+    return (important + rest).take(max)
+}
 
 // Ticket 03/24: search + read for the agent loop. Read-only (ADR-0003:
 // no Confirmation gate on reads); every result carries its mailbox

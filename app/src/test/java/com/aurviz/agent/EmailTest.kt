@@ -95,6 +95,94 @@ class EmailTest {
         assertEquals(1, readImportant(fake, max = 1).size)
     }
 
+    // NG-7: one inbox scan per read, important-first (stable), then rest, capped.
+    @Test
+    fun readScansInboxOncePerRead() {
+        var scans = 0
+        val inner =
+            FakeGmailApi(
+                inbox =
+                    listOf(
+                        EmailSummary("1", "a@x.com", "One", "s1", important = true),
+                        EmailSummary("2", "b@x.com", "Two", "s2", important = false),
+                    ),
+            )
+        val counting =
+            object : GmailApi by inner {
+                override fun listInbox(): List<EmailSummary> {
+                    scans++
+                    return inner.listInbox()
+                }
+            }
+        readImportant(counting, max = 5)
+        assertEquals(1, scans)
+    }
+
+    @Test
+    fun readKeepsStableOrderWithinEachGroup() {
+        val fake =
+            FakeGmailApi(
+                inbox =
+                    listOf(
+                        EmailSummary("1", "a@x.com", "One", "s1", important = false),
+                        EmailSummary("2", "b@x.com", "Two", "s2", important = true),
+                        EmailSummary("3", "c@x.com", "Three", "s3", important = false),
+                        EmailSummary("4", "d@x.com", "Four", "s4", important = true),
+                    ),
+            )
+        val ids = readImportant(fake, max = 10).map { it.id }
+        assertEquals(listOf("2", "4", "1", "3"), ids)
+    }
+
+    @Test
+    fun readCapTruncationKeepsImportantFirst() {
+        val fake =
+            FakeGmailApi(
+                inbox =
+                    listOf(
+                        EmailSummary("1", "a@x.com", "One", "s1", important = false),
+                        EmailSummary("2", "b@x.com", "Two", "s2", important = true),
+                        EmailSummary("3", "c@x.com", "Three", "s3", important = true),
+                        EmailSummary("4", "d@x.com", "Four", "s4", important = false),
+                    ),
+            )
+        val ids = readImportant(fake, max = 2).map { it.id }
+        assertEquals(listOf("2", "3"), ids)
+    }
+
+    @Test
+    fun readEmptyInboxReturnsEmpty() {
+        assertEquals(0, readImportant(FakeGmailApi(), max = 5).size)
+    }
+
+    @Test
+    fun readAllImportantPreservesOrder() {
+        val fake =
+            FakeGmailApi(
+                inbox =
+                    listOf(
+                        EmailSummary("1", "a@x.com", "One", "s1", important = true),
+                        EmailSummary("2", "b@x.com", "Two", "s2", important = true),
+                    ),
+            )
+        val ids = readImportant(fake, max = 10).map { it.id }
+        assertEquals(listOf("1", "2"), ids)
+    }
+
+    @Test
+    fun readNoneImportantPreservesOrder() {
+        val fake =
+            FakeGmailApi(
+                inbox =
+                    listOf(
+                        EmailSummary("1", "a@x.com", "One", "s1", important = false),
+                        EmailSummary("2", "b@x.com", "Two", "s2", important = false),
+                    ),
+            )
+        val ids = readImportant(fake, max = 10).map { it.id }
+        assertEquals(listOf("1", "2"), ids)
+    }
+
     @Test
     fun revokeClearsTokens() {
         val tokens = TokenStore()
