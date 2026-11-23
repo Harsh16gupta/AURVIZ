@@ -166,3 +166,10 @@ Every case where the AI was wrong and how it was caught. Add an entry with file:
   missingSlots|slotQuestion app/src` empty after the pick; single `Plan`
   definition at `ChatTimeline.kt:11` (`PlanCard.kt:20` is unrelated
   `PlanPrice`); `getImportantEmails` untouched (live registry tool).
+
+## 2026-11-23 — NG-7 landing (cherry-pick `6fb9a10` onto main)
+
+- **Applied cleanly, no conflicts** (`Email.kt` +7/−2, `EmailTest.kt` +88).
+  Old code called `api.listInbox()` twice (two full scans); new code
+  partitions a single scan. Re-verified against main: `readImportant`
+  is the only `listInbox` double-call site.
