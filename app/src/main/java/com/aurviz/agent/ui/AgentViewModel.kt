@@ -34,6 +34,8 @@ import com.aurviz.agent.PendingApproval
 import com.aurviz.agent.PendingApprovalOutcome
 import com.aurviz.agent.Plan
 import com.aurviz.agent.RoomPendingApprovalStore
+import com.aurviz.agent.RoomScheduleRunStore
+import com.aurviz.agent.Schedule
 import com.aurviz.agent.TimelineStep
 import com.aurviz.agent.RoomMemoryStore
 import com.aurviz.agent.RoomScheduleStore
@@ -225,8 +227,10 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                 hapticsEnabled = UiPrefs.hapticsEnabled(appCtx),
                 selectedProvider = UiPrefs.selectedProvider(appCtx),
                 confirmSendEmail = UiPrefs.confirmSendEmail(appCtx),
+                disabledScheduleIds = UiPrefs.disabledScheduleIds(appCtx),
             )
         }
+        refreshScheduleRuns()
         refreshLlmKeyFlags()
         refreshGmailStatus()
         refreshMemories()
@@ -491,6 +495,25 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteMemory(id: String) {
         viewModelScope.launch(Dispatchers.IO) {
             roomStore.delete(id)
+            refreshMemories()
+        }
+    }
+
+    // Inline edit: replace the Memory's text, keeping its source.
+    fun updateMemory(memory: Memory, newText: String) {
+        val text = newText.trim()
+        if (text.isBlank()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            roomStore.delete(memory.id)
+            roomStore.save(text, memory.source)
+            refreshMemories()
+        }
+    }
+
+    // Undo delete: save the text back under its original source.
+    fun restoreMemory(memory: Memory) {
+        viewModelScope.launch(Dispatchers.IO) {
+            roomStore.save(memory.text, memory.source)
             refreshMemories()
         }
     }
@@ -881,6 +904,54 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
     fun rejectSchedule() {
         _state.update { it.copy(pendingSchedule = null, statusLine = "Schedule discarded.") }
         recordCompleted(responseText = "Schedule discarded.")
+    }
+
+    // Pure UI formatting (Schedule.kt stays untouched).
+    // Moved to top level below so screens can call them without a ViewModel.
+
+    fun toggleScheduleEnabled(id: String, enabled: Boolean) {
+        val app = getApplication<Application>()
+        val updated = if (enabled) {
+            state.value.disabledScheduleIds - id
+        } else {
+            state.value.disabledScheduleIds + id
+        }
+        UiPrefs.setDisabledScheduleIds(app.applicationContext, updated)
+        _state.update { it.copy(disabledScheduleIds = updated) }
+        viewModelScope.launch(Dispatchers.IO) {
+            if (enabled) {
+                listSchedules(scheduleStore).find { it.id == id }?.let { registerRoutineAlarm(app, it) }
+            } else {
+                cancelRoutineAlarm(app, id)
+                cancelRoutineWork(app, id)
+            }
+        }
+    }
+
+    fun runScheduleNow(id: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val schedule = listSchedules(scheduleStore).find { it.id == id } ?: return@launch
+            sendCommand(schedule.instruction)
+        }
+    }
+
+    fun refreshScheduleRuns() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val runs = RoomScheduleRunStore(db.runs()).list()
+                .sortedByDescending { it.fireTime }
+                .take(20)
+                .map { run ->
+                    ScheduleRunSummary(
+                        id = "${run.scheduleId}-${run.fireTime}",
+                        scheduleId = run.scheduleId,
+                        status = run.status.name,
+                        durationMs = run.durationMs,
+                        summary = run.result ?: run.error,
+                        timestampMs = run.fireTime,
+                    )
+                }
+            _state.update { it.copy(scheduleRuns = runs) }
+        }
     }
 
     // --- Pending approvals (held scheduled-run writes, ticket 15/28) ---
@@ -1333,4 +1404,22 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         }
         super.onCleared()
     }
+}
+
+// Pure UI formatting for the grouped Schedule card (Schedule.kt stays
+// untouched). Top level so screens can call them without a ViewModel.
+
+// Cron line, e.g. "9 9 * * *" or "0 9 * * 1,3,5".
+fun formatScheduleCron(schedule: Schedule): String {
+    val daysExpr = schedule.days?.sorted()?.joinToString(",") ?: "*"
+    return "${schedule.minute} ${schedule.hour} * * $daysExpr"
+}
+
+// Human line, e.g. "Daily at 09:00" or "Mon, Wed, Fri at 09:00".
+fun formatScheduleTime(schedule: Schedule): String {
+    val time = "%02d:%02d".format(schedule.hour, schedule.minute)
+    val days = schedule.days
+    if (days.isNullOrEmpty()) return "Daily at $time"
+    val names = mapOf(1 to "Mon", 2 to "Tue", 3 to "Wed", 4 to "Thu", 5 to "Fri", 6 to "Sat", 7 to "Sun")
+    return days.sorted().map { names[it] ?: "$it" }.joinToString(", ") + " at $time"
 }

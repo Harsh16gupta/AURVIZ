@@ -115,6 +115,20 @@ data class AgentUiState(
     // Interactive AI provider override (null = Auto/Default).
     val selectedProvider: String? = null,
     val confirmSendEmail: Boolean = true,
+    // Disabled Schedule ids (UiPrefs-backed) + recent run history.
+    val disabledScheduleIds: Set<String> = emptySet(),
+    val scheduleRuns: List<ScheduleRunSummary> = emptyList(),
+)
+
+// One recorded scheduled run for the Recent Runs list (GLOSSARY Schedule):
+// mapped from RoomScheduleRunStore rows without changing domain entities.
+data class ScheduleRunSummary(
+    val id: String,
+    val scheduleId: String,
+    val status: String,
+    val durationMs: Long,
+    val summary: String?,
+    val timestampMs: Long,
 )
 
 // Ticket 11/24: visible retry line for CommandScreen, rendered from the

@@ -61,6 +61,7 @@ import com.aurviz.agent.ui.components.ScreenScaffold
 import com.aurviz.agent.ui.components.ScrollToLatestButton
 import com.aurviz.agent.ui.components.SuggestionCard
 import com.aurviz.agent.ui.components.Text
+import com.aurviz.agent.ui.components.TextField
 import com.aurviz.agent.ui.components.Icon
 import com.aurviz.agent.ui.components.ThinkingIndicator
 import com.aurviz.agent.ui.components.UserMessage
@@ -166,6 +167,7 @@ fun CommandScreen(
                                 state = state,
                                 onRetry = onRetry,
                                 onApprovePending = onApprovePending,
+                                onApproveEdited = onApproveEdited,
                                 onRejectPending = onRejectPending,
                             )
                         }
@@ -371,6 +373,7 @@ private fun ActiveRunSection(
     state: AgentUiState,
     onRetry: () -> Unit,
     onApprovePending: (String) -> Unit,
+    onApproveEdited: (String, Map<String, Any?>) -> Unit,
     onRejectPending: (String) -> Unit,
 ) {
     var elapsed by remember { mutableIntStateOf(0) }
@@ -413,20 +416,64 @@ private fun ActiveRunSection(
                 detail = pendingCall.arguments.entries.joinToString("\n") { (k, v) -> "$k: $v" }
             }
             val unseen = state.pendingApprovalUnseen
-            ConfirmationCard(
-                toolLabel = pendingCall.name,
-                title = title,
-                detail = detail,
-                warningText = if (unseen.isNotEmpty()) {
-                    "New recipient — never emailed before: ${unseen.joinToString()}"
-                } else {
-                    null
-                },
-                approveLabel = if (pendingCall.name == "send_email") "Approve & Send" else "Approve",
-                denyLabel = "Deny",
-                onApprove = { onApprovePending(proposalId) },
-                onDeny = { onRejectPending(proposalId) },
-            )
+            if (pendingCall.name == "send_email") {
+                var to by remember(proposalId) {
+                    mutableStateOf((pendingCall.arguments["to"] as? String).orEmpty())
+                }
+                var subject by remember(proposalId) {
+                    mutableStateOf((pendingCall.arguments["subject"] as? String).orEmpty())
+                }
+                var body by remember(proposalId) {
+                    mutableStateOf((pendingCall.arguments["body"] as? String).orEmpty())
+                }
+                val toUnseen = to.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                    .any { it.lowercase() in unseen.map { u -> u.lowercase() }.toSet() }
+                ConfirmationCard(
+                    toolLabel = pendingCall.name,
+                    title = title,
+                    detail = detail,
+                    warningText = if (toUnseen || unseen.isNotEmpty()) {
+                        "New recipient — never emailed before."
+                    } else {
+                        null
+                    },
+                    approveLabel = "Approve & Send",
+                    denyLabel = "Deny",
+                    onApprove = {
+                        val origTo = (pendingCall.arguments["to"] as? String).orEmpty()
+                        val origSubject = (pendingCall.arguments["subject"] as? String).orEmpty()
+                        val origBody = (pendingCall.arguments["body"] as? String).orEmpty()
+                        if (to.trim() != origTo.trim() || subject != origSubject || body != origBody) {
+                            onApproveEdited(
+                                proposalId,
+                                mapOf("to" to to.trim(), "subject" to subject, "body" to body),
+                            )
+                        } else {
+                            onApprovePending(proposalId)
+                        }
+                    },
+                    onDeny = { onRejectPending(proposalId) },
+                ) {
+                    TextField(value = to, onValueChange = { to = it }, label = "To")
+                    TextField(value = subject, onValueChange = { subject = it }, label = "Subject")
+                    TextField(value = body, onValueChange = { body = it }, label = "Body", minLines = 3)
+                }
+            } else {
+                ConfirmationCard(
+                    toolLabel = pendingCall.name,
+                    title = title,
+                    detail = detail,
+                    warningText = if (unseen.isNotEmpty()) {
+                        "New recipient — never emailed before: ${unseen.joinToString()}"
+                    } else {
+                        null
+                    },
+                    approveLabel = "Approve",
+                    denyLabel = "Deny",
+                    onApprove = { onApprovePending(proposalId) },
+                    onDeny = { onRejectPending(proposalId) },
+                )
+            }
         }
 
         if (state.timeline.any { it.state == StepState.FAILED } && !state.agentRunning) {

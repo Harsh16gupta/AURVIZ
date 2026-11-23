@@ -8,9 +8,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -19,6 +21,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -27,9 +30,11 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.aurviz.agent.knownAddressesFromInbox
+import com.aurviz.agent.ui.components.HapticKind
 import com.aurviz.agent.ui.components.Icon
 import com.aurviz.agent.unseenRecipients
 import com.aurviz.agent.ui.components.IconButton
+import com.aurviz.agent.ui.components.LocalHaptics
 import com.aurviz.agent.ui.components.ScreenScaffold
 import com.aurviz.agent.ui.theme.Space
 import com.aurviz.agent.ui.components.Text
@@ -81,7 +86,11 @@ fun AgentNav(
     val navController = rememberNavController()
     val state by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val haptics = LocalHaptics.current
     var showVoice by rememberSaveable { mutableStateOf(false) }
+    val goCommand: () -> Unit = {
+        if (!navController.popBackStack()) navController.navigate(Dests.COMMAND)
+    }
 
     // One-shot: the ViewModel exposes the loopback OAuth URL; the Activity
     // context opens it in a browser, then the event is consumed.
@@ -116,7 +125,8 @@ fun AgentNav(
                             state = state,
                             onOpenUrl = vm::openWeb,
                             onAttachBridge = vm::attachWebBridge,
-                            onBack = { navController.navigate(Dests.COMMAND) },
+                            onBack = goCommand,
+                            onSaveMemory = { vm.sendCommand("remember $it") },
                         )
                     }
                     composable(Dests.SCHEDULES) {
@@ -129,7 +139,13 @@ fun AgentNav(
                             onApproveHeldWrite = vm::approveHeldWrite,
                             onRejectHeldWrite = vm::rejectHeldWrite,
                             onRefreshApprovals = vm::refreshPendingApprovals,
-                            onBack = { navController.navigate(Dests.COMMAND) },
+                            onToggleScheduleEnabled = vm::toggleScheduleEnabled,
+                            onRunScheduleNow = {
+                                vm.runScheduleNow(it)
+                                navController.navigate(Dests.COMMAND)
+                            },
+                            onRefreshRuns = vm::refreshScheduleRuns,
+                            onBack = goCommand,
                         )
                     }
                     composable(Dests.MEMORY) {
@@ -137,7 +153,9 @@ fun AgentNav(
                             state = state,
                             onRemember = { vm.sendCommand("remember $it") },
                             onForget = vm::deleteMemory,
-                            onBack = { navController.navigate(Dests.COMMAND) },
+                            onBack = goCommand,
+                            onUpdateMemory = vm::updateMemory,
+                            onRestoreMemory = vm::restoreMemory,
                         )
                     }
                     composable(Dests.SETTINGS) {
@@ -154,14 +172,19 @@ fun AgentNav(
                             onOpenBatterySettings = onOpenBatterySettings,
                             onRefreshBattery = vm::refreshBatteryFlag,
                             onVoiceSettings = { showVoice = true },
-                            onBack = { navController.navigate(Dests.COMMAND) },
+                            onBack = goCommand,
+                            onSetThemeMode = vm::setThemeMode,
+                            onSetHapticsEnabled = vm::setHapticsEnabled,
+                            onSetConfirmSendEmail = vm::setConfirmSendEmail,
                         )
                     }
                 }
             }
             BottomBar(
                 currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route,
+                showScheduleDot = state.pendingApprovals.isNotEmpty(),
                 onSelect = { route ->
+                    haptics?.play(HapticKind.Selection)
                     navController.navigate(route) {
                         popUpTo(Dests.COMMAND) { saveState = true }
                         launchSingleTop = true
@@ -200,38 +223,61 @@ fun AgentNav(
 }
 
 @Composable
-private fun BottomBar(currentRoute: String?, onSelect: (String) -> Unit) {
-    Row(
+private fun BottomBar(
+    currentRoute: String?,
+    onSelect: (String) -> Unit,
+    showScheduleDot: Boolean = false,
+) {
+    Column(
         Modifier.fillMaxWidth()
-            .background(Theme.colors.surface)
-            .navigationBarsPadding()
-            .padding(horizontal = Space * 2, vertical = Space * 2),
-        horizontalArrangement = Arrangement.SpaceAround,
-        verticalAlignment = Alignment.CenterVertically,
+            .background(Theme.colors.panel),
     ) {
-        Tabs.forEach { tab ->
-            val selected = currentRoute == tab.route
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(Space * 0.5f),
-            ) {
-                IconButton(
-                    onClick = { onSelect(tab.route) },
-                    contentDescription = tab.label,
-                    size = com.aurviz.agent.ui.components.IconButtonSize.Medium,
+        Box(
+            Modifier.fillMaxWidth()
+                .height(0.5.dp)
+                .background(Theme.colors.edge),
+        )
+        Row(
+            Modifier.fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = Space * 2, vertical = Space * 2),
+            horizontalArrangement = Arrangement.SpaceAround,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Tabs.forEach { tab ->
+                val selected = currentRoute == tab.route
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(Space * 0.5f),
                 ) {
-                    Icon(
-                        tab.icon,
-                        contentDescription = null,
-                        modifier = Modifier.size(22.dp),
-                        tint = if (selected) Theme.colors.primary else Theme.colors.onBackgroundMuted,
+                    Box {
+                        IconButton(
+                            onClick = { onSelect(tab.route) },
+                            contentDescription = tab.label,
+                            size = com.aurviz.agent.ui.components.IconButtonSize.Medium,
+                        ) {
+                            Icon(
+                                tab.icon,
+                                contentDescription = null,
+                                modifier = Modifier.size(22.dp),
+                                tint = if (selected) Theme.colors.primary else Theme.colors.onBackgroundMuted,
+                            )
+                        }
+                        if (tab.route == Dests.SCHEDULES && showScheduleDot) {
+                            Box(
+                                Modifier.align(Alignment.TopEnd)
+                                    .size(7.dp)
+                                    .clip(CircleShape)
+                                    .background(Theme.colors.warning),
+                            )
+                        }
+                    }
+                    Text(
+                        tab.label,
+                        style = Theme.typography.caption,
+                        color = if (selected) Theme.colors.primary else Theme.colors.onBackgroundMuted,
                     )
                 }
-                Text(
-                    tab.label,
-                    style = Theme.typography.caption,
-                    color = if (selected) Theme.colors.primary else Theme.colors.onBackgroundMuted,
-                )
             }
         }
     }

@@ -1,20 +1,29 @@
 package com.aurviz.agent.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import com.aurviz.agent.BuildConfig
 import com.aurviz.agent.OEM_AUTOSTART_GUIDANCE
 import com.aurviz.agent.ui.AgentUiState
 import com.aurviz.agent.ui.components.Button
 import com.aurviz.agent.ui.components.ButtonVariant
+import com.aurviz.agent.ui.components.ChoiceTile
+import com.aurviz.agent.ui.components.HapticKind
+import com.aurviz.agent.ui.components.LocalHaptics
+import com.aurviz.agent.ui.components.OptionGroup
 import com.aurviz.agent.ui.components.OptionRow
 import com.aurviz.agent.ui.components.OptionToggle
 import com.aurviz.agent.ui.components.Page
@@ -27,10 +36,11 @@ import com.aurviz.agent.ui.theme.EnvelopeSimple
 import com.aurviz.agent.ui.theme.Icons
 import com.aurviz.agent.ui.theme.Sparkle
 import com.aurviz.agent.ui.theme.Theme
+import com.aurviz.agent.ui.theme.ThemeMode
 import com.aurviz.agent.ui.theme.Waveform
 
 // Preferences, Gmail sign-in, and latency telemetry. The loopback OAuth
-// keeps its pasted-link fallback here in a collapsible section so a
+// keeps its pasted link fallback here in a collapsible section so a
 // browser that never returns to the app cannot strand the user.
 @Composable
 fun SettingsScreen(
@@ -47,6 +57,9 @@ fun SettingsScreen(
     onRefreshBattery: () -> Unit,
     onVoiceSettings: () -> Unit,
     onBack: () -> Unit,
+    onSetThemeMode: (ThemeMode) -> Unit = {},
+    onSetHapticsEnabled: (Boolean) -> Unit = {},
+    onSetConfirmSendEmail: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     // P2: key drafts and the pasted OAuth link are memory-only (remember,
@@ -54,12 +67,12 @@ fun SettingsScreen(
     // saved-instance state. Fields start empty, clear on save, and clear
     // again when the screen leaves composition.
     var pasted by remember { mutableStateOf("") }
-    var haptics by rememberSaveable { mutableStateOf(true) }
     // Key fields always start empty: saved keys are never read back into UI.
     var geminiKey by remember { mutableStateOf("") }
     var groqKey by remember { mutableStateOf("") }
     var deepseekKey by remember { mutableStateOf("") }
     var metaKey by remember { mutableStateOf("") }
+    val haptics = LocalHaptics.current
 
     DisposableEffect(Unit) {
         onDispose {
@@ -77,29 +90,54 @@ fun SettingsScreen(
     }
 
     Page(title = "Settings", onBack = onBack, modifier = modifier) {
+        Section("Appearance & Feedback") {
+            Row(horizontalArrangement = Arrangement.spacedBy(Space * 2)) {
+                listOf(
+                    ThemeMode.SYSTEM to "System",
+                    ThemeMode.DARK to "Dark",
+                    ThemeMode.LIGHT to "Light",
+                ).forEach { (mode, label) ->
+                    ChoiceTile(
+                        selected = state.themeMode == mode,
+                        onClick = {
+                            haptics?.play(HapticKind.Selection)
+                            onSetThemeMode(mode)
+                        },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(label, style = Theme.typography.label)
+                    }
+                }
+            }
+            OptionToggle(
+                title = "Haptics",
+                checked = state.hapticsEnabled,
+                onCheckedChange = onSetHapticsEnabled,
+                description = "Gentle buzz on send and confirm.",
+            )
+        }
         Section(
-            "Gmail",
+            "Connections",
             footer = if (state.gmailConnected) {
-                "Signed in as ${state.gmailAccount ?: "connected"}."
+                "Signed in as ${state.gmailAccount ?: "connected"} · Scopes: gmail.readonly · gmail.send."
             } else {
                 "Connect once — the login survives restarts."
             },
         ) {
             if (state.gmailConnected) {
                 OptionRow(
-                    "Gmail: ${state.gmailAccount ?: "connected"}",
-                    onClick = {},
+                    title = "Gmail: ${state.gmailAccount ?: "connected"}",
                     description = "Tap Revoke below to disconnect the mailbox.",
                     icon = Icons.EnvelopeSimple,
                 )
                 OptionRow(
-                    "Revoke Gmail access",
+                    title = "Revoke Gmail access",
                     onClick = onRevokeGmail,
                     destructive = true,
                 )
             } else {
                 OptionRow(
-                    "Connect Gmail",
+                    title = "Connect Gmail",
                     onClick = onConnectGmail,
                     description = "Google sign-in opens in your browser.",
                     icon = Icons.EnvelopeSimple,
@@ -107,7 +145,7 @@ fun SettingsScreen(
                 )
             }
             OptionRow(
-                if (state.pasteFallbackVisible) "Hide pasted-link fallback" else "Paste callback link instead",
+                title = if (state.pasteFallbackVisible) "Hide pasted-link fallback" else "Paste callback link instead",
                 onClick = {
                     if (state.pasteFallbackVisible) onDismissPasteFallback() else onConnectGmail()
                 },
@@ -141,17 +179,11 @@ fun SettingsScreen(
                     }
                 }
             }
-        }
-        Section(
-            "AI keys",
-            footer = "Keys stay encrypted on this phone and are never baked into the app. " +
-                "Release builds ship with empty keys — enter them here to run the agent.",
-        ) {
             OptionRow(
-                "Gemini",
-                onClick = {},
+                title = "Gemini",
                 description = "Default provider.",
-                value = if (state.geminiKeySet) "Set" else "Not set",
+                badge = if (state.geminiKeySet) "Set" else null,
+                value = if (state.geminiKeySet) null else "Not set",
             )
             TextField(
                 value = geminiKey,
@@ -159,10 +191,10 @@ fun SettingsScreen(
                 label = "Paste Gemini API key",
             )
             OptionRow(
-                "Groq",
-                onClick = {},
+                title = "Groq",
                 description = "Fallback provider.",
-                value = if (state.groqKeySet) "Set" else "Not set",
+                badge = if (state.groqKeySet) "Set" else null,
+                value = if (state.groqKeySet) null else "Not set",
             )
             TextField(
                 value = groqKey,
@@ -170,10 +202,10 @@ fun SettingsScreen(
                 label = "Paste Groq API key",
             )
             OptionRow(
-                "DeepSeek",
-                onClick = {},
+                title = "DeepSeek",
                 description = "DeepSeek flash provider.",
-                value = if (state.deepseekKeySet) "Set" else "Not set",
+                badge = if (state.deepseekKeySet) "Set" else null,
+                value = if (state.deepseekKeySet) null else "Not set",
             )
             TextField(
                 value = deepseekKey,
@@ -181,10 +213,10 @@ fun SettingsScreen(
                 label = "Paste DeepSeek API key",
             )
             OptionRow(
-                "Meta",
-                onClick = {},
+                title = "Meta",
                 description = "Meta Muse Spark provider.",
-                value = if (state.metaKeySet) "Set" else "Not set",
+                badge = if (state.metaKeySet) "Set" else null,
+                value = if (state.metaKeySet) null else "Not set",
             )
             TextField(
                 value = metaKey,
@@ -217,89 +249,118 @@ fun SettingsScreen(
                 }
             }
         }
-        Section("Performance") {
-            OptionRow(
-                "Last Plan generation",
-                onClick = {},
-                icon = Icons.Sparkle,
-                value = state.perf.planMs?.let { "$it ms" } ?: "—",
+        Section("Confirmation Rules") {
+            OptionToggle(
+                title = "Require Confirmation for send_email",
+                checked = state.confirmSendEmail,
+                onCheckedChange = onSetConfirmSendEmail,
+                description = "Each send_email Tool call waits for approval.",
             )
             OptionRow(
-                "Last Tool execution",
-                onClick = {},
-                icon = Icons.Sparkle,
-                value = state.perf.toolMs?.let { "$it ms" } ?: "—",
+                title = "Read Emails",
+                description = "Mailbox reads run without a Confirmation.",
+                value = "Auto-run",
             )
             OptionRow(
-                "Last Memory recall",
-                onClick = {},
-                icon = Icons.Sparkle,
-                value = state.perf.recallMs?.let { "$it ms" } ?: "—",
+                title = "Forget Memory",
+                description = "Deletions preview before anything is removed.",
+                value = "Preview & Confirm",
+            )
+            OptionRow(
+                title = "Scheduled Writes",
+                description = "Unattended writes wait in Schedules.",
+                value = "Hold for Confirmation",
             )
         }
         Section(
-            "Schedules",
+            "Permissions & Background",
             footer = "Revoked permission falls back to inexact timing — " +
                 "Schedules still run, just not exactly on time. " +
-                "Android 12+ needs exact-alarm permission for on-time firing.",
+                "Android 12+ needs exact-alarm permission for on-time firing. " +
+                "Doze and vendor battery managers can delay Schedules. " +
+                OEM_AUTOSTART_GUIDANCE,
         ) {
             if (state.exactAlarmNeeded) {
                 OptionRow(
-                    "Allow exact alarms",
+                    title = "Exact alarms",
                     onClick = onOpenExactAlarmSettings,
                     description = "Schedules still run without it — just not exactly on time.",
                     icon = Icons.Bell,
+                    value = "Action needed",
+                    valueColor = Theme.colors.warning,
                     navigates = true,
                 )
             } else {
                 OptionRow(
-                    "Exact alarms allowed",
-                    onClick = {},
+                    title = "Exact alarms",
                     description = "Schedules fire at their saved time.",
                     icon = Icons.Bell,
+                    value = "Granted",
+                    valueColor = Theme.colors.success,
                 )
             }
-        }
-        Section(
-            "Battery & background",
-            footer = "Doze and vendor battery managers can delay Schedules. " +
-                "Exempting Aurviz keeps fire times reliable.",
-        ) {
             if (state.batteryOptimizationNeeded) {
                 OptionRow(
-                    "Allow background running",
+                    title = "Background running",
                     onClick = onOpenBatterySettings,
                     description = "Battery optimization is restricting Aurviz — exempt it so Schedules fire on time.",
                     icon = Icons.Bell,
+                    value = "Action needed",
+                    valueColor = Theme.colors.warning,
                     navigates = true,
                 )
             } else {
                 OptionRow(
-                    "Background running allowed",
-                    onClick = {},
+                    title = "Background running",
                     description = "Battery optimization is not restricting Aurviz.",
                     icon = Icons.Bell,
+                    value = "Granted",
+                    valueColor = Theme.colors.success,
                 )
             }
-            Text(
-                OEM_AUTOSTART_GUIDANCE,
-                color = Theme.colors.onBackgroundMuted,
-            )
-        }
-        Section("Voice") {
             OptionRow(
-                "Voice Command",
+                title = "Voice Command",
                 onClick = onVoiceSettings,
                 description = "Waveform, live transcription, hands-free options.",
                 icon = Icons.Waveform,
                 navigates = true,
             )
-            OptionToggle(
-                title = "Haptics",
-                checked = haptics,
-                onCheckedChange = { haptics = it },
-                description = "Gentle buzz on send and confirm.",
+        }
+        Section("Performance Telemetry") {
+            OptionGroup {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                ) {
+                    MetricColumn("Plan", state.perf.planMs)
+                    MetricColumn("Tool", state.perf.toolMs)
+                    MetricColumn("Recall", state.perf.recallMs)
+                }
+            }
+            OptionRow(
+                title = "Provider",
+                description = "${state.interactions.size} Interactions recorded",
+                value = state.selectedProvider ?: state.providerUsed ?: BuildConfig.LLM_DEFAULT_PROVIDER,
             )
         }
+    }
+}
+
+@Composable
+private fun MetricColumn(label: String, ms: Long?) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(
+            label,
+            style = Theme.typography.caption,
+            color = Theme.colors.onBackgroundMuted,
+        )
+        Text(
+            ms?.let { "$it ms" } ?: "—",
+            style = Theme.typography.code,
+            color = Theme.colors.onBackground,
+        )
     }
 }
