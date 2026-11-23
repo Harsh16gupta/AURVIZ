@@ -46,10 +46,16 @@ interface MemoryDao {
     fun markUsed(pid: Long, nowMs: Long)
 }
 
-@Database(entities = [MemoryRow::class, ScheduleRow::class], version = 3, exportSchema = false)
+@Database(
+    entities = [MemoryRow::class, ScheduleRow::class, ScheduleRunRow::class, PendingApprovalRow::class],
+    version = 4,
+    exportSchema = false,
+)
 abstract class AppDb : RoomDatabase() {
     abstract fun memories(): MemoryDao
     abstract fun schedules(): ScheduleDao
+    abstract fun runs(): ScheduleRunDao
+    abstract fun approvals(): PendingApprovalDao
 }
 
 // Version 2 -> 3 adds only the ticket #31 ranking columns; existing rows
