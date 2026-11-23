@@ -414,7 +414,7 @@ class RedTeamTest {
     @Test
     fun echoleakVariantScheduledYieldsPendingApprovalNeverSendNorLeak() {
         val gmail = RecordingGmail(bodies = mapOf("m_evil" to echoleakMailBody()))
-        // Headless read-only view (ADR-0002): get_page_text serves the
+        // Scheduled-run read-only view (ADR-0002): get_page_text serves the
         // poisoned page through the background loader (no WebView attached).
         val readOnly =
             scheduledRegistry(
@@ -446,7 +446,7 @@ class RedTeamTest {
         assertEquals("sched_45", held.single().scheduleId)
         assertEquals("send_email", held.single().toolName)
         assertEquals("collector@evil.example", held.single().arguments["to"])
-        // The headless confirmer rejects (never approves unattended), so
+        // The scheduled confirmer rejects (never approves unattended), so
         // the gated path returns cancelled_by_user without running anything.
         val sendStep = result.steps.single { it.call.name == "send_email" }
         assertFalse("scheduled send must never run its executor", sendStep.approved)
