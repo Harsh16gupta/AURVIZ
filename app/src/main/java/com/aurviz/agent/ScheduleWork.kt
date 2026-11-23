@@ -27,6 +27,7 @@ import androidx.work.WorkerParameters
 const val SCHEDULE_ID_KEY = "schedule_id"
 const val FIRE_TIME_KEY = "fire_time"
 private const val ROUTINE_CHANNEL_ID = "routines"
+private const val ROUTINE_RUNNING_CHANNEL_ID = "routine_running"
 
 class ScheduleWorker(context: Context, params: WorkerParameters) : Worker(context, params) {
     // Expedited work below API 31 runs as a foreground service: WorkManager
@@ -36,17 +37,20 @@ class ScheduleWorker(context: Context, params: WorkerParameters) : Worker(contex
         val scheduleId = inputData.getString(SCHEDULE_ID_KEY) ?: "routine"
         val manager =
             applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        // Own channel: the results channel is DEFAULT (audible) while this
+        // ongoing note stays LOW — first channel creation wins, so sharing
+        // one id would have pinned the results to LOW forever.
         manager.createNotificationChannel(
-            NotificationChannel(ROUTINE_CHANNEL_ID, "Routines", NotificationManager.IMPORTANCE_LOW),
+            NotificationChannel(ROUTINE_RUNNING_CHANNEL_ID, "Routine running", NotificationManager.IMPORTANCE_LOW),
         )
         val note =
-            NotificationCompat.Builder(applicationContext, ROUTINE_CHANNEL_ID)
+            NotificationCompat.Builder(applicationContext, ROUTINE_RUNNING_CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.ic_dialog_info)
                 .setContentTitle("Running routine")
                 .setContentText(scheduleId)
                 .setOngoing(true)
                 .build()
-        return ForegroundInfo(routineNotificationId(scheduleId), note)
+        return ForegroundInfo(routineForegroundNotificationId(scheduleId), note)
     }
 
     override fun doWork(): Result {

@@ -164,6 +164,11 @@ fun schedulesToRescheduleAfterReboot(store: ScheduleStore): List<String> =
 // note, even with identical wording (text.hashCode would collide).
 fun routineNotificationId(scheduleId: String): Int = scheduleId.hashCode()
 
+// Foreground-service note id: distinct from the result note id so the
+// ongoing "Running routine" note and the "Routine done" note never share
+// a slot. Same stability contract as the result id.
+fun routineForegroundNotificationId(scheduleId: String): Int = "running_$scheduleId".hashCode()
+
 // --- Seam D: the words on the result note. ---
 data class ScheduleNotification(val title: String, val text: String)
 

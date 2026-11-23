@@ -265,6 +265,12 @@ class ScheduleTest {
     }
 
     @Test
+    fun foregroundNoteIdIsStableAndSplitFromResultId() {
+        assertEquals(routineForegroundNotificationId("sched_1"), routineForegroundNotificationId("sched_1"))
+        assertFalse(routineForegroundNotificationId("sched_1") == routineNotificationId("sched_1"))
+    }
+
+    @Test
     fun loopCreateArmsAndCancelDisarmsOnlyOnApprovedSuccess() {
         val ok = ToolResult.Success(mapOf("ok" to true))
         val cancelled = ToolResult.Success(mapOf("status" to "cancelled_by_user"))
