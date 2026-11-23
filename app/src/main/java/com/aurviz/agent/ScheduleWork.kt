@@ -7,6 +7,7 @@ import androidx.core.app.NotificationCompat
 import androidx.room.Room
 import androidx.work.Data
 import androidx.work.ExistingWorkPolicy
+import androidx.work.ForegroundInfo
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkManager
@@ -26,14 +27,38 @@ import androidx.work.WorkerParameters
 const val SCHEDULE_ID_KEY = "schedule_id"
 const val FIRE_TIME_KEY = "fire_time"
 private const val ROUTINE_CHANNEL_ID = "routines"
+private const val ROUTINE_RUNNING_CHANNEL_ID = "routine_running"
 
 class ScheduleWorker(context: Context, params: WorkerParameters) : Worker(context, params) {
+    // Expedited work below API 31 runs as a foreground service: WorkManager
+    // calls this before doWork. Without the override the base Worker throws
+    // and the routine never runs on Android 8-11 (minSdk 26).
+    override fun getForegroundInfo(): ForegroundInfo {
+        val scheduleId = inputData.getString(SCHEDULE_ID_KEY) ?: "routine"
+        val manager =
+            applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        // Own channel: the results channel is DEFAULT (audible) while this
+        // ongoing note stays LOW — first channel creation wins, so sharing
+        // one id would have pinned the results to LOW forever.
+        manager.createNotificationChannel(
+            NotificationChannel(ROUTINE_RUNNING_CHANNEL_ID, "Routine running", NotificationManager.IMPORTANCE_LOW),
+        )
+        val note =
+            NotificationCompat.Builder(applicationContext, ROUTINE_RUNNING_CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setContentTitle("Running routine")
+                .setContentText(scheduleId)
+                .setOngoing(true)
+                .build()
+        return ForegroundInfo(routineForegroundNotificationId(scheduleId), note)
+    }
+
     override fun doWork(): Result {
         val scheduleId = inputData.getString(SCHEDULE_ID_KEY) ?: return Result.failure()
         val fireTime = inputData.getLong(FIRE_TIME_KEY, 0L).takeIf { it > 0 } ?: System.currentTimeMillis()
         val db =
             Room.databaseBuilder(applicationContext, AppDb::class.java, "aurviz.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .build()
         try {
             val scheduleStore = RoomScheduleStore(db.schedules())
@@ -62,7 +87,14 @@ class ScheduleWorker(context: Context, params: WorkerParameters) : Worker(contex
                 } catch (_: Exception) {
                     LlmKeys()
                 }
-            val chat = HeadlessChatLlm(defaultCandidates(BuildConfig.LLM_DEFAULT_PROVIDER, vaultKeys))
+            val chat =
+                HeadlessChatLlm(
+                    defaultCandidates(BuildConfig.LLM_DEFAULT_PROVIDER, vaultKeys),
+                    // Ticket 39 (minimal): the scheduled model sees the
+                    // read-only view — allowed reads plus gated writes by
+                    // name, so attempts become PendingApproval rows.
+                    scheduledRegistry(full).toolSchemas(),
+                )
             return when (
                 val outcome =
                     runScheduledRoutine(
@@ -84,7 +116,11 @@ class ScheduleWorker(context: Context, params: WorkerParameters) : Worker(contex
                 }
             }
         } catch (_: Exception) {
-            return Result.failure()
+            // Transient failure (DB/LLM throw): retry with the same
+            // fireTime. Safe by idempotency — a post-claim crash re-enters
+            // as DuplicateSkipped, a pre-claim crash retries for real — so
+            // the due run is preserved instead of terminally dropped.
+            return Result.retry()
         } finally {
             try {
                 db.close()
@@ -127,7 +163,7 @@ class RescheduleWorker(context: Context, params: WorkerParameters) : Worker(cont
     override fun doWork(): Result {
         val db =
             Room.databaseBuilder(applicationContext, AppDb::class.java, "aurviz.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .build()
         try {
             rescheduleAll(RoomScheduleStore(db.schedules())) { registerRoutineAlarm(applicationContext, it) }
@@ -154,11 +190,22 @@ fun postScheduleNotification(context: Context, scheduleId: String, note: Schedul
     manager.createNotificationChannel(
         NotificationChannel(ROUTINE_CHANNEL_ID, "Routines", NotificationManager.IMPORTANCE_DEFAULT),
     )
+    // Tap routes into the app; the Schedules screen reloads held approvals
+    // on entry so the row the note refers to is visible.
+    val openApp =
+        android.app.PendingIntent.getActivity(
+            context,
+            routineNotificationId(scheduleId),
+            android.content.Intent(context, MainActivity::class.java)
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE,
+        )
     val androidNote =
         NotificationCompat.Builder(context, ROUTINE_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentTitle(note.title)
             .setContentText(note.text)
+            .setContentIntent(openApp)
             .setAutoCancel(true)
             .build()
     manager.notify(routineNotificationId(scheduleId), androidNote)

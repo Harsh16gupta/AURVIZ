@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -43,10 +44,17 @@ fun SchedulesScreen(
     onUnschedule: (String) -> Unit,
     onApproveHeldWrite: (String) -> Unit,
     onRejectHeldWrite: (String) -> Unit,
+    onRefreshApprovals: () -> Unit = {},
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var draft by rememberSaveable { mutableStateOf("") }
+
+    // A Worker can save a new held row + notify while this screen is cached:
+    // reload on every entry so it never says "nothing waiting" stale.
+    LaunchedEffect(Unit) {
+        onRefreshApprovals()
+    }
 
     Page(title = "Schedules", onBack = onBack, modifier = modifier) {
         Section(

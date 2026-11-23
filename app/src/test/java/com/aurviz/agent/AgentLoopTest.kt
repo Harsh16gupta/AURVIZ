@@ -64,7 +64,7 @@ class AgentLoopTest {
                 ),
             )
         val events = mutableListOf<AgentEvent>()
-        val result = AgentLoop(llm, registry(), onEvent = events::add).run("morning routine")
+        val result = AgentLoop(llm, registry(), onEvent = events::add, confirm = { ApprovalDecision.Approved }).run("morning routine")
         assertTrue(result is AgentLoopResult.Answered)
         assertEquals("Done", (result as AgentLoopResult.Answered).answer)
         assertEquals(2, result.steps.size)
@@ -168,6 +168,54 @@ class AgentLoopTest {
     }
 
     @Test
+    fun stepDoneCarriesRejectedApprovalFlag() {
+        val llm =
+            FakeLlmProvider(
+                listOf(
+                    call("call_1", "create_schedule", mapOf("task" to "check mail", "when" to "at 9am")),
+                    answer("dropped"),
+                ),
+            )
+        val events = mutableListOf<AgentEvent>()
+        AgentLoop(
+            llm,
+            registry(),
+            onEvent = events::add,
+            confirm = { ApprovalDecision.Rejected },
+        ).run("schedule mail check")
+        // Reject reports Success(cancelled_by_user): consumers must read
+        // approved, never the result shape alone.
+        val done = events.filterIsInstance<AgentEvent.StepDone>().single()
+        assertEquals(false, done.approved)
+        assertTrue(done.result is ToolResult.Success)
+    }
+
+    @Test
+    fun stepDoneCarriesEditedArgsThatRan() {
+        val edited = mapOf<String, Any?>("task" to "edited task", "when" to "at 10am")
+        val llm =
+            FakeLlmProvider(
+                listOf(
+                    call("call_1", "create_schedule", mapOf("task" to "check mail", "when" to "at 9am")),
+                    answer("saved"),
+                ),
+            )
+        val events = mutableListOf<AgentEvent>()
+        val result =
+            AgentLoop(
+                llm,
+                registry(),
+                onEvent = events::add,
+                confirm = { ApprovalDecision.ApprovedWithEdit(edited) },
+            ).run("schedule mail check")
+        assertTrue(result is AgentLoopResult.Answered)
+        assertTrue(result.steps[0].approved)
+        val done = events.filterIsInstance<AgentEvent.StepDone>().single()
+        assertEquals(edited, done.effectiveArgs)
+        assertEquals(edited, result.steps[0].call.arguments)
+    }
+
+    @Test
     fun nullToolCallIdIsGeneratedAndMatched() {
         val llm =
             FakeLlmProvider(
@@ -196,7 +244,7 @@ class AgentLoopTest {
                     answer("Done"),
                 ),
             )
-        val result = AgentLoop(llm, registry()).run("morning routine")
+        val result = AgentLoop(llm, registry(), confirm = { ApprovalDecision.Approved }).run("morning routine")
         assertTrue(result is AgentLoopResult.Answered)
         val rows = (result as AgentLoopResult.Answered).toTimeline()
         assertEquals("Heard command", rows[0].title)
@@ -319,5 +367,42 @@ class AgentLoopTest {
         assertTrue(events.last() is AgentEvent.Failed)
         val rows = result.toTimeline()
         assertEquals(StepState.FAILED, rows.last().state)
+    }
+
+    @Test
+    fun secondCallInBatchDoesNotStartAfterTotalTimeout() {
+        // A slow first Tool/Confirmation must not let the second call in the
+        // same batch start after the deadline. Partial steps are kept.
+        val times = mutableListOf(0L, 0L, 0L, 0L, 2_000L)
+        var idx = 0
+        val nowMs = {
+            val v = times[minOf(idx, times.lastIndex)]
+            idx++
+            v
+        }
+        val llm =
+            FakeLlmProvider(
+                listOf(
+                    LlmResult(
+                        toolCalls =
+                            listOf(
+                                ToolCall("c1", "getImportantEmails", mapOf("max_results" to 5)),
+                                ToolCall("c2", "getImportantEmails", mapOf("max_results" to 5)),
+                            ),
+                        content = null,
+                    ),
+                ),
+            )
+        val result =
+            AgentLoop(
+                llm,
+                registry(),
+                totalTimeoutMs = 1_000L,
+                nowMs = nowMs,
+            ).run("check mail")
+        assertTrue(result is AgentLoopResult.Failed)
+        assertTrue((result as AgentLoopResult.Failed).error.contains("total timeout"))
+        assertEquals(1, result.steps.size)
+        assertEquals("c1", result.steps[0].call.id)
     }
 }

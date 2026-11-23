@@ -51,7 +51,11 @@ data class AgentUiState(
     // Confirmation). NeedsApproval raises pendingApproval with the
     // unseen flags computed at raise time; StepDone clears it.
     // Approve/Reject resolve the suspended gate — nothing runs before.
+    // P0: the card's capability is the opaque per-proposal nonce in
+    // pendingApprovalProposalId (never the Tool call id — fallback ids
+    // repeat every run). Buttons echo the nonce; a stale/guessed id fails.
     val pendingApproval: ToolCall? = null,
+    val pendingApprovalProposalId: String? = null,
     // Ticket 15/28: writes a scheduled run held for the user (GLOSSARY
     // Confirmation for unattended runs, ADR-0002). Each row renders its
     // approval card in-app; approving runs the held call exactly once,
@@ -74,13 +78,17 @@ data class AgentUiState(
     val geminiKeySet: Boolean = false,
     val groqKeySet: Boolean = false,
     val sending: Boolean = false,
+    // P0 single-flight: one Task Execution at a time. While true the
+    // Composer sends nothing so a second command cannot replace the open
+    // Confirmation card's gate.
+    val agentRunning: Boolean = false,
 )
 
 // Ticket 11/24: visible retry line for CommandScreen, rendered from the
 // copied providersTried via retryDisclosure() (ticket 35). Null when the
 // first provider answered or nothing ran yet — no silent replay.
 fun AgentUiState.retryLine(): String? {
-    val used = providerUsed ?: return null
     if (providersTried.size <= 1) return null
+    val used = providerUsed ?: return "No provider answered (tried ${providersTried.joinToString(", ")})"
     return retryDisclosure(FallbackResult(LlmResult(emptyList(), null), used, providersTried))
 }

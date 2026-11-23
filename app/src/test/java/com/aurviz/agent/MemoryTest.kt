@@ -64,18 +64,6 @@ class MemoryTest {
     }
 
     @Test
-    fun offlineQueueReplaysOnceWithoutDuplicates() {
-        val store = InMemoryStore()
-        val outbox = Outbox()
-        outbox.queue("my boss is Priya", "you told me")
-        outbox.queue("standup at 9am", "you told me")
-        assertEquals(2, outbox.replay(store))
-        assertEquals(1, recallFor(store, "who is my boss?").size)
-        assertEquals(0, outbox.replay(store))
-        assertEquals(2, store.list().size)
-    }
-
-    @Test
     fun recallRanksHigherWordOverlapFirst() {
         val store = InMemoryStore()
         rememberFact(store, "my boss is Priya", source = "you told me")
@@ -223,5 +211,32 @@ class MemoryTest {
     @Test
     fun ftsQueryBuilderProducesPrefixTerms() {
         assertEquals("boss* priya*", toFtsQuery("boss Priya"))
+    }
+
+    @Test
+    fun storeSearchFtsUsesPrefixTermModel() {
+        val store = InMemoryStore()
+        store.save("my boss is Priya", source = "you told me")
+        store.save("I like pizza", source = "you told me")
+        val found = store.searchFts("bos*")
+        assertEquals(1, found.size)
+        assertEquals("my boss is Priya", found[0].text)
+    }
+
+    @Test
+    fun roomFtsQueryUsesMatchOverMemoriesFts() {
+        // The offline index is a real SQLite FTS MATCH, not a table scan.
+        // Room's @Query is CLASS-retention (invisible to reflection), so pin
+        // the source like the manifest tests do.
+        var dir = java.io.File(System.getProperty("user.dir"))
+        while (true) {
+            if (java.io.File(dir, "src/main/AndroidManifest.xml").exists()) break
+            dir = dir.parentFile ?: throw AssertionError("no app module dir")
+        }
+        val db = java.io.File(dir, "src/main/java/com/aurviz/agent/MemoryDb.kt").readText()
+        assertTrue(db.contains("memoriesFts MATCH :query"))
+        assertTrue(db.contains("@Fts4"))
+        assertTrue(db.contains("MIGRATION_4_5"))
+        assertTrue(db.contains("USING FTS4"))
     }
 }

@@ -39,6 +39,22 @@ interface MemoryStore {
 
     // Ticket #31: record a recall so recency (lastUsed) and useCount learn.
     fun markUsed(id: String, nowMs: Long = System.currentTimeMillis())
+
+    // Offline FTS candidate lookup. The default is the same prefix-term
+    // model over the listed rows (keeps InMemoryStore working with no
+    // database); RoomMemoryStore overrides it with a SQLite FTS MATCH over
+    // the memoriesFts index instead of scanning the table.
+    fun searchFts(ftsQuery: String): List<Memory> {
+        val words = ftsQuery.split(" ").map { it.removeSuffix("*") }.filter { it.isNotBlank() }.toSet()
+        return list()
+            .mapIndexed { index, memory ->
+                val haystack = memory.text.lowercase().split(Regex("[^a-z0-9]+")).filter { it.isNotBlank() }.toSet()
+                val matched = words.count { term -> haystack.any { it.startsWith(term) } }
+                Triple(memory, matched, index)
+            }
+            .filter { (_, matched, _) -> matched == words.size && words.isNotEmpty() }
+            .map { (memory, _, _) -> memory }
+    }
 }
 
 class InMemoryStore : MemoryStore {
@@ -88,28 +104,6 @@ fun rememberFact(
 fun forgetPreview(store: MemoryStore, query: String): List<Memory> =
     recallFor(store, query)
 
-// Memories written while offline wait here.
-// replay() uploads them in order and skips ones already stored.
-class Outbox {
-    private val pending = mutableListOf<Pair<String, String>>()
-
-    fun queue(text: String, source: String) {
-        pending += text to source
-    }
-
-    fun replay(store: MemoryStore): Int {
-        val already = store.list().map { it.text to it.source }.toSet()
-        var uploaded = 0
-        for ((text, source) in pending) {
-            if ((text to source) !in already) {
-                store.save(text, source)
-                uploaded++
-            }
-        }
-        pending.clear()
-        return uploaded
-    }
-}
 // Find memories sharing words with the question: most shared words
 // first (ticket #18 keyword ranking, unchanged); ties break toward higher
 // importance, then toward more recent use (lastUsed, else createdAt),
@@ -119,7 +113,7 @@ class Outbox {
 // embeddings (those are ticket #32); set online=false to force the
 // offline FTS fallback path explicitly.
 fun recallFor(store: MemoryStore, query: String, online: Boolean = true): List<Memory> =
-    rankMemories(store.list(), query, online = online)
+    rankMemories(store, query, online = online)
 
 // Shared boost ordering: most matched terms first, then higher
 // importance, then more recent activity, then later insertion.
@@ -132,10 +126,11 @@ private fun boostComparator(): Comparator<Triple<Memory, Int, Int>> =
 private fun memoryTokens(text: String): Set<String> =
     text.lowercase().split(Regex("[^a-z0-9]+")).filter { it.isNotBlank() }.toSet()
 
-private fun rankMemories(memories: List<Memory>, query: String, online: Boolean): List<Memory> {
+private fun rankMemories(store: MemoryStore, query: String, online: Boolean): List<Memory> {
     val words = memoryTokens(query)
     if (words.isEmpty()) return emptyList()
-    if (!online) return ftsRecall(memories, words)
+    if (!online) return ftsRecall(store, words)
+    val memories = store.list()
     return memories
         .mapIndexed { index, memory ->
             Triple(memory, memoryTokens(memory.text).intersect(words).size, index)
@@ -151,16 +146,31 @@ private fun rankMemories(memories: List<Memory>, query: String, online: Boolean)
 fun toFtsQuery(query: String): String =
     memoryTokens(query).joinToString(" ") { "$it*" }
 
-private fun ftsRecall(memories: List<Memory>, words: Set<String>): List<Memory> =
-    memories
-        .mapIndexed { index, memory ->
+private fun ftsRecall(store: MemoryStore, words: Set<String>): List<Memory> {
+    if (words.isEmpty()) return emptyList()
+    // Real FTS MATCH candidates from the store's index (Room) or the same
+    // prefix-term model over listed rows (in-memory default) — then the
+    // shared boost ranking below.
+    val candidates =
+        try {
+            store.searchFts(words.joinToString(" ") { "$it*" })
+        } catch (_: Exception) {
+            emptyList()
+        }
+    val candidateIds = candidates.map { it.id }.toSet()
+    val scored =
+        store.list().mapIndexed { index, memory ->
             val haystack = memoryTokens(memory.text)
             val matched = words.count { term -> haystack.any { it.startsWith(term) } }
             Triple(memory, matched, index)
         }
-        .filter { (_, matched, _) -> matched == words.size }
+    return scored
+        .filter { (memory, matched, _) ->
+            matched == words.size && (candidateIds.isEmpty() || memory.id in candidateIds)
+        }
         .sortedWith(boostComparator())
         .map { (memory, _, _) -> memory }
+}
 
 // Ticket 16/29: memories travel in a delimited system section, never
 // concatenated into the user message (ADR-0005). The loop renders this
@@ -185,45 +195,31 @@ fun renderMemorySection(memories: List<Memory>): String {
 // boosts with an offline FTS fallback (ticket #31); embeddings belong
 // to ticket #32.
 fun saveMemoryToolSchema(): JSONObject =
-    JSONObject()
-        .put("type", "function")
-        .put(
-            "function",
-            JSONObject()
-                .put("name", "save_memory")
-                .put("description", "Save a fact about the user for future commands, e.g. their boss's name.")
-                .put(
-                    "parameters",
-                    JSONObject()
-                        .put("type", "object")
-                        .put(
-                            "properties",
-                            JSONObject()
-                                .put("text", JSONObject().put("type", "string").put("description", "The fact to remember, e.g. my boss is Priya"))
-                                .put("source", JSONObject().put("type", "string").put("description", "Where the fact came from, e.g. you told me")),
-                        )
-                        .put("required", JSONArray().put("text")),
-                ),
-        )
+    toolSchema(
+        "save_memory",
+        "Save a fact about the user for future commands, e.g. their boss's name.",
+        JSONObject()
+            .put("type", "object")
+            .put(
+                "properties",
+                JSONObject()
+                    .put("text", JSONObject().put("type", "string").put("description", "The fact to remember, e.g. my boss is Priya"))
+                    .put("source", JSONObject().put("type", "string").put("description", "Where the fact came from, e.g. you told me")),
+            )
+            .put("required", JSONArray().put("text")),
+    )
 
 fun searchMemoryToolSchema(): JSONObject =
-    JSONObject()
-        .put("type", "function")
-        .put(
-            "function",
-            JSONObject()
-                .put("name", "search_memory")
-                .put("description", "Search remembered facts sharing words with the query, best match first.")
-                .put(
-                    "parameters",
-                    JSONObject()
-                        .put("type", "object")
-                        .put(
-                            "properties",
-                            JSONObject()
-                                .put("query", JSONObject().put("type", "string").put("description", "What to look for, e.g. who is my boss?"))
-                                .put("max_results", JSONObject().put("type", "integer")),
-                        )
-                        .put("required", JSONArray().put("query")),
-                ),
-        )
+    toolSchema(
+        "search_memory",
+        "Search remembered facts sharing words with the query, best match first.",
+        JSONObject()
+            .put("type", "object")
+            .put(
+                "properties",
+                JSONObject()
+                    .put("query", JSONObject().put("type", "string").put("description", "What to look for, e.g. who is my boss?"))
+                    .put("max_results", JSONObject().put("type", "integer")),
+            )
+            .put("required", JSONArray().put("query")),
+    )

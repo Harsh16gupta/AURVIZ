@@ -57,7 +57,17 @@ sealed interface AgentEvent {
 
     data class NeedsApproval(val call: ToolCall) : AgentEvent
 
-    data class StepDone(val call: ToolCall, val result: ToolResult) : AgentEvent
+    data class StepDone(
+        val call: ToolCall,
+        val result: ToolResult,
+        // Gated Tools report reject/timeout as Success(cancelled_by_user)
+        // with approved=false: consumers must check approved, not just the
+        // result shape. effectiveArgs are the args that actually ran
+        // (edited-approve changes them) — consumers must read these, never
+        // the original call arguments.
+        val approved: Boolean,
+        val effectiveArgs: Map<String, Any?>,
+    ) : AgentEvent
 
     data class Failed(val error: String) : AgentEvent
 }
@@ -94,7 +104,7 @@ class AgentLoop(
     private val registry: ToolRegistry,
     private val maxSteps: Int = MAX_STEPS,
     private val onEvent: (AgentEvent) -> Unit = {},
-    private val confirm: (ToolCall) -> ApprovalDecision = { ApprovalDecision.Approved },
+    private val confirm: (ToolCall) -> ApprovalDecision = { ApprovalDecision.Rejected },
     // Ticket 10/24: per-step and total timeouts (ADR-0005, gaps §3H).
     // The blocking calls underneath are already bounded by the OkHttp
     // connect/read timeouts; the loop turns an overrun or a transport
@@ -149,14 +159,20 @@ class AgentLoop(
                     if (call.id != null) call else call.copy(id = "call_s${stepIndex}_$callIndex")
                 }
             messages += ChatMessage(role = "assistant", content = turn.content, toolCalls = calls)
-            for (call in calls) {
+            for ((callIndex, call) in calls.withIndex()) {
+                // Total-budget check before each subsequent call in the batch:
+                // a slow first Tool or Confirmation must not let another call
+                // start after the deadline. Partial steps are kept.
+                if (callIndex > 0 && nowMs() - startMs >= totalTimeoutMs) {
+                    return failed("total timeout after ${totalTimeoutMs}ms at step $stepIndex")
+                }
                 onEvent(AgentEvent.ToolRunning(call))
                 if (registry.requiresConfirmation(call.name)) {
                     onEvent(AgentEvent.NeedsApproval(call))
                 }
                 val gated = registry.executeGated(call, confirm)
                 steps += ExecutedStep(call.copy(arguments = gated.effectiveArgs), gated.result, gated.approved)
-                onEvent(AgentEvent.StepDone(call, gated.result))
+                onEvent(AgentEvent.StepDone(call, gated.result, gated.approved, gated.effectiveArgs))
                 messages +=
                     ChatMessage(
                         role = "tool",

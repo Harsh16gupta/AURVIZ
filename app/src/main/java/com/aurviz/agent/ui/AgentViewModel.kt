@@ -12,6 +12,7 @@ import com.aurviz.agent.AgentEvent
 import com.aurviz.agent.AgentLoop
 import com.aurviz.agent.AgentLoopResult
 import com.aurviz.agent.ApprovalDecision
+import com.aurviz.agent.ApprovalGate
 import com.aurviz.agent.BuildConfig
 import com.aurviz.agent.ChatLlmProvider
 import com.aurviz.agent.ChatMessage
@@ -25,6 +26,7 @@ import com.aurviz.agent.LlmResult
 import com.aurviz.agent.MIGRATION_1_2
 import com.aurviz.agent.MIGRATION_2_3
 import com.aurviz.agent.MIGRATION_3_4
+import com.aurviz.agent.MIGRATION_4_5
 import com.aurviz.agent.Memory
 import com.aurviz.agent.NamedProvider
 import com.aurviz.agent.PendingApproval
@@ -40,6 +42,7 @@ import com.aurviz.agent.ToolCall
 import com.aurviz.agent.ToolResult
 import com.aurviz.agent.WebBridge
 import com.aurviz.agent.WebException
+import com.aurviz.agent.allToolSchemas
 import com.aurviz.agent.approvalCardFor
 import com.aurviz.agent.approvePendingApproval
 import com.aurviz.agent.buildAuthUrl
@@ -56,13 +59,15 @@ import com.aurviz.agent.formatSchedulePreview
 import com.aurviz.agent.forgetPreview
 import com.aurviz.agent.knownAddressesFromInbox
 import com.aurviz.agent.listSchedules
+import com.aurviz.agent.loopScheduleSideEffect
+import com.aurviz.agent.LoopScheduleSideEffect
 import com.aurviz.agent.newCodeVerifier
 import com.aurviz.agent.openPage
 import com.aurviz.agent.parseSchedule
-import com.aurviz.agent.planWithFallback
+import com.aurviz.agent.FallbackExhausted
+import com.aurviz.agent.planWithFallbackMessages
 import com.aurviz.agent.refreshBatteryNeeded
 import com.aurviz.agent.scheduleTimingNote
-import com.aurviz.agent.readImportant
 import com.aurviz.agent.recallFor
 import com.aurviz.agent.registerRoutineAlarm
 import com.aurviz.agent.rejectPendingApproval
@@ -70,13 +75,13 @@ import com.aurviz.agent.rememberFact
 import com.aurviz.agent.retryDisclosure
 import com.aurviz.agent.toTimeline
 import com.aurviz.agent.ui.components.VoiceState as OrbState
-import java.util.concurrent.LinkedBlockingQueue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import org.json.JSONArray
 
 // Thin orchestrator over the tested domain logic (Planner, Email, Web,
 // WebViewBridge, MemoryStore, VoiceInput, LoopbackAuth). All decisions stay
@@ -112,6 +117,16 @@ fun LoopUiProgress.withEvent(event: AgentEvent): LoopUiProgress =
         is AgentEvent.Failed -> copy(error = event.error)
     }
 
+// Bound the Confirmation wait by the Task Execution's remaining budget
+// (ADR-0005 gaps §3H): the card never outlives the run, so expiry lands
+// as TimedOut instead of blocking an already-dead budget. Zero remaining
+// returns immediately (TimedOut) instead of opening a hopeless wait.
+fun approvalWaitMs(
+    elapsedMs: Long,
+    totalBudgetMs: Long,
+    maxWaitMs: Long = ApprovalGate.APPROVAL_TIMEOUT_MS,
+): Long = minOf(maxWaitMs, totalBudgetMs - elapsedMs).coerceAtLeast(0L)
+
 // Deterministic messages→prompt rendering for the single-shot fallback
 // seam below: the system prompt (framing + delimited memories) stays
 // first, assistant turns keep their Tool names, tool turns keep their
@@ -128,24 +143,39 @@ fun renderLoopPrompt(messages: List<ChatMessage>): String =
         }
     }
 
-// ChatLlmProvider over the single-shot planWithFallback seam: every loop
-// turn replays the rendered messages through the candidates in order and
-// unions every provider that saw the prompt, so the ViewModel copies
-// providersTried verbatim and the retry is never silent (ADR-0004).
-// The candidate list is built once per run: rebuilding it per turn would
-// also rebuild each provider's HTTP client.
+// ChatLlmProvider over the structured fallback seam: the loop's messages
+// ride intact and every provider that saw the prompt is unioned, so the
+// ViewModel copies providersTried verbatim and the retry is never silent
+// (ADR-0004). The candidate list is built once per run: rebuilding it per
+// turn would also rebuild each provider's HTTP client.
+// Provider pinning: the first provider that answers a run handles every
+// later turn, so the accumulated private transcript (memories, mail, tool
+// results) is never replayed to a second host mid-run. Tried is merged
+// even when the turn fails, so a terminal failure still discloses who saw it.
+// The advertised set is the run's registry view (ticket 39): the model
+// sees exactly the Tools it can call, gated or not.
 class FallbackChatLlm(
     private val candidates: List<NamedProvider>,
+    private val tools: JSONArray = allToolSchemas(),
 ) : ChatLlmProvider {
     val tried: MutableList<String> = mutableListOf()
     var lastProvider: String? = null
         private set
+    private var pinned: String? = null
 
     override fun chat(messages: List<ChatMessage>): LlmResult {
-        val fb = planWithFallback(renderLoopPrompt(messages), candidates)
-        for (name in fb.tried) if (name !in tried) tried += name
-        lastProvider = fb.providerName
-        return fb.result
+        val effective =
+            pinned?.let { name -> candidates.filter { it.name == name } } ?: candidates
+        try {
+            val fb = planWithFallbackMessages(messages, effective.ifEmpty { candidates }, tools)
+            for (name in fb.tried) if (name !in tried) tried += name
+            if (pinned == null) pinned = fb.providerName
+            lastProvider = fb.providerName
+            return fb.result
+        } catch (e: FallbackExhausted) {
+            for (name in e.tried) if (name !in tried) tried += name
+            throw e.cause as? Exception ?: RuntimeException(e)
+        }
     }
 }
 
@@ -156,7 +186,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
 
     private val db: AppDb =
         Room.databaseBuilder(application, AppDb::class.java, "aurviz.db")
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
             .build()
     private val roomStore = RoomMemoryStore(db.memories())
     private val scheduleStore = RoomScheduleStore(db.schedules())
@@ -211,13 +241,14 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
             lower.startsWith("remember ") -> handleRemember(command.substring(9).trim())
             lower.startsWith("forget ") -> handleForgetPreview(command.substring(7).trim())
             lower.startsWith("email ") -> handleEmailSend(command.substring(6).trim())
-            lower == "check mail" || lower == "check email" ||
-                lower == "check important emails" || lower == "check emails" -> handleEmailRead()
             lower == "disconnect gmail" -> revokeGmail()
             lower.startsWith("open ") -> openWeb(command.substring(5).trim())
             lower.startsWith("schedule ") -> handleScheduleCreate(command.substring(9).trim())
             lower == "schedules" -> refreshSchedules(showLine = true)
             lower.startsWith("unschedule ") -> handleUnschedule(command.substring(11).trim())
+            // Reads (including "check mail") run the end-to-end loop like
+            // every other command: the read Tools are ungated, so the loop
+            // fetches and summarizes without a Confirmation card.
             else -> runLoopCommand(command)
         }
     }
@@ -360,39 +391,6 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(pendingEmail = null, statusLine = "Not sent.") }
     }
 
-    private fun handleEmailRead() {
-        if (!tokens.isConnected()) {
-            _state.update { it.copy(statusLine = "Connect Gmail first (Settings).") }
-            return
-        }
-        _state.update { it.copy(statusLine = "Checking mailbox…") }
-        viewModelScope.launch(Dispatchers.IO) {
-            val t0 = System.currentTimeMillis()
-            try {
-                val found = readImportant(gmail, max = 5)
-                val ms = System.currentTimeMillis() - t0
-                _state.update {
-                    it.copy(
-                        statusLine = if (found.isEmpty()) {
-                            "Inbox zero — nothing unread."
-                        } else {
-                            "Important:\n" + found.joinToString("\n") { e -> "• ${e.from}: ${e.subject}" }
-                        },
-                        emails = found,
-                        timeline = buildTimeline(
-                            Plan(listOf(ToolCall("gmail", "getImportantEmails", mapOf("max_results" to 5)))),
-                            doneCount = 1,
-                            error = null,
-                        ),
-                        perf = it.perf.copy(toolMs = ms),
-                    )
-                }
-            } catch (e: Exception) {
-                _state.update { it.copy(statusLine = "Read failed: ${e.message}", timeline = emptyList()) }
-            }
-        }
-    }
-
     fun startSignIn() {
         if (signingIn) return
         signingIn = true
@@ -508,7 +506,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
 
     fun revokeGmail() {
         tokens.revoke()
-        tokenVault.clear()
+        tokenVault.clearGmail()
         refreshGmailStatus()
         _state.update {
             it.copy(
@@ -709,6 +707,43 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // Foreground loop side effects (ADR-0002): a create/cancel the Task
+    // Execution ran arms/disarms exactly like the manual and held-approval
+    // paths, so an approved natural-language Schedule fires without a
+    // later global re-arm. Runs on the loop's IO thread; failures are
+    // contained so they never break the Task Execution. Only an approved
+    // Success acts: reject/timeout report Success(cancelled_by_user) with
+    // approved=false, and the schedule id comes from the args that
+    // actually ran (edited-approve), never the model's original call.
+    private fun syncLoopScheduleSideEffect(event: AgentEvent.StepDone) {
+        val call = event.call.copy(arguments = event.effectiveArgs)
+        when (loopScheduleSideEffect(call.name, event.approved, event.result)) {
+            LoopScheduleSideEffect.ARM -> {
+                val newId = (event.result as? ToolResult.Success)?.data
+                    .let { it as? Map<*, *> }?.get("id") as? String ?: return
+                try {
+                    val app = getApplication<Application>()
+                    listSchedules(scheduleStore).find { it.id == newId }
+                        ?.let { registerRoutineAlarm(app, it) }
+                    refreshSchedules()
+                    refreshExactAlarmFlag()
+                } catch (_: Exception) {
+                }
+            }
+            LoopScheduleSideEffect.DISARM -> {
+                val target = call.arguments["schedule_id"] as? String ?: return
+                try {
+                    val app = getApplication<Application>()
+                    cancelRoutineWork(app, target)
+                    cancelRoutineAlarm(app, target)
+                    refreshSchedules()
+                } catch (_: Exception) {
+                }
+            }
+            null -> Unit
+        }
+    }
+
     private fun handleUnschedule(raw: String) {
         val id = raw.trim().let { if (it.startsWith("sched_")) it else "sched_$it" }
         viewModelScope.launch(Dispatchers.IO) {
@@ -756,6 +791,31 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(exactAlarmNeeded = needsAsk) }
     }
 
+    // Revocation/grant reconciliation (ADR-0002): Android cancels existing
+    // exact alarms when the user revokes the permission. Re-register every
+    // persisted Schedule so the alarm mode matches the current grant —
+    // exact when allowed, inexact otherwise — then refresh the flags.
+    // Called on every resume (covers start + back-from-Settings grant).
+    fun reconcileAlarmsAfterResume() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val app = getApplication<Application>()
+                for (schedule in listSchedules(scheduleStore)) {
+                    try {
+                        registerRoutineAlarm(app, schedule)
+                    } catch (_: Exception) {
+                    }
+                }
+            } catch (_: Exception) {
+            }
+            refreshExactAlarmFlag()
+            refreshBatteryFlag()
+            // A Worker may have saved held approvals while the app was away.
+            refreshSchedules()
+            refreshPendingApprovals()
+        }
+    }
+
     fun refreshBatteryFlag() {
         val app = getApplication<Application>()
         val needsAsk = try {
@@ -777,53 +837,93 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
     // blocks the loop thread until approvePendingSend/rejectPendingSend
     // resolves it — the gate never auto-approves, and the deterministic
     // SendPolicy still screens an approved send before the transport.
-    private var pendingDecisions: LinkedBlockingQueue<ApprovalDecision>? = null
+    //
+    // P0 binding: one ApprovalGate per ViewModel. Each gated call opens a
+    // fresh one-shot ticket bound to an opaque per-proposal nonce; the card
+    // buttons echo the nonce back (never the Tool call id) and stale
+    // nonces are ignored. One Task Execution runs at a time so a second
+    // command cannot replace the open card's queue.
+    private val approvalGate = ApprovalGate()
 
-    fun approvePendingSend() {
-        pendingDecisions?.offer(ApprovalDecision.Approved)
+    @Volatile
+    private var currentRunId: Long? = null
+
+    fun approvePendingSend(proposalId: String) {
+        approvalGate.resolve(proposalId, ApprovalDecision.Approved)
     }
 
-    fun rejectPendingSend() {
-        pendingDecisions?.offer(ApprovalDecision.Rejected)
+    fun approvePendingSendEdited(proposalId: String, args: Map<String, Any?>) {
+        approvalGate.resolve(proposalId, ApprovalDecision.ApprovedWithEdit(args))
+    }
+
+    fun rejectPendingSend(proposalId: String) {
+        approvalGate.resolve(proposalId, ApprovalDecision.Rejected)
     }
 
     private fun runLoopCommand(cmd: String) {
+        val runId = approvalGate.startRun()
+        if (runId == null) {
+            _state.update {
+                it.copy(statusLine = "Already running — resolve the current Confirmation first.")
+            }
+            return
+        }
+        currentRunId = runId
         _state.update {
             it.copy(
                 statusLine = "Command: $cmd\nAgent: thinking…",
                 timeline = emptyList(),
                 providerUsed = null,
                 providersTried = emptyList(),
+                pendingApproval = null,
+                pendingApprovalProposalId = null,
+                pendingApprovalUnseen = emptyList(),
+                agentRunning = true,
             )
         }
         viewModelScope.launch(Dispatchers.IO) {
             val runT0 = System.currentTimeMillis()
+            val registry = defaultToolRegistry(gmailApi = gmail, scheduleStore = scheduleStore, memoryStore = roomStore)
             val chat =
                 FallbackChatLlm(
                     defaultCandidates(BuildConfig.LLM_DEFAULT_PROVIDER, tokenVault.loadLlmKeys()),
+                    // Ticket 39 (minimal): the model sees this run's
+                    // registry view — every Tool it can call, gated or not.
+                    registry.toolSchemas(),
                 )
-            val registry = defaultToolRegistry(gmailApi = gmail, scheduleStore = scheduleStore, memoryStore = roomStore)
-            val decisions = LinkedBlockingQueue<ApprovalDecision>(1)
-            pendingDecisions = decisions
             val confirm: (ToolCall) -> ApprovalDecision = { call ->
-                val known =
-                    try {
-                        knownAddressesFromInbox(gmail.listInbox())
-                    } catch (_: Exception) {
-                        knownAddressesFromInbox(_state.value.emails)
+                val callId = call.id.orEmpty()
+                val ticket = approvalGate.openGate(runId, callId)
+                if (ticket == null || callId.isEmpty()) {
+                    ApprovalDecision.Rejected
+                } else {
+                    val known =
+                        try {
+                            knownAddressesFromInbox(gmail.listInbox())
+                        } catch (_: Exception) {
+                            knownAddressesFromInbox(_state.value.emails)
+                        }
+                    val unseen = approvalCardFor(call, known)?.unseen.orEmpty()
+                    _state.update {
+                        it.copy(
+                            pendingApproval = call,
+                            pendingApprovalProposalId = ticket.proposalId,
+                            pendingApprovalUnseen = unseen,
+                            statusLine = "Command: $cmd\nAgent: needs approval: ${call.name}",
+                        )
                     }
-                val unseen = approvalCardFor(call, known)?.unseen.orEmpty()
-                _state.update {
-                    it.copy(
-                        pendingApproval = call,
-                        pendingApprovalUnseen = unseen,
-                        statusLine = "Command: $cmd\nAgent: needs approval: ${call.name}",
-                    )
-                }
-                try {
-                    decisions.take()
-                } catch (_: InterruptedException) {
-                    ApprovalDecision.TimedOut
+                    // Bounded wait: expiry becomes TimedOut (cancelled_by_user),
+                    // never an auto-approve. The wait is capped by the run's
+                    // remaining total budget, so a slow first Tool cannot park
+                    // the card past the deadline. Interrupt also maps to
+                    // TimedOut so cancellation never releases the Tool.
+                    try {
+                        val waitMs = approvalWaitMs(System.currentTimeMillis() - runT0, AgentLoop.DEFAULT_TOTAL_TIMEOUT_MS)
+                        ticket.queue.poll(waitMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+                            ?: ApprovalDecision.TimedOut
+                    } catch (_: InterruptedException) {
+                        ApprovalDecision.TimedOut
+                    }
                 }
             }
             var progress = LoopUiProgress()
@@ -832,6 +932,9 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                     chat,
                     registry,
                     onEvent = { event ->
+                        if (event is AgentEvent.StepDone) {
+                            syncLoopScheduleSideEffect(event)
+                        }
                         progress = progress.withEvent(event)
                         val snapshot = progress.timeline()
                         val phase =
@@ -848,6 +951,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                                 timeline = snapshot,
                                 // The decision landed: drop the card.
                                 pendingApproval = if (event is AgentEvent.StepDone) null else it.pendingApproval,
+                                pendingApprovalProposalId = if (event is AgentEvent.StepDone) null else it.pendingApprovalProposalId,
                                 pendingApprovalUnseen = if (event is AgentEvent.StepDone) emptyList() else it.pendingApprovalUnseen,
                             )
                         }
@@ -857,7 +961,8 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 // Ticket 16/29: memories ride in the loop's delimited system
                 // section via recallFor — never concatenated into the command.
-                val memories = recallFor(roomStore, cmd)
+                // Top 5 only, matching the benchmarked prompt budget.
+                val memories = recallFor(roomStore, cmd).take(5)
                 when (val result = loop.run(cmd, memories)) {
                     is AgentLoopResult.Answered -> {
                         val tried = chat.tried.toList()
@@ -872,6 +977,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                                 providerUsed = used,
                                 providersTried = tried,
                                 pendingApproval = null,
+                                pendingApprovalProposalId = null,
                                 pendingApprovalUnseen = emptyList(),
                                 perf = it.perf.copy(planMs = System.currentTimeMillis() - runT0),
                             )
@@ -885,6 +991,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                                 providerUsed = chat.lastProvider,
                                 providersTried = chat.tried.toList(),
                                 pendingApproval = null,
+                                pendingApprovalProposalId = null,
                                 pendingApprovalUnseen = emptyList(),
                                 perf = it.perf.copy(planMs = System.currentTimeMillis() - runT0),
                             )
@@ -899,11 +1006,21 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                         providerUsed = chat.lastProvider,
                         providersTried = chat.tried.toList(),
                         pendingApproval = null,
+                        pendingApprovalProposalId = null,
                         pendingApprovalUnseen = emptyList(),
                     )
                 }
             } finally {
-                if (pendingDecisions === decisions) pendingDecisions = null
+                approvalGate.finishRun(runId)
+                if (currentRunId == runId) currentRunId = null
+                _state.update {
+                    it.copy(
+                        agentRunning = false,
+                        pendingApproval = null,
+                        pendingApprovalProposalId = null,
+                        pendingApprovalUnseen = emptyList(),
+                    )
+                }
             }
         }
     }

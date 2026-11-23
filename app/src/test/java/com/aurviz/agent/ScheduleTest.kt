@@ -263,4 +263,27 @@ class ScheduleTest {
         assertEquals(routineNotificationId("sched_1"), routineNotificationId("sched_1"))
         assertFalse(routineNotificationId("sched_1") == routineNotificationId("sched_2"))
     }
+
+    @Test
+    fun foregroundNoteIdIsStableAndSplitFromResultId() {
+        assertEquals(routineForegroundNotificationId("sched_1"), routineForegroundNotificationId("sched_1"))
+        assertFalse(routineForegroundNotificationId("sched_1") == routineNotificationId("sched_1"))
+    }
+
+    @Test
+    fun loopCreateArmsAndCancelDisarmsOnlyOnApprovedSuccess() {
+        val ok = ToolResult.Success(mapOf("ok" to true))
+        val cancelled = ToolResult.Success(mapOf("status" to "cancelled_by_user"))
+        val failed = ToolResult.Failure("nope", retryable = false)
+        assertEquals(LoopScheduleSideEffect.ARM, loopScheduleSideEffect("create_schedule", true, ok))
+        assertEquals(LoopScheduleSideEffect.DISARM, loopScheduleSideEffect("cancel_schedule", true, ok))
+        // Reject/timeout report Success(cancelled_by_user) with approved=false:
+        // a rejected cancel must not disarm, a rejected create must not arm.
+        assertNull(loopScheduleSideEffect("create_schedule", false, cancelled))
+        assertNull(loopScheduleSideEffect("cancel_schedule", false, cancelled))
+        assertNull(loopScheduleSideEffect("create_schedule", true, failed))
+        assertNull(loopScheduleSideEffect("cancel_schedule", true, failed))
+        assertNull(loopScheduleSideEffect("send_email", true, ok))
+        assertNull(loopScheduleSideEffect("search_emails", true, ok))
+    }
 }

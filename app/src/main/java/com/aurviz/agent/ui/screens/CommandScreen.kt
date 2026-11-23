@@ -10,6 +10,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import com.aurviz.agent.StepState
@@ -23,6 +27,7 @@ import com.aurviz.agent.ui.components.Composer
 import com.aurviz.agent.ui.components.Markdown
 import com.aurviz.agent.ui.components.ScreenScaffold
 import com.aurviz.agent.ui.components.Section
+import com.aurviz.agent.ui.components.TextField
 import com.aurviz.agent.ui.theme.Space
 import com.aurviz.agent.ui.components.Text
 import com.aurviz.agent.ui.components.ThinkingIndicator
@@ -40,8 +45,9 @@ fun CommandScreen(
     onMicTap: () -> Unit,
     onVoiceClick: () -> Unit,
     onOpenBrowser: () -> Unit,
-    onApprovePending: () -> Unit = {},
-    onRejectPending: () -> Unit = {},
+    onApprovePending: (String) -> Unit = {},
+    onApproveEdited: (String, Map<String, Any?>) -> Unit = { _, _ -> },
+    onRejectPending: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     ScreenScaffold(modifier) {
@@ -80,14 +86,20 @@ fun CommandScreen(
                 // Ticket 12/25: the Confirmation gate's card. Shows the
                 // exact send the model asked for plus the unseen-recipient
                 // highlight; Approve runs it once through the gated path,
-                // Reject discards it with no send.
-                state.pendingApproval?.let { call ->
+                // Reject discards it with no send. P0: the card echoes the
+                // opaque per-proposal nonce (never the Tool call id) and
+                // renders only when the nonce is present — no nonce, no card.
+                val pendingCall = state.pendingApproval
+                val proposalId = state.pendingApprovalProposalId
+                if (pendingCall != null && proposalId != null) {
                     item {
                         ApprovalCardRow(
-                            call = call,
+                            call = pendingCall,
+                            proposalId = proposalId,
                             unseen = state.pendingApprovalUnseen,
-                            onApprove = onApprovePending,
-                            onReject = onRejectPending,
+                            onApprove = { onApprovePending(proposalId) },
+                            onApproveEdited = { args -> onApproveEdited(proposalId, args) },
+                            onReject = { onRejectPending(proposalId) },
                         )
                     }
                 }
@@ -124,8 +136,8 @@ fun CommandScreen(
                     value = state.inputText,
                     onValueChange = onInputChange,
                     model = state.providerUsed ?: "Aurviz",
-                    responding = state.sending,
-                    canSend = state.inputText.isNotBlank(),
+                    responding = state.sending || state.agentRunning,
+                    canSend = state.inputText.isNotBlank() && !state.sending && !state.agentRunning,
                     onSend = { onSend(state.inputText) },
                     onStop = {},
                     onAddClick = {},
@@ -158,37 +170,56 @@ private fun TimelineRow(step: TimelineStep) {
 
 // Ticket 12/25: the gate's card for one suspended Tool call. Send cards
 // show the exact To/Subject/Body from the call plus the unseen-recipient
-// highlight; other gated calls get the same Approve/Reject shape with
-// their exact args. Rendering is exact strings — never a paraphrase.
+// highlight; the fields are editable and Approve sends the edited values
+// through the registry's edited-approve path (revalidated before it runs).
+// Other gated calls get the same Approve/Reject shape with their exact
+// args. Rendering starts from exact strings — never a paraphrase.
 @Composable
 private fun ApprovalCardRow(
     call: ToolCall,
+    proposalId: String,
     unseen: List<String>,
     onApprove: () -> Unit,
+    onApproveEdited: (Map<String, Any?>) -> Unit,
     onReject: () -> Unit,
 ) {
     val unseenSet = unseen.map { it.trim().lowercase() }.toSet()
     Section("Confirmation — ${call.name}") {
         if (call.name == "send_email") {
-            val to = (call.arguments["to"] as? String).orEmpty()
+            var to by remember(proposalId) { mutableStateOf((call.arguments["to"] as? String).orEmpty()) }
+            var subject by remember(proposalId) { mutableStateOf((call.arguments["subject"] as? String).orEmpty()) }
+            var body by remember(proposalId) { mutableStateOf((call.arguments["body"] as? String).orEmpty()) }
+            TextField(value = to, onValueChange = { to = it }, label = "To")
+            TextField(value = subject, onValueChange = { subject = it }, label = "Subject")
+            TextField(value = body, onValueChange = { body = it }, label = "Body", minLines = 3)
             val toUnseen = to.split(",").map { it.trim() }.filter { it.isNotEmpty() }.any { it.lowercase() in unseenSet }
-            Text("To: $to")
-            Text("Subject: ${(call.arguments["subject"] as? String).orEmpty()}")
-            Text("Body: ${(call.arguments["body"] as? String).orEmpty()}")
             if (toUnseen) {
                 Text("New recipient — never emailed before.", color = Theme.colors.destructive)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(Space * 2)) {
+                Button(
+                    onClick = {
+                        onApproveEdited(mapOf("to" to to.trim(), "subject" to subject, "body" to body))
+                    },
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("Approve & Send")
+                }
+                Button(onClick = onReject, variant = ButtonVariant.Secondary, modifier = Modifier.weight(1f)) {
+                    Text("Reject")
+                }
             }
         } else {
             call.arguments.entries.forEach { (key, value) ->
                 Text("$key: $value")
             }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(Space * 2)) {
-            Button(onClick = onApprove, modifier = Modifier.weight(1f)) {
-                Text("Approve & Send")
-            }
-            Button(onClick = onReject, variant = ButtonVariant.Secondary, modifier = Modifier.weight(1f)) {
-                Text("Reject")
+            Row(horizontalArrangement = Arrangement.spacedBy(Space * 2)) {
+                Button(onClick = onApprove, modifier = Modifier.weight(1f)) {
+                    Text("Approve & Send")
+                }
+                Button(onClick = onReject, variant = ButtonVariant.Secondary, modifier = Modifier.weight(1f)) {
+                    Text("Reject")
+                }
             }
         }
     }

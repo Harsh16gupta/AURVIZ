@@ -16,8 +16,6 @@ class ProviderPickerTest {
             geminiModel = "gemini-2.5-flash",
             groqKey = "groq-key",
             groqModel = "llama-3.1-8b-instant",
-            deepseekKey = "deepseek-key",
-            deepseekBaseUrl = "https://api.deepseek.com",
         )
 
     @Test
@@ -33,6 +31,15 @@ class ProviderPickerTest {
         val config = resolveProvider("meta", settings())
         assertEquals("gemini", config.name)
         assertEquals("https://generativelanguage.googleapis.com/v1beta/openai", config.baseUrl)
+    }
+
+    @Test
+    fun droppedDeepseekNameFallsBackToGemini() {
+        // ADR-0004: DeepSeek is unwired — the name no longer resolves and
+        // must fall back to Gemini like any other unknown name.
+        val config = resolveProvider("deepseek", settings())
+        assertEquals("gemini", config.name)
+        assertEquals("gemini-key", config.apiKey)
     }
 
     private fun successOn(name: String): NamedProvider {
@@ -61,7 +68,7 @@ class ProviderPickerTest {
     fun skipsNoKeyWithoutCalling() {
         val noKey =
             NamedProvider(
-                "deepseek",
+                "stale",
                 "",
                 object : LlmProvider {
                     override fun plan(userText: String): LlmResult =
@@ -193,10 +200,10 @@ class ProviderPickerTest {
     fun consecutiveRateLimitsBackOffExponentially() {
         val first = failOn("gemini", HttpFailure("rate_limited", 0, true))
         val second = failOn("groq", HttpFailure("rate_limited", null, true))
-        val third = successOn("deepseek")
+        val third = successOn("gemini")
         val slept = mutableListOf<Long>()
         val outcome = planWithFallback("check mail", listOf(first, second, third), sleeper = { slept += it })
-        assertEquals("deepseek", outcome.providerName)
+        assertEquals("gemini", outcome.providerName)
         assertEquals(listOf(1_000L, 2_000L), slept)
     }
 

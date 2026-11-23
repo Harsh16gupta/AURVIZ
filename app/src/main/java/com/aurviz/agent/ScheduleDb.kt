@@ -115,6 +115,19 @@ interface ScheduleRunDao {
 
     @Query("UPDATE schedule_runs SET status = :status, `error` = :error, `result` = :result, durationMs = :durationMs WHERE pid = :pid")
     fun finish(pid: Long, status: String, error: String?, result: String?, durationMs: Long)
+
+    @Query("SELECT pid FROM schedule_runs WHERE scheduleId = :scheduleId AND fireTime = :fireTime LIMIT 1")
+    fun findPid(scheduleId: String, fireTime: Long): Long?
+
+    /**
+     * Reclaim a stale RUNNING row as a fresh lease in one conditional
+     * UPDATE: exactly one racing worker wins (returns 1), the rest see 0.
+     * The row stays RUNNING with a reclaim note — never terminally marked —
+     * so a second crash keeps the due run retryable until finish() records
+     * the real outcome. TTL ages from the alarm's fireTime (kept).
+     */
+    @Query("UPDATE schedule_runs SET status = 'RUNNING', `error` = 'stale RUNNING claim reclaimed; retrying' WHERE scheduleId = :scheduleId AND fireTime = :fireTime AND status = 'RUNNING' AND :nowMs - fireTime > :ttlMs")
+    fun reclaimStaleRunning(scheduleId: String, fireTime: Long, nowMs: Long, ttlMs: Long): Int
 }
 
 // One write a scheduled run attempted but never executed: the user
@@ -170,6 +183,13 @@ class RoomScheduleRunStore(private val dao: ScheduleRunDao) : ScheduleRunStore {
     override fun find(scheduleId: String, fireTime: Long): ScheduleRun? = dao.find(scheduleId, fireTime)?.toRun()
 
     override fun list(): List<ScheduleRun> = dao.listAll().map { it.toRun() }
+
+    override fun resetStaleRunning(scheduleId: String, fireTime: Long, nowMs: Long, ttlMs: Long): Long? {
+        // One conditional UPDATE wins the lease atomically; the follow-up
+        // read only fetches the winner's pid.
+        if (dao.reclaimStaleRunning(scheduleId, fireTime, nowMs, ttlMs) == 0) return null
+        return dao.findPid(scheduleId, fireTime)
+    }
 
     private fun ScheduleRunRow.toRun(): ScheduleRun =
         ScheduleRun(scheduleId, fireTime, ScheduleRunStatus.valueOf(status), error, result, durationMs)

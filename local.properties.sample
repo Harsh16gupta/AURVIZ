@@ -6,9 +6,8 @@
 LLM_DEFAULT_PROVIDER=gemini
 GEMINI_API_KEY=
 GEMINI_MODEL=gemini-2.5-flash
-DEEPSEEK_API_KEY=
-DEEPSEEK_BASE_URL=https://api.deepseek.com
 GROQ_API_KEY=
 GROQ_MODEL=llama-3.1-8b-instant
-META_LLAMA_API_KEY=
-SUPERMEMORY_API_KEY=
+# Gmail OAuth (Desktop-app client, PKCE + loopback). Required for sign-in.
+GOOGLE_OAUTH_CLIENT_ID=
+GOOGLE_OAUTH_CLIENT_SECRET=

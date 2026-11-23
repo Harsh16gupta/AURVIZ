@@ -1,5 +1,6 @@
 package com.aurviz.agent
 
+import org.json.JSONArray
 import org.json.JSONObject
 
 // Ticket 17/24: scheduled-run deferral seam (ADR-0002, gaps §3E). A
@@ -136,10 +137,14 @@ fun runScheduled(
 // ADR-0002: scheduled runs see reads only. A scheduled send_email or
 // schedule/memory write is never executed: the loop records a
 // PendingApproval row and the user approves in-app.
+// getImportantEmails is a read-only legacy fetch (ADR-0003: reads are
+// ungated), so it stays ungated here too — otherwise a read would be
+// held as an approval row.
 val SCHEDULED_RUN_ALLOWLIST: Set<String> =
     setOf(
         "search_emails",
         "read_email",
+        "getImportantEmails",
         "get_page_text",
         "search_memory",
         "list_schedules",
@@ -147,7 +152,11 @@ val SCHEDULED_RUN_ALLOWLIST: Set<String> =
 
 // Terminal run states, stored in schedule_runs.status. RUNNING is the
 // transient claim marker so a double-fire loses the race instead of
-// double-running; finish() always overwrites it.
+// double-running; finish() always overwrites it. A RUNNING row older than
+// STALE_RUN_TTL_MS means the process died between claim and finish (the
+// only path that leaves RUNNING behind): the next delivery reclaims it
+// instead of skipping forever.
+const val STALE_RUN_TTL_MS = 10 * 60_000L
 enum class ScheduleRunStatus {
     RUNNING,
     SUCCESS,
@@ -179,6 +188,16 @@ interface ScheduleRunStore {
     fun find(scheduleId: String, fireTime: Long): ScheduleRun?
 
     fun list(): List<ScheduleRun>
+
+    /**
+     * Reclaim a stale RUNNING row (process death between claim and finish).
+     * Re-asserts the RUNNING lease and returns the existing pid when the
+     * row was RUNNING and older than ttlMs, else null. The row is never
+     * terminally marked here, so a second crash keeps the due run
+     * retryable; finish() alone records the outcome. Genuinely concurrent
+     * duplicates stay DuplicateSkipped.
+     */
+    fun resetStaleRunning(scheduleId: String, fireTime: Long, nowMs: Long, ttlMs: Long = STALE_RUN_TTL_MS): Long?
 }
 
 class InMemoryScheduleRunStore : ScheduleRunStore {
@@ -204,6 +223,18 @@ class InMemoryScheduleRunStore : ScheduleRunStore {
     override fun find(scheduleId: String, fireTime: Long): ScheduleRun? = rows[scheduleId to fireTime]?.second
 
     @Synchronized
+    override fun resetStaleRunning(scheduleId: String, fireTime: Long, nowMs: Long, ttlMs: Long): Long? {
+        val entry = rows[scheduleId to fireTime] ?: return null
+        val (pid, run) = entry
+        if (run.status != ScheduleRunStatus.RUNNING) return null
+        if (nowMs - fireTime <= ttlMs) return null
+        // Synchronized = one winner; the lease is re-asserted, never
+        // terminally marked, so a second crash keeps the due run retryable.
+        rows[scheduleId to fireTime] = pid to run.copy(status = ScheduleRunStatus.RUNNING, error = "stale RUNNING claim reclaimed; retrying")
+        return pid
+    }
+
+    @Synchronized
     override fun list(): List<ScheduleRun> = rows.values.map { it.second }
 }
 
@@ -211,13 +242,19 @@ class InMemoryScheduleRunStore : ScheduleRunStore {
 // silent no-ops: the runner maps them to the Reconnect notification.
 fun isGmailAuthFailure(error: String): Boolean {
     val text = error.lowercase()
-    return text.contains("not connected") ||
-        text.contains("401") ||
-        text.contains("unauthorized") ||
-        text.contains("invalid_grant") ||
+    // Token/phrasing signals are inherently Gmail-shaped.
+    if (text.contains("invalid_grant") ||
         text.contains("token refresh") ||
         text.contains("token expired") ||
-        text.contains("reconnect gmail")
+        text.contains("reconnect gmail") ||
+        text.contains("not connected")
+    ) return true
+    // Bare codes ("HTTP 401") also come from the LLM transport (bad model
+    // key), so they only count inside a Gmail-shaped message
+    // ("Gmail: HTTP 401 ..."). Otherwise a bad LLM key would post a
+    // misleading "Reconnect Gmail" notification.
+    if (!text.contains("gmail")) return false
+    return text.contains("401") || text.contains("unauthorized")
 }
 
 // The loop's registry view for scheduled runs: allowlisted reads run
@@ -250,33 +287,59 @@ private fun blockedScheduledTool(name: String): ToolResult =
         retryable = false,
     )
 
-// Headless chat over the single-shot fallback seam (ADR-0004): every
-// loop turn replays the rendered messages through the candidates in
-// order. Same turn shape as the foreground FallbackChatLlm; this one
-// lives in the agent package so the Worker never imports UI.
-fun renderScheduledPrompt(messages: List<ChatMessage>): String =
-    messages.joinToString("\n") { message ->
-        when (message.role) {
-            "assistant" ->
-                ("[assistant] " + message.content.orEmpty() +
-                    message.toolCalls.joinToString(" ", prefix = " ") { it.name }).trim()
-            "tool" -> "[tool ${message.toolCallId}] ${message.content.orEmpty()}"
-            else -> message.content.orEmpty()
-        }
-    }
-
+// Headless chat over the structured fallback seam (ADR-0004): the loop's
+// messages ride intact. Same pinning as the foreground chat: the first
+// provider that answers handles every later turn, so private results are
+// never replayed to a second host mid-run. Tried unions every provider
+// that saw the prompt, even on failure, so the outcome can disclose it.
+// This class lives in the agent package so the Worker never imports UI.
+// The advertised set is the scheduled run's read-only registry view: the
+// model sees allowed reads plus gated writes by name, and attempts on the
+// latter become PendingApproval rows instead of silent refusals.
 class HeadlessChatLlm(
     private val candidates: List<NamedProvider>,
+    private val tools: JSONArray = allToolSchemas(),
 ) : ChatLlmProvider {
-    override fun chat(messages: List<ChatMessage>): LlmResult =
-        planWithFallback(renderScheduledPrompt(messages), candidates).result
+    val tried: MutableList<String> = mutableListOf()
+    var lastProvider: String? = null
+        private set
+    private var pinned: String? = null
+
+    override fun chat(messages: List<ChatMessage>): LlmResult {
+        val effective =
+            pinned?.let { name -> candidates.filter { it.name == name } } ?: candidates
+        try {
+            val fb = planWithFallbackMessages(messages, effective.ifEmpty { candidates }, tools)
+            for (name in fb.tried) if (name !in tried) tried += name
+            if (pinned == null) pinned = fb.providerName
+            lastProvider = fb.providerName
+            return fb.result
+        } catch (e: FallbackExhausted) {
+            for (name in e.tried) if (name !in tried) tried += name
+            throw e.cause as? Exception ?: RuntimeException(e)
+        }
+    }
 }
 
 // What the summary note says: the loop's answer (or its error), plus
-// how many attempted writes are waiting for approval.
-fun scheduledSummary(answer: String?, error: String?, blockedCount: Int): String {
+// how many attempted writes are waiting for approval, plus the retry
+// disclosure when private context was replayed across providers (ADR-0004).
+// Total failure still discloses who saw the prompt — the line names the
+// tried hosts instead of going silent when no provider answered.
+fun scheduledSummary(
+    answer: String?,
+    error: String?,
+    blockedCount: Int,
+    providersTried: List<String> = emptyList(),
+    providerUsed: String? = null,
+): String {
     val base = answer ?: error.orEmpty()
-    return if (blockedCount > 0) "$base (${blockedCount} request(s) need your approval)" else base
+    val withBlocked = if (blockedCount > 0) "$base (${blockedCount} request(s) need your approval)" else base
+    if (providersTried.size <= 1) return withBlocked
+    val retryBit =
+        if (providerUsed != null) " (retried on $providerUsed; tried ${providersTried.joinToString(", ")})"
+        else " (tried ${providersTried.joinToString(", ")}; no provider answered)"
+    return "$withBlocked$retryBit"
 }
 
 fun scheduledRunNotification(
@@ -285,6 +348,8 @@ fun scheduledRunNotification(
     error: String?,
     blockedCount: Int,
     authFailed: Boolean,
+    providersTried: List<String> = emptyList(),
+    providerUsed: String? = null,
 ): ScheduleNotification =
     if (authFailed) {
         ScheduleNotification(
@@ -292,7 +357,7 @@ fun scheduledRunNotification(
             "Routine \"${schedule.instruction}\" couldn't reach Gmail (sign-in expired). Reconnect Gmail to resume routines.",
         )
     } else {
-        buildResultNotification(schedule, scheduledSummary(answer, error, blockedCount))
+        buildResultNotification(schedule, scheduledSummary(answer, error, blockedCount, providersTried, providerUsed))
     }
 
 sealed interface ScheduledRunOutcome {
@@ -300,6 +365,8 @@ sealed interface ScheduledRunOutcome {
         val run: ScheduleRun,
         val notification: ScheduleNotification,
         val blocked: List<PendingApproval>,
+        val providersTried: List<String> = emptyList(),
+        val providerUsed: String? = null,
     ) : ScheduledRunOutcome
 
     data class DuplicateSkipped(val run: ScheduleRun) : ScheduledRunOutcome
@@ -309,6 +376,9 @@ sealed interface ScheduledRunOutcome {
 // here, before any LLM call), run the AgentLoop on the read-only view
 // with a headless confirmer (no UI exists to approve: every write is
 // rejected and recorded), then store the run and build the note.
+// A stale RUNNING row (process death between claim and finish) is reclaimed
+// after STALE_RUN_TTL_MS instead of skipping forever; a fresh RUNNING row
+// is a genuine duplicate and skips.
 // Never throws: a transport failure becomes a FAILED run row.
 fun runScheduledRoutine(
     schedule: Schedule,
@@ -319,15 +389,9 @@ fun runScheduledRoutine(
     approvals: PendingApprovalStore,
     nowMs: () -> Long = System::currentTimeMillis,
 ): ScheduledRunOutcome {
-    runs.find(schedule.id, fireTime)?.let { return ScheduledRunOutcome.DuplicateSkipped(it) }
-    val pid =
-        runs.claim(schedule.id, fireTime)
-            ?: return ScheduledRunOutcome.DuplicateSkipped(
-                runs.find(schedule.id, fireTime)
-                    ?: ScheduleRun(schedule.id, fireTime, ScheduleRunStatus.RUNNING, null, null, 0L),
-            )
     val startMs = nowMs()
-    val blockedCalls = mutableListOf<ToolCall>()
+    fun executeWithPid(pid: Long): ScheduledRunOutcome {
+        val blockedCalls = mutableListOf<ToolCall>()
     val readOnly = scheduledRegistry(registry)
     val loop =
         AgentLoop(
@@ -382,9 +446,28 @@ fun runScheduledRoutine(
     val run =
         runs.find(schedule.id, fireTime)
             ?: ScheduleRun(schedule.id, fireTime, status, error, resultText, durationMs)
+    val tried = (llm as? HeadlessChatLlm)?.tried?.toList().orEmpty()
+    val used = (llm as? HeadlessChatLlm)?.lastProvider
     return ScheduledRunOutcome.Ran(
         run,
-        scheduledRunNotification(schedule, answer, error, blockedCalls.size, authFailed),
+        scheduledRunNotification(schedule, answer, error, blockedCalls.size, authFailed, tried, used),
         blocked,
+        tried,
+        used,
     )
+    }
+
+    runs.find(schedule.id, fireTime)?.let { existing ->
+        if (existing.status != ScheduleRunStatus.RUNNING) return ScheduledRunOutcome.DuplicateSkipped(existing)
+        val reclaimed = runs.resetStaleRunning(schedule.id, fireTime, startMs)
+            ?: return ScheduledRunOutcome.DuplicateSkipped(existing)
+        return executeWithPid(reclaimed)
+    }
+    val pid =
+        runs.claim(schedule.id, fireTime)
+            ?: return ScheduledRunOutcome.DuplicateSkipped(
+                runs.find(schedule.id, fireTime)
+                    ?: ScheduleRun(schedule.id, fireTime, ScheduleRunStatus.RUNNING, null, null, 0L),
+            )
+    return executeWithPid(pid)
 }

@@ -25,91 +25,63 @@ interface LlmProvider {
 
 /** Demo Tool: read-only, safe for the spike. Real Tools land in T3+. */
 fun demoToolSchema(): JSONObject =
-    JSONObject()
-        .put("type", "function")
-        .put(
-            "function",
-            JSONObject()
-                .put("name", "getImportantEmails")
-                .put("description", "Fetch unread important emails.")
-                .put(
-                    "parameters",
-                    JSONObject()
-                        .put("type", "object")
-                        .put(
-                            "properties",
-                            JSONObject().put("max_results", JSONObject().put("type", "integer")),
-                        )
-                        .put("required", JSONArray().put("max_results")),
-                ),
-        )
+    toolSchema(
+        "getImportantEmails",
+        "Fetch unread important emails.",
+        JSONObject()
+            .put("type", "object")
+            .put(
+                "properties",
+                JSONObject().put("max_results", JSONObject().put("type", "integer")),
+            )
+            .put("required", JSONArray().put("max_results")),
+    )
 
 /** Scheduling Tool: the LLM proposes WHAT + WHEN in words; the app parses
  *  the time with its tested parser and shows a preview for Confirm.
  *  The LLM never sets alarms itself — same Confirm gate as email send
  *  (ADR-0003: requiresConfirmation). */
 fun scheduleToolSchema(): JSONObject =
-    JSONObject()
-        .put("type", "function")
-        .put(
-            "function",
-            JSONObject()
-                .put("name", "create_schedule")
-                .put("description", "Save a recurring routine that runs later. Split the request into WHAT to do (task) and WHEN it runs (when, in the user's own words).")
-                .put(
-                    "parameters",
-                    JSONObject()
-                        .put("type", "object")
-                        .put(
-                            "properties",
-                            JSONObject()
-                                .put("task", JSONObject().put("type", "string").put("description", "What the routine does, e.g. read emails"))
-                                .put("when", JSONObject().put("type", "string").put("description", "When it runs, in the user's own words, e.g. at 2:38 a.m.")),
-                        )
-                        .put("required", JSONArray().put("task").put("when")),
-                ),
-        )
+    toolSchema(
+        "create_schedule",
+        "Save a recurring routine that runs later. Split the request into WHAT to do (task) and WHEN it runs (when, in the user's own words).",
+        JSONObject()
+            .put("type", "object")
+            .put(
+                "properties",
+                JSONObject()
+                    .put("task", JSONObject().put("type", "string").put("description", "What the routine does, e.g. read emails"))
+                    .put("when", JSONObject().put("type", "string").put("description", "When it runs, in the user's own words, e.g. at 2:38 a.m.")),
+            )
+            .put("required", JSONArray().put("task").put("when")),
+    )
 
 /** Scheduling Tool: read-only list, no Confirmation (ADR-0003: reads,
  *  searches, and lists are ungated). */
 fun listSchedulesToolSchema(): JSONObject =
-    JSONObject()
-        .put("type", "function")
-        .put(
-            "function",
-            JSONObject()
-                .put("name", "list_schedules")
-                .put("description", "List the saved recurring routines with their ids, instructions, and times.")
-                .put(
-                    "parameters",
-                    JSONObject()
-                        .put("type", "object")
-                        .put("properties", JSONObject()),
-                ),
-        )
+    toolSchema(
+        "list_schedules",
+        "List the saved recurring routines with their ids, instructions, and times.",
+        JSONObject()
+            .put("type", "object")
+            .put("properties", JSONObject()),
+    )
 
 /** Scheduling Tool: deleting a routine is state-changing, so it carries
  *  the same Confirm gate as creation (ADR-0003: requiresConfirmation). */
 fun cancelScheduleToolSchema(): JSONObject =
-    JSONObject()
-        .put("type", "function")
-        .put(
-            "function",
-            JSONObject()
-                .put("name", "cancel_schedule")
-                .put("description", "Delete a saved recurring routine. Use the schedule_id from list_schedules.")
-                .put(
-                    "parameters",
-                    JSONObject()
-                        .put("type", "object")
-                        .put(
-                            "properties",
-                            JSONObject()
-                                .put("schedule_id", JSONObject().put("type", "string").put("description", "The routine id, e.g. sched_1")),
-                        )
-                        .put("required", JSONArray().put("schedule_id")),
-                ),
-        )
+    toolSchema(
+        "cancel_schedule",
+        "Delete a saved recurring routine. Use the schedule_id from list_schedules.",
+        JSONObject()
+            .put("type", "object")
+            .put(
+                "properties",
+                JSONObject()
+                    .put("schedule_id", JSONObject().put("type", "string").put("description", "The routine id, e.g. sched_1")),
+            )
+            .put("required", JSONArray().put("schedule_id")),
+    )
 
 fun allToolSchemas(): JSONArray =
     JSONArray()
@@ -146,6 +118,78 @@ fun buildToolsRequestBody(model: String, userText: String, tools: JSONArray, sys
         .put("messages", messages)
         .put("tools", tools)
         .put("tool_choice", "auto")
+}
+
+// ADR-0005: structured wire format. The loop's messages list rides intact:
+// system (framing + delimited memories), user (bare command), assistant
+// turns carrying tool_calls, and role:"tool" results matched by
+// tool_call_id. Untrusted mail/page/memory text travels only inside tool
+// results and the system memories section — never concatenated into a
+// single user string, so the role boundary survives on the wire.
+fun chatMessageToJson(message: ChatMessage): JSONObject {
+    val json = JSONObject().put("role", message.role)
+    when (message.role) {
+        "assistant" -> {
+            if (message.content != null) json.put("content", message.content)
+            else json.put("content", JSONObject.NULL)
+            if (message.toolCalls.isNotEmpty()) {
+                val calls = JSONArray()
+                for (call in message.toolCalls) {
+                    val argsJson = JSONObject()
+                    for ((k, v) in call.arguments) {
+                        when (v) {
+                            null -> argsJson.put(k, JSONObject.NULL)
+                            is Number, is Boolean, is String -> argsJson.put(k, v)
+                            else -> argsJson.put(k, v.toString())
+                        }
+                    }
+                    val fn = JSONObject().put("name", call.name).put("arguments", argsJson.toString())
+                    val raw = JSONObject().put("type", "function").put("function", fn)
+                    if (call.id != null) raw.put("id", call.id)
+                    calls.put(raw)
+                }
+                json.put("tool_calls", calls)
+            }
+        }
+        "tool" -> {
+            json.put("content", message.content.orEmpty())
+            if (message.toolCallId != null) json.put("tool_call_id", message.toolCallId)
+        }
+        else -> json.put("content", message.content.orEmpty())
+    }
+    return json
+}
+
+fun buildChatRequestBody(model: String, messages: List<ChatMessage>, tools: JSONArray): JSONObject {
+    val wire = JSONArray()
+    for (message in messages) wire.put(chatMessageToJson(message))
+    return JSONObject()
+        .put("model", model)
+        .put("messages", wire)
+        .put("tools", tools)
+        .put("tool_choice", "auto")
+}
+
+// Legacy single-string fallback for providers that only implement plan().
+// Production HTTP (OpenAiChatProvider) never uses this; it exists so
+// scripted LlmProvider doubles in tests keep working through the messages
+// fallback seam.
+fun flattenChatMessages(messages: List<ChatMessage>): String =
+    messages.joinToString("\n") { message ->
+        when (message.role) {
+            "system" -> "[system] ${message.content.orEmpty()}"
+            "assistant" ->
+                ("[assistant] " + message.content.orEmpty() +
+                    message.toolCalls.joinToString(" ", prefix = " ") { it.name }).trim()
+            "tool" -> "[tool ${message.toolCallId}] ${message.content.orEmpty()}"
+            else -> message.content.orEmpty()
+        }
+    }
+
+// Structured provider seam: chatMessages sends the real roles. plan()
+// stays for single-shot callers and legacy test doubles.
+interface StructuredLlmProvider : LlmProvider {
+    fun chatMessages(messages: List<ChatMessage>, tools: JSONArray): LlmResult
 }
 
 fun parseToolCalls(response: JSONObject): LlmResult {
@@ -192,17 +236,16 @@ fun llmHttpClient(): OkHttpClient =
         .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
         .build()
 
-/** OpenAI-shape chat/completions client. Covers Gemini compat, Groq, DeepSeek. */
+/** OpenAI-shape chat/completions client. Covers Gemini compat and Groq. */
 class OpenAiChatProvider(
     private val baseUrl: String,
     private val apiKey: String,
     private val model: String,
     private val client: OkHttpClient = llmHttpClient(),
-) : LlmProvider {
-    override fun plan(userText: String): LlmResult {
+) : StructuredLlmProvider {
+    override fun chatMessages(messages: List<ChatMessage>, tools: JSONArray): LlmResult {
         val url = baseUrl.trimEnd('/') + "/chat/completions"
-        val json =
-            buildToolsRequestBody(model, userText, allToolSchemas(), buildSystemPrompt()).toString()
+        val json = buildChatRequestBody(model, messages, tools).toString()
         val request =
             Request.Builder()
                 .url(url)
@@ -221,6 +264,19 @@ class OpenAiChatProvider(
             return parseToolCalls(JSONObject(text))
         }
     }
+
+    override fun plan(userText: String): LlmResult {
+        // Legacy single-shot path: same shape as before (system framing +
+        // bare user text over the full advertised set) via the structured
+        // body. The loop's chat path uses chatMessages() so roles survive.
+        return chatMessages(
+            listOf(
+                ChatMessage(role = "system", content = buildSystemPrompt()),
+                ChatMessage(role = "user", content = userText),
+            ),
+            allToolSchemas(),
+        )
+    }
 }
 
 /** Provider endpoints. Keys/models come from BuildConfig (local.properties). */
@@ -231,12 +287,6 @@ object Providers {
     fun default(): LlmProvider =
         when (BuildConfig.LLM_DEFAULT_PROVIDER) {
             "groq" -> OpenAiChatProvider(GROQ_BASE_URL, BuildConfig.GROQ_API_KEY, BuildConfig.GROQ_MODEL)
-            "deepseek" ->
-                OpenAiChatProvider(
-                    BuildConfig.DEEPSEEK_BASE_URL,
-                    BuildConfig.DEEPSEEK_API_KEY,
-                    "deepseek-chat",
-                )
             else -> OpenAiChatProvider(GEMINI_BASE_URL, BuildConfig.GEMINI_API_KEY, BuildConfig.GEMINI_MODEL)
         }
 }

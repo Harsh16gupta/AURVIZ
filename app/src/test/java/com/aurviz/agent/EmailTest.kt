@@ -41,6 +41,33 @@ class EmailTest {
     }
 
     @Test
+    fun crlfInToIsRejectedWithoutTransport() {
+        val fake = FakeGmailApi()
+        val draft = composeEmail(to = "a@x.com\r\nBcc: evil@x.com", subject = "Hi", body = "hello")
+        val result = executeSendEmail(fake, draft, approved = true, policy = AllowAllSendPolicy)
+        assertTrue(result is ToolResult.Failure)
+        assertEquals(0, fake.sent.size)
+    }
+
+    @Test
+    fun crlfInSubjectIsRejectedWithoutTransport() {
+        val fake = FakeGmailApi()
+        val draft = composeEmail(to = "a@x.com", subject = "Hi\r\nX-Injected: yes", body = "hello")
+        val result = executeSendEmail(fake, draft, approved = true, policy = AllowAllSendPolicy)
+        assertTrue(result is ToolResult.Failure)
+        assertEquals(0, fake.sent.size)
+    }
+
+    @Test
+    fun multilineBodyStillSends() {
+        val fake = FakeGmailApi()
+        val draft = composeEmail(to = "a@x.com", subject = "Hi", body = "line one\nline two")
+        val result = executeSendEmail(fake, draft, approved = true, policy = AllowAllSendPolicy)
+        assertTrue(result is ToolResult.Success)
+        assertEquals(1, fake.sent.size)
+    }
+
+    @Test
     fun importantMailRanksFirst() {
         val fake =
             FakeGmailApi(

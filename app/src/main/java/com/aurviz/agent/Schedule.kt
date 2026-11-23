@@ -133,6 +133,25 @@ fun nextFireTime(schedule: Schedule, zone: ZoneId, now: ZonedDateTime): ZonedDat
     return null
 }
 
+// Loop-created schedule side effects (ADR-0002): a create/cancel that the
+// Task Execution ran must arm/disarm its alarm + Worker like the manual
+// and held-approval paths. Pure decision; the ViewModel maps ARM/DISARM
+// to register/cancel calls on the IO thread. Only an approved Success
+// counts: reject/timeout arrive as Success(cancelled_by_user) with
+// approved=false, and acting on those would arm/disarm a routine the
+// user just rejected.
+enum class LoopScheduleSideEffect { ARM, DISARM }
+
+fun loopScheduleSideEffect(callName: String, approved: Boolean, result: ToolResult): LoopScheduleSideEffect? {
+    if (!approved) return null
+    if (result !is ToolResult.Success) return null
+    return when (callName) {
+        "create_schedule" -> LoopScheduleSideEffect.ARM
+        "cancel_schedule" -> LoopScheduleSideEffect.DISARM
+        else -> null
+    }
+}
+
 // One routine = one background job: stable name per schedule id,
 // so re-saving never creates a double.
 fun uniqueWorkName(scheduleId: String): String = "schedule_$scheduleId"
@@ -144,6 +163,11 @@ fun schedulesToRescheduleAfterReboot(store: ScheduleStore): List<String> =
 // Stable note id per routine: two routines never overwrite each other's
 // note, even with identical wording (text.hashCode would collide).
 fun routineNotificationId(scheduleId: String): Int = scheduleId.hashCode()
+
+// Foreground-service note id: distinct from the result note id so the
+// ongoing "Running routine" note and the "Routine done" note never share
+// a slot. Same stability contract as the result id.
+fun routineForegroundNotificationId(scheduleId: String): Int = "running_$scheduleId".hashCode()
 
 // --- Seam D: the words on the result note. ---
 data class ScheduleNotification(val title: String, val text: String)

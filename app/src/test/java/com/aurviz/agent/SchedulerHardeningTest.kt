@@ -128,8 +128,8 @@ class SchedulerHardeningTest {
     fun gmailAuthFailureVariantsAreRecognized() {
         for (error in listOf(
             "gmail is not connected: token expired",
-            "401 Unauthorized",
-            "request failed with 401",
+            "Gmail: HTTP 401 token expired",
+            "gmail request failed with 401",
             "invalid_grant: Token has been expired or revoked",
             "gmail token refresh failed",
             "Please Reconnect Gmail to continue",
@@ -137,6 +137,15 @@ class SchedulerHardeningTest {
             assertTrue("should be auth failure: $error", isGmailAuthFailure(error))
         }
         assertFalse(isGmailAuthFailure("timeout waiting for search results"))
+    }
+
+    @Test
+    fun bareLlm401IsNotAGmailAuthFailure() {
+        // A bad model key surfaces as "HTTP 401" with no Gmail shape: it
+        // must not post a misleading "Reconnect Gmail" notification.
+        assertFalse(isGmailAuthFailure("step 0 failed: HTTP 401"))
+        assertFalse(isGmailAuthFailure("scheduled run failed: HTTP 401"))
+        assertFalse(isGmailAuthFailure("401 Unauthorized"))
     }
 
     @Test
@@ -194,6 +203,18 @@ class SchedulerHardeningTest {
     }
 
     @Test
+    fun resumeRearmsPersistedSchedulesToCurrentGrant() {
+        // Revocation cancels existing exact alarms with no callback here:
+        // every resume must re-register persisted Schedules (exact vs
+        // inexact follows the current grant inside registerRoutineAlarm).
+        val activity = File(moduleDir(), "src/main/java/com/aurviz/agent/MainActivity.kt").readText()
+        assertTrue(activity.contains("reconcileAlarmsAfterResume"))
+        val vm = File(moduleDir(), "src/main/java/com/aurviz/agent/ui/AgentViewModel.kt").readText()
+        assertTrue(vm.contains("fun reconcileAlarmsAfterResume"))
+        assertTrue(vm.contains("registerRoutineAlarm(app, schedule)"))
+    }
+
+    @Test
     fun noPeriodicWorkAnywhereInMainSource() {
         val banned = listOf("PeriodicWorkRequest", "enqueueUniquePeriodicWork", "setPeriodic(")
         val hits = mutableListOf<String>()
@@ -214,5 +235,14 @@ class SchedulerHardeningTest {
         for (marker in listOf("Thread(", "goAsync(", "Room.databaseBuilder", "thread {")) {
             assertFalse("receivers must use the Worker path, found: $marker", marker in text)
         }
+    }
+
+    @Test
+    fun expeditedWorkerOverridesForegroundInfo() {
+        // Android 8-11 runs expedited work as a foreground service: without
+        // this override the base Worker throws before doWork. Reflection
+        // pins the override (the runtime behavior needs a device).
+        val method = ScheduleWorker::class.java.getDeclaredMethod("getForegroundInfo")
+        assertEquals(ScheduleWorker::class.java, method.declaringClass)
     }
 }

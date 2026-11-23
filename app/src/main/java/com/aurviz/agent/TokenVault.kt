@@ -49,6 +49,17 @@ class TokenVault(private val prefs: SharedPreferences) {
         prefs.edit().clear().apply()
     }
 
+    // Ticket 36 SPEC fix: the Gmail-revoke path must remove ONLY the three
+    // Gmail fields. clear() wipes the whole prefs file incl. user-entered
+    // LLM keys — revokeGmail() must call this, never clear().
+    fun clearGmail() {
+        prefs.edit()
+            .remove("access")
+            .remove("refresh")
+            .remove("account")
+            .apply()
+    }
+
     fun saveLlmKeys(keys: LlmKeys) {
         prefs.edit()
             .putString("llm_gemini_key", keys.geminiKey)

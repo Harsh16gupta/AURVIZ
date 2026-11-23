@@ -1,5 +1,7 @@
 package com.aurviz.agent
 
+import org.json.JSONArray
+
 // T4: picker + auto-fallback. Pure decision logic, JVM-testable.
 // The screen (picker UI) and real HTTP stay in thin wiring below.
 
@@ -10,8 +12,6 @@ data class ProviderSettings(
     val geminiModel: String = "gemini-2.5-flash",
     val groqKey: String = "",
     val groqModel: String = "llama-3.1-8b-instant",
-    val deepseekKey: String = "",
-    val deepseekBaseUrl: String = "https://api.deepseek.com",
 )
 
 // One provider's address + key + model. Name in, this out.
@@ -80,6 +80,42 @@ fun planWithFallback(
     throw lastError ?: IllegalStateException("No provider with API key")
 }
 
+// Structured fallback (ADR-0005): same try-order, disclosure, and backoff
+// as planWithFallback, but the loop's messages ride intact. Providers
+// implementing StructuredLlmProvider get the real roles; legacy plan-only
+// doubles get the flattened string so scripted tests keep working.
+class FallbackExhausted(val tried: List<String>, cause: Exception) : Exception(cause.message, cause)
+
+fun planWithFallbackMessages(
+    messages: List<ChatMessage>,
+    candidates: List<NamedProvider>,
+    tools: JSONArray = allToolSchemas(),
+    sleeper: (Long) -> Unit = { Thread.sleep(it) },
+): FallbackResult {
+    val tried = mutableListOf<String>()
+    var lastError: Exception? = null
+    var retries = 0
+    for ((index, candidate) in candidates.withIndex()) {
+        if (candidate.apiKey.isBlank()) continue
+        try {
+            val structured = candidate.provider as? StructuredLlmProvider
+            val result =
+                structured?.chatMessages(messages, tools)
+                    ?: candidate.provider.plan(flattenChatMessages(messages))
+            tried += candidate.name
+            return FallbackResult(result, candidate.name, tried.toList())
+        } catch (e: LlmException) {
+            tried += candidate.name
+            if (!e.failure.fallback) throw FallbackExhausted(tried.toList(), e)
+            lastError = e
+            val hasNext = candidates.drop(index + 1).any { it.apiKey.isNotBlank() }
+            if (hasNext) sleeper(backoffDelayMs(e.failure.retryAfter, retries++))
+        }
+    }
+    if (tried.isEmpty()) throw IllegalStateException("No provider with API key")
+    throw FallbackExhausted(tried.toList(), lastError ?: IllegalStateException("No provider with API key"))
+}
+
 // Visible "retried on Y" disclosure (ADR-0004): null when the first provider
 // answered, non-null naming every provider that saw the prompt otherwise.
 // The caller copies `tried` into AgentUiState.providersTried so a
@@ -109,8 +145,6 @@ fun settingsFromBuildConfig(): ProviderSettings =
         geminiModel = BuildConfig.GEMINI_MODEL,
         groqKey = BuildConfig.GROQ_API_KEY,
         groqModel = BuildConfig.GROQ_MODEL,
-        deepseekKey = BuildConfig.DEEPSEEK_API_KEY,
-        deepseekBaseUrl = BuildConfig.DEEPSEEK_BASE_URL,
     )
 
 fun providerFromConfig(config: ProviderConfig): LlmProvider =
@@ -121,7 +155,7 @@ fun providerFromConfig(config: ProviderConfig): LlmProvider =
 // User keys from Settings (TokenVault) win over BuildConfig per provider.
 fun defaultCandidates(preferred: String, userKeys: LlmKeys = LlmKeys()): List<NamedProvider> {
     val settings = effectiveSettings(settingsFromBuildConfig(), userKeys)
-    val order = listOf(preferred.trim().lowercase(), "gemini", "groq", "deepseek").distinct()
+    val order = listOf(preferred.trim().lowercase(), "gemini", "groq").distinct()
     return order.map { name ->
         val config = resolveProvider(name, settings)
         NamedProvider(config.name, config.apiKey, providerFromConfig(config))
@@ -137,13 +171,6 @@ fun resolveProvider(name: String, settings: ProviderSettings): ProviderConfig =
                 baseUrl = Providers.GROQ_BASE_URL,
                 apiKey = settings.groqKey,
                 model = settings.groqModel,
-            )
-        "deepseek" ->
-            ProviderConfig(
-                name = "deepseek",
-                baseUrl = settings.deepseekBaseUrl,
-                apiKey = settings.deepseekKey,
-                model = "deepseek-chat",
             )
         "gemini" ->
             ProviderConfig(

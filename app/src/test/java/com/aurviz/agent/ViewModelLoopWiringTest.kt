@@ -3,6 +3,7 @@ package com.aurviz.agent
 import com.aurviz.agent.ui.AgentUiState
 import com.aurviz.agent.ui.FallbackChatLlm
 import com.aurviz.agent.ui.LoopUiProgress
+import com.aurviz.agent.ui.approvalWaitMs
 import com.aurviz.agent.ui.retryLine
 import com.aurviz.agent.ui.withEvent
 import org.junit.Assert.assertEquals
@@ -98,9 +99,22 @@ class ViewModelLoopWiringTest {
         progress = progress.withEvent(AgentEvent.NeedsApproval(call))
         assertEquals(call, progress.pendingApproval)
         assertEquals(before, progress.timeline())
-        progress = progress.withEvent(AgentEvent.StepDone(call, ToolResult.Success(mapOf("ok" to true))))
+        progress = progress.withEvent(AgentEvent.StepDone(call, ToolResult.Success(mapOf("ok" to true)), approved = true, effectiveArgs = call.arguments))
         assertEquals(1, progress.doneCount)
         assertTrue(progress.timeline().any { it.title.startsWith("Tool ") && it.state == StepState.DONE })
+    }
+
+    @Test
+    fun approvalWaitIsCappedByRemainingRunBudget() {
+        // Fresh run: the card may wait the full bound.
+        assertEquals(300_000L, approvalWaitMs(0L, 300_000L))
+        // Slow first Tool: only the remainder is waitable.
+        assertEquals(60_000L, approvalWaitMs(240_000L, 300_000L))
+        // Budget exhausted: no hopeless wait (immediate TimedOut).
+        assertEquals(0L, approvalWaitMs(300_000L, 300_000L))
+        assertEquals(0L, approvalWaitMs(400_000L, 300_000L))
+        // A tighter cap still wins when budget remains.
+        assertEquals(10_000L, approvalWaitMs(0L, 300_000L, maxWaitMs = 10_000L))
     }
 
     @Test
@@ -142,6 +156,12 @@ class ViewModelLoopWiringTest {
         assertTrue(result is AgentLoopResult.Answered)
         assertEquals(listOf("gemini"), chat.tried)
         assertNull(AgentUiState(providerUsed = chat.lastProvider, providersTried = chat.tried.toList()).retryLine())
+    }
+
+    @Test
+    fun totalFailureStillDisclosesTriedProviders() {
+        val state = AgentUiState(providerUsed = null, providersTried = listOf("gemini", "groq"))
+        assertEquals("No provider answered (tried gemini, groq)", state.retryLine())
     }
 
     @Test

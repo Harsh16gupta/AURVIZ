@@ -110,6 +110,21 @@ private fun validateArgs(definition: ToolDefinition, args: Map<String, Any?>): T
     return null
 }
 
+/** Shared OpenAI function-tool envelope (ADR-0004): every LLM-visible
+ *  schema is {"type":"function","function":{name, description, parameters}}.
+ *  One builder for ToolRegistry, LlmProvider, and Memory schemas so the
+ *  shape cannot drift between them. */
+fun toolSchema(name: String, description: String, parameters: JSONObject): JSONObject =
+    JSONObject()
+        .put("type", "function")
+        .put(
+            "function",
+            JSONObject()
+                .put("name", name)
+                .put("description", description)
+                .put("parameters", parameters),
+        )
+
 class ToolRegistry {
     private val tools = mutableMapOf<String, ToolDefinition>()
 
@@ -130,15 +145,7 @@ class ToolRegistry {
     fun toolSchemas(): JSONArray =
         JSONArray(
             tools.values.map { definition ->
-                JSONObject()
-                    .put("type", "function")
-                    .put(
-                        "function",
-                        JSONObject()
-                            .put("name", definition.name)
-                            .put("description", definition.description)
-                            .put("parameters", definition.parameters),
-                    )
+                toolSchema(definition.name, definition.description, definition.parameters)
             },
         )
 
@@ -500,8 +507,8 @@ fun defaultToolRegistry(
                 val store = memoryStore
                     ?: return@ToolDefinition ToolResult.Failure("memory store is not available", retryable = false)
                 val query = args["query"] as String
-                val max = (args["max_results"] as Number?)?.toInt()?.coerceAtLeast(0)
-                val hits = recallFor(store, query).let { if (max != null) it.take(max) else it }
+                val max = (args["max_results"] as Number?)?.toInt()?.coerceAtLeast(0) ?: 5
+                val hits = recallFor(store, query).take(max)
                 ToolResult.Success(
                     hits.map { memory ->
                         mapOf(
