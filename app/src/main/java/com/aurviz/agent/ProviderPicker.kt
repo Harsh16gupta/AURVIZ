@@ -10,8 +10,6 @@ data class ProviderSettings(
     val geminiModel: String = "gemini-2.5-flash",
     val groqKey: String = "",
     val groqModel: String = "llama-3.1-8b-instant",
-    val deepseekKey: String = "",
-    val deepseekBaseUrl: String = "https://api.deepseek.com",
 )
 
 // One provider's address + key + model. Name in, this out.
@@ -109,8 +107,6 @@ fun settingsFromBuildConfig(): ProviderSettings =
         geminiModel = BuildConfig.GEMINI_MODEL,
         groqKey = BuildConfig.GROQ_API_KEY,
         groqModel = BuildConfig.GROQ_MODEL,
-        deepseekKey = BuildConfig.DEEPSEEK_API_KEY,
-        deepseekBaseUrl = BuildConfig.DEEPSEEK_BASE_URL,
     )
 
 fun providerFromConfig(config: ProviderConfig): LlmProvider =
@@ -121,7 +117,7 @@ fun providerFromConfig(config: ProviderConfig): LlmProvider =
 // User keys from Settings (TokenVault) win over BuildConfig per provider.
 fun defaultCandidates(preferred: String, userKeys: LlmKeys = LlmKeys()): List<NamedProvider> {
     val settings = effectiveSettings(settingsFromBuildConfig(), userKeys)
-    val order = listOf(preferred.trim().lowercase(), "gemini", "groq", "deepseek").distinct()
+    val order = listOf(preferred.trim().lowercase(), "gemini", "groq").distinct()
     return order.map { name ->
         val config = resolveProvider(name, settings)
         NamedProvider(config.name, config.apiKey, providerFromConfig(config))
@@ -137,13 +133,6 @@ fun resolveProvider(name: String, settings: ProviderSettings): ProviderConfig =
                 baseUrl = Providers.GROQ_BASE_URL,
                 apiKey = settings.groqKey,
                 model = settings.groqModel,
-            )
-        "deepseek" ->
-            ProviderConfig(
-                name = "deepseek",
-                baseUrl = settings.deepseekBaseUrl,
-                apiKey = settings.deepseekKey,
-                model = "deepseek-chat",
             )
         "gemini" ->
             ProviderConfig(

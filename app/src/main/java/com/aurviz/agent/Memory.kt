@@ -88,28 +88,6 @@ fun rememberFact(
 fun forgetPreview(store: MemoryStore, query: String): List<Memory> =
     recallFor(store, query)
 
-// Memories written while offline wait here.
-// replay() uploads them in order and skips ones already stored.
-class Outbox {
-    private val pending = mutableListOf<Pair<String, String>>()
-
-    fun queue(text: String, source: String) {
-        pending += text to source
-    }
-
-    fun replay(store: MemoryStore): Int {
-        val already = store.list().map { it.text to it.source }.toSet()
-        var uploaded = 0
-        for ((text, source) in pending) {
-            if ((text to source) !in already) {
-                store.save(text, source)
-                uploaded++
-            }
-        }
-        pending.clear()
-        return uploaded
-    }
-}
 // Find memories sharing words with the question: most shared words
 // first (ticket #18 keyword ranking, unchanged); ties break toward higher
 // importance, then toward more recent use (lastUsed, else createdAt),
@@ -185,45 +163,31 @@ fun renderMemorySection(memories: List<Memory>): String {
 // boosts with an offline FTS fallback (ticket #31); embeddings belong
 // to ticket #32.
 fun saveMemoryToolSchema(): JSONObject =
-    JSONObject()
-        .put("type", "function")
-        .put(
-            "function",
-            JSONObject()
-                .put("name", "save_memory")
-                .put("description", "Save a fact about the user for future commands, e.g. their boss's name.")
-                .put(
-                    "parameters",
-                    JSONObject()
-                        .put("type", "object")
-                        .put(
-                            "properties",
-                            JSONObject()
-                                .put("text", JSONObject().put("type", "string").put("description", "The fact to remember, e.g. my boss is Priya"))
-                                .put("source", JSONObject().put("type", "string").put("description", "Where the fact came from, e.g. you told me")),
-                        )
-                        .put("required", JSONArray().put("text")),
-                ),
-        )
+    toolSchema(
+        "save_memory",
+        "Save a fact about the user for future commands, e.g. their boss's name.",
+        JSONObject()
+            .put("type", "object")
+            .put(
+                "properties",
+                JSONObject()
+                    .put("text", JSONObject().put("type", "string").put("description", "The fact to remember, e.g. my boss is Priya"))
+                    .put("source", JSONObject().put("type", "string").put("description", "Where the fact came from, e.g. you told me")),
+            )
+            .put("required", JSONArray().put("text")),
+    )
 
 fun searchMemoryToolSchema(): JSONObject =
-    JSONObject()
-        .put("type", "function")
-        .put(
-            "function",
-            JSONObject()
-                .put("name", "search_memory")
-                .put("description", "Search remembered facts sharing words with the query, best match first.")
-                .put(
-                    "parameters",
-                    JSONObject()
-                        .put("type", "object")
-                        .put(
-                            "properties",
-                            JSONObject()
-                                .put("query", JSONObject().put("type", "string").put("description", "What to look for, e.g. who is my boss?"))
-                                .put("max_results", JSONObject().put("type", "integer")),
-                        )
-                        .put("required", JSONArray().put("query")),
-                ),
-        )
+    toolSchema(
+        "search_memory",
+        "Search remembered facts sharing words with the query, best match first.",
+        JSONObject()
+            .put("type", "object")
+            .put(
+                "properties",
+                JSONObject()
+                    .put("query", JSONObject().put("type", "string").put("description", "What to look for, e.g. who is my boss?"))
+                    .put("max_results", JSONObject().put("type", "integer")),
+            )
+            .put("required", JSONArray().put("query")),
+    )

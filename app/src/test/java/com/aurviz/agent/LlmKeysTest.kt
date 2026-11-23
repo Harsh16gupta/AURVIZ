@@ -47,6 +47,27 @@ class LlmKeysTest {
     }
 
     @Test
+    fun revokeGmailPathKeepsLlmKeys() {
+        // Ticket 36 SPEC breach: revokeGmail() called vault.clear(), wiping
+        // the whole prefs file incl. user-entered LLM keys. The revoke path
+        // must remove only the three Gmail fields.
+        val vault = vault()
+        val tokens = TokenStore()
+        tokens.gmailAccessToken = "gmail-access"
+        tokens.gmailRefreshToken = "gmail-refresh"
+        tokens.gmailAccount = "user@example.com"
+        vault.saveFrom(tokens)
+        vault.saveLlmKeys(LlmKeys(geminiKey = "user-gemini", groqKey = "user-groq"))
+        vault.clearGmail()
+        assertEquals(LlmKeys(geminiKey = "user-gemini", groqKey = "user-groq"), vault.loadLlmKeys())
+        val reloaded = TokenStore()
+        vault.loadInto(reloaded)
+        assertEquals(null, reloaded.gmailAccessToken)
+        assertEquals(null, reloaded.gmailRefreshToken)
+        assertEquals(null, reloaded.gmailAccount)
+    }
+
+    @Test
     fun userKeysOverrideBuildConfigKeys() {
         val base =
             ProviderSettings(

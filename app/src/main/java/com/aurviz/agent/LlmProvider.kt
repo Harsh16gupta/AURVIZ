@@ -25,91 +25,63 @@ interface LlmProvider {
 
 /** Demo Tool: read-only, safe for the spike. Real Tools land in T3+. */
 fun demoToolSchema(): JSONObject =
-    JSONObject()
-        .put("type", "function")
-        .put(
-            "function",
-            JSONObject()
-                .put("name", "getImportantEmails")
-                .put("description", "Fetch unread important emails.")
-                .put(
-                    "parameters",
-                    JSONObject()
-                        .put("type", "object")
-                        .put(
-                            "properties",
-                            JSONObject().put("max_results", JSONObject().put("type", "integer")),
-                        )
-                        .put("required", JSONArray().put("max_results")),
-                ),
-        )
+    toolSchema(
+        "getImportantEmails",
+        "Fetch unread important emails.",
+        JSONObject()
+            .put("type", "object")
+            .put(
+                "properties",
+                JSONObject().put("max_results", JSONObject().put("type", "integer")),
+            )
+            .put("required", JSONArray().put("max_results")),
+    )
 
 /** Scheduling Tool: the LLM proposes WHAT + WHEN in words; the app parses
  *  the time with its tested parser and shows a preview for Confirm.
  *  The LLM never sets alarms itself — same Confirm gate as email send
  *  (ADR-0003: requiresConfirmation). */
 fun scheduleToolSchema(): JSONObject =
-    JSONObject()
-        .put("type", "function")
-        .put(
-            "function",
-            JSONObject()
-                .put("name", "create_schedule")
-                .put("description", "Save a recurring routine that runs later. Split the request into WHAT to do (task) and WHEN it runs (when, in the user's own words).")
-                .put(
-                    "parameters",
-                    JSONObject()
-                        .put("type", "object")
-                        .put(
-                            "properties",
-                            JSONObject()
-                                .put("task", JSONObject().put("type", "string").put("description", "What the routine does, e.g. read emails"))
-                                .put("when", JSONObject().put("type", "string").put("description", "When it runs, in the user's own words, e.g. at 2:38 a.m.")),
-                        )
-                        .put("required", JSONArray().put("task").put("when")),
-                ),
-        )
+    toolSchema(
+        "create_schedule",
+        "Save a recurring routine that runs later. Split the request into WHAT to do (task) and WHEN it runs (when, in the user's own words).",
+        JSONObject()
+            .put("type", "object")
+            .put(
+                "properties",
+                JSONObject()
+                    .put("task", JSONObject().put("type", "string").put("description", "What the routine does, e.g. read emails"))
+                    .put("when", JSONObject().put("type", "string").put("description", "When it runs, in the user's own words, e.g. at 2:38 a.m.")),
+            )
+            .put("required", JSONArray().put("task").put("when")),
+    )
 
 /** Scheduling Tool: read-only list, no Confirmation (ADR-0003: reads,
  *  searches, and lists are ungated). */
 fun listSchedulesToolSchema(): JSONObject =
-    JSONObject()
-        .put("type", "function")
-        .put(
-            "function",
-            JSONObject()
-                .put("name", "list_schedules")
-                .put("description", "List the saved recurring routines with their ids, instructions, and times.")
-                .put(
-                    "parameters",
-                    JSONObject()
-                        .put("type", "object")
-                        .put("properties", JSONObject()),
-                ),
-        )
+    toolSchema(
+        "list_schedules",
+        "List the saved recurring routines with their ids, instructions, and times.",
+        JSONObject()
+            .put("type", "object")
+            .put("properties", JSONObject()),
+    )
 
 /** Scheduling Tool: deleting a routine is state-changing, so it carries
  *  the same Confirm gate as creation (ADR-0003: requiresConfirmation). */
 fun cancelScheduleToolSchema(): JSONObject =
-    JSONObject()
-        .put("type", "function")
-        .put(
-            "function",
-            JSONObject()
-                .put("name", "cancel_schedule")
-                .put("description", "Delete a saved recurring routine. Use the schedule_id from list_schedules.")
-                .put(
-                    "parameters",
-                    JSONObject()
-                        .put("type", "object")
-                        .put(
-                            "properties",
-                            JSONObject()
-                                .put("schedule_id", JSONObject().put("type", "string").put("description", "The routine id, e.g. sched_1")),
-                        )
-                        .put("required", JSONArray().put("schedule_id")),
-                ),
-        )
+    toolSchema(
+        "cancel_schedule",
+        "Delete a saved recurring routine. Use the schedule_id from list_schedules.",
+        JSONObject()
+            .put("type", "object")
+            .put(
+                "properties",
+                JSONObject()
+                    .put("schedule_id", JSONObject().put("type", "string").put("description", "The routine id, e.g. sched_1")),
+            )
+            .put("required", JSONArray().put("schedule_id")),
+    )
 
 fun allToolSchemas(): JSONArray =
     JSONArray()
@@ -192,7 +164,7 @@ fun llmHttpClient(): OkHttpClient =
         .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
         .build()
 
-/** OpenAI-shape chat/completions client. Covers Gemini compat, Groq, DeepSeek. */
+/** OpenAI-shape chat/completions client. Covers Gemini compat and Groq. */
 class OpenAiChatProvider(
     private val baseUrl: String,
     private val apiKey: String,
@@ -231,12 +203,6 @@ object Providers {
     fun default(): LlmProvider =
         when (BuildConfig.LLM_DEFAULT_PROVIDER) {
             "groq" -> OpenAiChatProvider(GROQ_BASE_URL, BuildConfig.GROQ_API_KEY, BuildConfig.GROQ_MODEL)
-            "deepseek" ->
-                OpenAiChatProvider(
-                    BuildConfig.DEEPSEEK_BASE_URL,
-                    BuildConfig.DEEPSEEK_API_KEY,
-                    "deepseek-chat",
-                )
             else -> OpenAiChatProvider(GEMINI_BASE_URL, BuildConfig.GEMINI_API_KEY, BuildConfig.GEMINI_MODEL)
         }
 }

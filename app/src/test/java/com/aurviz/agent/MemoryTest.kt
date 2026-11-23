@@ -64,18 +64,6 @@ class MemoryTest {
     }
 
     @Test
-    fun offlineQueueReplaysOnceWithoutDuplicates() {
-        val store = InMemoryStore()
-        val outbox = Outbox()
-        outbox.queue("my boss is Priya", "you told me")
-        outbox.queue("standup at 9am", "you told me")
-        assertEquals(2, outbox.replay(store))
-        assertEquals(1, recallFor(store, "who is my boss?").size)
-        assertEquals(0, outbox.replay(store))
-        assertEquals(2, store.list().size)
-    }
-
-    @Test
     fun recallRanksHigherWordOverlapFirst() {
         val store = InMemoryStore()
         rememberFact(store, "my boss is Priya", source = "you told me")
