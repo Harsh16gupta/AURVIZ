@@ -94,7 +94,119 @@ fun rejectPendingApproval(
 // Tool names that never run unattended. Attempts reach this set either as
 // gate-refusals (registered but gated) or as unknown-tool failures (absent
 // from the read-only registry) — both without touching the transport.
+// Ticket #67 carves the single bounded exception: a send_email whose
+// arguments exactly match a creation-time ScheduledSendConsent for the
+// owning schedule (plus SendPolicy) runs headless; everything else holds.
+// This contradicts the letter of ADR-0002/0003 ("never executes"); the ADR
+// amendment lands in #70, flagged here per AGENTS.md instead of silently
+// overriding.
 val SCHEDULED_SENSITIVE_TOOLS = setOf("send_email", "create_schedule", "cancel_schedule")
+
+// --- Ticket #67: bounded creation-time consent for scheduled sends. ---
+// Granted when the user approves a Schedule whose routine sends exactly one
+// templated email (exact recipient set + subject/body template + owning
+// Schedule id). Fire-time re-validates the exact match plus the
+// deterministic SendPolicy with no human present: exact match runs, any
+// drift (recipient, bulk expansion, subject/body, policy deny) defers to
+// PendingApproval. Revocable via revoke(); scoped by scheduleId so consent
+// never leaks across routines.
+data class ScheduledSendConsent(
+    val scheduleId: String,
+    val recipients: Set<String>,
+    val subject: String,
+    val body: String,
+)
+
+interface ScheduledConsentStore {
+    fun save(consent: ScheduledSendConsent): ScheduledSendConsent
+    fun find(scheduleId: String): ScheduledSendConsent?
+    fun revoke(scheduleId: String)
+    fun list(): List<ScheduledSendConsent>
+}
+
+class InMemoryScheduledConsentStore : ScheduledConsentStore {
+    private val items = mutableMapOf<String, ScheduledSendConsent>()
+
+    @Synchronized
+    override fun save(consent: ScheduledSendConsent): ScheduledSendConsent {
+        items[consent.scheduleId] = consent
+        return consent
+    }
+
+    @Synchronized
+    override fun find(scheduleId: String): ScheduledSendConsent? = items[scheduleId]
+
+    @Synchronized
+    override fun revoke(scheduleId: String) {
+        items.remove(scheduleId)
+    }
+
+    @Synchronized
+    override fun list(): List<ScheduledSendConsent> = items.values.toList()
+}
+
+/** Normalize one address for comparison: trimmed + lowercase. */
+fun normalizeConsentRecipient(address: String): String = address.trim().lowercase()
+
+/** The recipient set of a send_email call: "to" split on commas. */
+fun consentCallRecipients(args: Map<String, Any?>): Set<String> =
+    (args["to"] as? String).orEmpty().split(",").map { normalizeConsentRecipient(it) }.filter { it.isNotEmpty() }.toSet()
+
+/** Exact-match check: same recipient set, byte-identical subject and body. */
+fun consentMatches(consent: ScheduledSendConsent, args: Map<String, Any?>): Boolean {
+    if (consentCallRecipients(args) != consent.recipients) return false
+    if ((args["subject"] as? String) != consent.subject) return false
+    if ((args["body"] as? String) != consent.body) return false
+    return true
+}
+
+private fun consentDraftOf(args: Map<String, Any?>): EmailDraft? {
+    val to = (args["to"] as? String).orEmpty().split(",").map { it.trim() }.filter { it.isNotEmpty() }
+    val subject = args["subject"] as? String ?: return null
+    val body = args["body"] as? String ?: return null
+    if (to.isEmpty()) return null
+    return EmailDraft(to = to, subject = subject, body = body)
+}
+
+private fun consentPolicyAllows(args: Map<String, Any?>, policy: SendPolicy): Boolean {
+    val draft = consentDraftOf(args) ?: return false
+    if (draft.to.any(::headerValueHasNewline) || headerValueHasNewline(draft.subject)) return false
+    return policy.check(draft) is SendPolicyVerdict.Allow
+}
+
+/**
+ * Creation-time grant: persists only plausible, non-blank consent.
+ * Returns the saved consent, or null when refused (implausible address,
+ * blank subject/body — nothing persisted).
+ */
+fun grantScheduledSendConsent(
+    store: ScheduledConsentStore,
+    scheduleId: String,
+    recipients: Set<String>,
+    subject: String,
+    body: String,
+): ScheduledSendConsent? {
+    if (scheduleId.isBlank()) return null
+    val normalized = recipients.map { normalizeConsentRecipient(it) }.filter { it.isNotEmpty() }.toSet()
+    if (normalized.isEmpty()) return null
+    if (normalized.any { !isPlausibleEmail(it) }) return null
+    if (subject.isBlank() || body.isBlank()) return null
+    val consent = ScheduledSendConsent(scheduleId, normalized, subject, body)
+    store.save(consent)
+    return consent
+}
+
+fun isConsentedSend(
+    call: ToolCall,
+    scheduleId: String,
+    consents: ScheduledConsentStore,
+    policy: SendPolicy = DefaultSendPolicy(),
+): Boolean {
+    if (call.name != "send_email") return false
+    val consent = consents.find(scheduleId) ?: return false
+    if (!consentMatches(consent, call.arguments)) return false
+    return consentPolicyAllows(call.arguments, policy)
+}
 
 // One unattended run: the loop with a never-approving Confirmation hook,
 // then every sensitive attempt the model made is held as a PendingApproval
@@ -262,12 +374,37 @@ fun isGmailAuthFailure(error: String): Boolean {
 // from the refusal like any structured error) but is forced through
 // the Confirmation gate with neutered executors, so even a caller that
 // skips the gate cannot reach the real transport or store.
-fun scheduledRegistry(full: ToolRegistry): ToolRegistry {
+// Ticket #67: when scheduleId + consents are supplied, send_email carries
+// a consent-aware approvedExecute — the fire-time judge approves only the
+// exact match, and the executor re-checks consent + policy defensively so
+// a forged Approved without consent still cannot reach the transport.
+fun scheduledRegistry(
+    full: ToolRegistry,
+    scheduleId: String? = null,
+    consents: ScheduledConsentStore? = null,
+    sendPolicy: SendPolicy = DefaultSendPolicy(),
+): ToolRegistry {
     val out = ToolRegistry()
     for (name in full.names()) {
         val definition = full.find(name) ?: continue
         if (name in SCHEDULED_RUN_ALLOWLIST) {
             out.register(definition)
+        } else if (name == "send_email" && scheduleId != null && consents != null) {
+            val realApproved = definition.approvedExecute
+            out.register(
+                definition.copy(
+                    requiresConfirmation = true,
+                    execute = { blockedScheduledTool(name) },
+                    approvedExecute = { args ->
+                        val consent = consents.find(scheduleId)
+                        if (consent != null && consentMatches(consent, args) && consentPolicyAllows(args, sendPolicy)) {
+                            realApproved?.invoke(args) ?: blockedScheduledTool(name)
+                        } else {
+                            blockedScheduledTool(name)
+                        }
+                    },
+                ),
+            )
         } else {
             out.register(
                 definition.copy(
@@ -387,18 +524,22 @@ fun runScheduledRoutine(
     registry: ToolRegistry,
     runs: ScheduleRunStore,
     approvals: PendingApprovalStore,
+    consents: ScheduledConsentStore = InMemoryScheduledConsentStore(),
+    sendPolicy: SendPolicy = DefaultSendPolicy(),
     nowMs: () -> Long = System::currentTimeMillis,
 ): ScheduledRunOutcome {
     val startMs = nowMs()
     fun executeWithPid(pid: Long): ScheduledRunOutcome {
         val blockedCalls = mutableListOf<ToolCall>()
-    val readOnly = scheduledRegistry(registry)
+    val readOnly = scheduledRegistry(registry, schedule.id, consents, sendPolicy)
     val loop =
         AgentLoop(
             llm,
             readOnly,
             confirm = { call ->
                 if (call.name in SCHEDULED_RUN_ALLOWLIST) {
+                    ApprovalDecision.Approved
+                } else if (call.name == "send_email" && isConsentedSend(call, schedule.id, consents, sendPolicy)) {
                     ApprovalDecision.Approved
                 } else {
                     blockedCalls += call

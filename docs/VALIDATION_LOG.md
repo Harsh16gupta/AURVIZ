@@ -258,3 +258,33 @@ Every case where the AI was wrong and how it was caught. Add an entry with file:
 - Note: auto-approve without suspending contradicts ADR-0003's letter
   ("suspends the loop until the UI returns approve, edit, or reject") —
   permitted by spec #65 Q5; ADR amendment lands in #70, not here.
+
+## 2026-11-24 — Issue #67 T2 scheduled hold plus bounded creation consent (`main`)
+
+- **Working tree carried uncommitted work beyond the handoff list.**
+  `HANDOFF.md §7` listed only `GLOSSARY.md`, `HANDOFF.md`,
+  `architecture-deep-dive.html`, `docs/AURVIZ_EVOLUTION_PLAN.md`, but the
+  tree also held ticket-1/2 edits (`Schedule.kt`, `ScheduleAlarm.kt`,
+  `ScheduleDb.kt`, `AgentViewModel.kt`, new `ScheduleIds.kt`, later also
+  `ScheduleWork.kt`, `ScheduleRuntime.kt` appearing mid-session). A full
+  `cleanTestDebugUnitTest` exposed it: `AgentViewModel.kt:1044` referenced
+  `onApprovedWrite`/`ScheduleSideEffect` without an import, so the clean
+  build failed while the incremental build stayed green on cache. Verified
+  #67 in isolation by stashing the foreign paths, then restoring them
+  untouched — the #67 commit holds only `ScheduledRun.kt`,
+  `ScheduledConsentTest.kt`, and this log.
+- **Foreign hunk inside the ticket file.** `ScheduledRun.kt:46` carried the
+  ticket-1 codec (`ScheduleIds.approvalId(nextId)`) interleaved with the
+  #67 hunks, making the ticket depend on the uncommitted `ScheduleIds.kt`.
+  Reverted that one line to HEAD (`"approval_$nextId"`) so #67 compiles
+  and passes standalone; ticket-1 keeps its hunk on its own path.
+- Tests: new `ScheduledConsentTest` (18 tests: allowlist reads, held
+  writes, exact-match run, recipient/bulk/subject/body drift defer, policy
+  deny defer, schedule-write never consented, cross-schedule isolation,
+  double-fire + double-approve exactly-once, grant validation,
+  cron/timezone edges, expired-token reconnect, revoke). Full
+  `:app:testDebugUnitTest` green (384 tests, 0 failures). No UI touched,
+  so no `assembleDebug` per the ticket rule.
+- Note: the bounded exact-match exception contradicts ADR-0002 ("never
+  executed") and ADR-0003 ("never holds the send tool") — flagged in
+  `ScheduledRun.kt` per AGENTS.md; the amendment lands in #70, not here.
