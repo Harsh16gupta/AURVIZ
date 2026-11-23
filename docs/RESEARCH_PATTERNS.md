@@ -13,7 +13,7 @@ see §4). Claims I could not verify are marked **[UNVERIFIED]**.
 | 1 | https://github.com/google/adk-kotlin | 309 | 2026-11-21 | Apache-2.0 | yes | `requireConfirmation` gate shape; boolean vs dynamic vs advanced confirmation; remote-confirmation REST pattern |
 | 2 | https://github.com/JetBrains/Koog | 4668 | 2026-11-10 | Apache-2.0 | yes | Graph strategy `singleRunStrategy` loop shape; chat-memory + SQL persisters; `agents-test` module pattern |
 | 3 | https://github.com/googlesamples/mlkit (`android/genai` demo) | 4310 | 2026-10-26 | Apache-2.0 | yes | `HitlConfirmationTool` decorator; `maxTurns` cap (default 6); three tool modes incl. scoped allowlist |
-| 4 | https://github.com/Liquid4All/cookbook (`examples/AndroidAgent`) | 2794 | 2026-11-17 | **none found (no LICENSE file)** | yes | Minimal loop shape only — **do not copy code** (unlicensed) |
+| 4 | https://github.com/Liquid4All/cookbook (`examples/AndroidAgent`) | 2794 | 2026-11-17 | none covering AndroidAgent (LICENSE files exist only under `examples/localcowork`, `examples/telco-triage-ios`) | yes | Minimal loop shape only — **do not copy code** (unlicensed) |
 | 5 | https://github.com/langchain4j/langchain4j | 13434 | 2026-11-22 | Apache-2.0 | yes | `ChatMemoryStore` seam; guardrail/approval-in-tool-code idiom (via docs, not verified in code) |
 | 6 | https://github.com/ghost-in-the-droid/android-agent | 431 | 2026-11-15 | MIT | yes | HITL-at-checkpoint pattern (person solves captcha, agent continues); skill-scoped tool surface |
 
@@ -100,7 +100,7 @@ results, `tool_call_id` matching — i.e. Liquid's shape plus the timeouts/gatin
   Closest: ADK `Resume` + REST confirmation (re-inject `FunctionResponse` with
   `invocation_id`; `adk.dev/runtime/resume/`), and ghost android-agent's background operation
   claim (internals **[UNVERIFIED]**). Our `ScheduledRun.kt` (idempotency claim-first,
-  `scheduledRegistry` read-only view, headless reject-and-record confirmer, `schedule_runs`
+  `scheduledRegistry` read-only view, scheduled-run reject-and-record confirmer, `schedule_runs`
   + `PendingApproval` rows) has no direct model among the six — keep it; it is the
   differentiator, not the gap.
 
@@ -168,7 +168,7 @@ gaps.md's baseline (`3fcfbff`) predates the current tree. Verified status of its
 | gaps.md item | HEAD status |
 |---|---|
 | A AgentLoop + ToolRegistry | DONE (`AgentLoop.kt`, `ToolRegistry.kt`, 24 test files incl. `RedTeamTest`, `ScheduledRunTest`) |
-| B 13-tool surface | Registry DONE; **production wiring NOT done** → NG-1 |
+| B 13-tool surface (14 registered incl. legacy demo `getImportantEmails`) | Registry DONE; **production wiring NOT done** → NG-1 |
 | C confirmation decorator | DONE (`executeGated`, approval cards, `approvePendingSend/rejectPendingSend`) |
 | D real scheduled run | DONE (`ScheduledRun.kt`, `schedule_runs` + `PendingApproval`, expedited unique worker, AUTH_ERROR note) |
 | E injection defences | DONE (system framing, `DefaultSendPolicy`, source tags, red-team) + NG-4 hardening |
@@ -180,15 +180,22 @@ gaps.md's baseline (`3fcfbff`) predates the current tree. Verified status of its
 
 New gaps (not in gaps.md):
 
-- **NG-1 (HIGH). Production LLM sees 4 tools, registry has 13.**
+- **NG-1 (HIGH). Production LLM sees 4 tools, registry has 14.**
   `OpenAiChatProvider.plan` builds the request with `allToolSchemas()` (`LlmProvider.kt:205`);
   `ToolRegistry.toolSchemas()` (`ToolRegistry.kt:130`) has no production caller, and
   `planWithFallback` → `provider.plan` is the only LLM seam for both `FallbackChatLlm`
-  (`AgentViewModel.kt:139`) and `HeadlessChatLlm` (`ScheduledRun.kt:214`). The model can
-  therefore never emit `send_email`/`search_emails`/`read_email`/web/memory calls in
-  production; the approval-card and send-policy paths are unreachable with a real provider.
+  (`AgentViewModel.kt:139`) and `HeadlessChatLlm` (`ScheduledRun.kt:214`). The other tools are
+  therefore not advertised, so the `send_email`, memory, and web tool paths are unreachable
+  with a real provider (schedule-tool approvals still work — `create_schedule` is advertised
+  and gated). 13 is the intended LLM-visible set per gaps.md §3B (excl. legacy demo
+  `getImportantEmails`). `LlmProviderTest.kt:117` only asserts the four legacy names are
+  present (contains-checks, not an exact count or request inspection), so it constrains
+  nothing about additional tools; test fakes reference these seams in fallback/ViewModel
+  tests, so a `plan()` signature change may ripple beyond pure `AgentLoop` tests.
   Ticket: thread the calling registry's `toolSchemas()` through `plan()` (or pass tools into
-  `planWithFallback`) and retire `allToolSchemas` from the request path.
+  `planWithFallback`) — scheduled runs must receive `scheduledRegistry(full).toolSchemas()`,
+  not the unrestricted registry's — add a request-path test proving supplied schemas reach
+  the serialized request, and keep `allToolSchemas` only as an explicit fallback if at all.
 - **NG-2 (HIGH). Foreground loop registry has no WebBridge.**
   Both production `defaultToolRegistry(...)` calls (`AgentViewModel.kt:332,733`) omit
   `webBridge` (field exists, `AgentViewModel.kt:166`, attached at `:185`), so all five web
@@ -224,7 +231,7 @@ Koog/langchain4j internals beyond cited files.
 - WorkManager periodic for exact times (inexact under Doze; ADR-0002).
 - Whole-Plan pre-approval (decided: per-tool-call; GLOSSARY + ADR-0003).
 - DeepSeek/Meta keys, silent mid-conversation fallback (ADR-0004; NG-6 cleans the remnant).
-- Copy Liquid cookbook code (no license file found — ideas only).
+- Copy Liquid cookbook code (no license covers `examples/AndroidAgent` — ideas only).
 - Adopt CaMeL/research-artifact defenses as the security boundary (authors warn it may contain
   bugs; keep our registry gate + policy + HITL).
 - Prompt-level-only "protections" (OWASP: screening is not a boundary; enforce in code).
@@ -233,7 +240,7 @@ Koog/langchain4j internals beyond cited files.
 ## 6. Five changes worth most in the next 48h
 
 1. **Wire registry schemas into the LLM request (NG-1).** Nothing else matters until the model
-   can see the tools; all approval/policy UI is currently unreachable in production.
+   can see the tools; the send, memory, and web approval/policy paths are unreachable in production.
 2. **Pass the WebBridge into the loop registry (NG-2).** Five registered tools are dead
    without it.
 3. **Delete or rewire `Planner.kt` (NG-3).** Two vocabularies for tool names will bite the demo.
