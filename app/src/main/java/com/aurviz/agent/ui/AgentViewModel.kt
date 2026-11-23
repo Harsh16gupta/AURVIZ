@@ -48,6 +48,7 @@ import com.aurviz.agent.WebPage
 import com.aurviz.agent.WebException
 import com.aurviz.agent.BrowserRoute
 import com.aurviz.agent.allToolSchemas
+import com.aurviz.agent.appendSessionTurn
 import com.aurviz.agent.routeBrowserUrl
 import com.aurviz.agent.approvalCardFor
 import com.aurviz.agent.approvePendingApproval
@@ -261,6 +262,21 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
     // The currently running loop/command coroutine — cancelRun() stops it.
     private var activeJob: Job? = null
     private var interactionSeq = 0L
+
+    // Issue #51: in-memory Session transcript (ChatGPT-style thread).
+    // Turns inside one Session share context; a new Session starts empty.
+    // Scheduled runs never read this — they stay stateless.
+    private var activeSessionId: String = "s_${System.currentTimeMillis()}"
+    private val sessionTranscript = mutableListOf<ChatMessage>()
+
+    // Start a fresh Session thread: drop short-term context, keep Room
+    // Memory (long-term) untouched. The next command runs cold.
+    fun startNewSession() {
+        if (state.value.agentRunning) return
+        sessionTranscript.clear()
+        activeSessionId = "s_${System.currentTimeMillis()}"
+        _state.update { it.copy(sessionId = activeSessionId, sessionTurns = 0) }
+    }
 
     // Confirmation receipt fields stamped while a Task Execution is still
     // in flight (approve/reject lands before the run completes). Folded
@@ -1286,10 +1302,15 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                 // Ticket 16/29: memories ride in the loop's delimited system
                 // section via recallFor — never concatenated into the command.
                 // Top 5 only, matching the benchmarked prompt budget.
+                // Issue #51: thread history + signed-in identity ride too;
+                // scheduled runs never enter runLoopCommand so they stay cold.
                 val memories = recallFor(roomStore, cmd).take(5)
                 _state.update { it.copy(activeRecalledMemories = memories.map { m -> m.text }) }
-                when (val result = loop.run(cmd, memories)) {
+                val history = synchronized(sessionTranscript) { sessionTranscript.toList() }
+                val accountEmail = tokens.gmailAccount ?: state.value.gmailAccount
+                when (val result = loop.run(cmd, memories, accountEmail, history)) {
                     is AgentLoopResult.Answered -> {
+                        synchronized(sessionTranscript) { appendSessionTurn(sessionTranscript, cmd, result) }
                         val tried = chat.tried.toList()
                         val used = chat.lastProvider
                         val disclosure =
@@ -1305,11 +1326,14 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                                 pendingApprovalProposalId = null,
                                 pendingApprovalUnseen = emptyList(),
                                 perf = it.perf.copy(planMs = System.currentTimeMillis() - runT0),
+                                sessionId = activeSessionId,
+                                sessionTurns = synchronized(sessionTranscript) { sessionTranscript.size / 2 },
                             )
                         }
                         recordCompleted(responseText = result.answer)
                     }
                     is AgentLoopResult.Failed -> {
+                        synchronized(sessionTranscript) { appendSessionTurn(sessionTranscript, cmd, result) }
                         _state.update {
                             it.copy(
                                 statusLine = "Command: $cmd\nFailed: ${result.error}",
@@ -1320,6 +1344,8 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                                 pendingApprovalProposalId = null,
                                 pendingApprovalUnseen = emptyList(),
                                 perf = it.perf.copy(planMs = System.currentTimeMillis() - runT0),
+                                sessionId = activeSessionId,
+                                sessionTurns = synchronized(sessionTranscript) { sessionTranscript.size / 2 },
                             )
                         }
                         recordCompleted(responseText = "Failed: ${result.error}", failed = true)

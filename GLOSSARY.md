@@ -26,7 +26,11 @@ _Avoid_: Setting, option
 
 **Interaction**:
 Record of one past command, its plan, and its outcome.
-_Avoid_: Session, chat log
+_Avoid_: chat log
+
+**Session**:
+Sequence of Interactions sharing one short-term transcript. Turns inside one Session resolve follow-ups against each other; a new Session starts with an empty transcript. Memory stays available to every Session.
+_Avoid_: chat log
 
 **Schedule**:
 A recurring instruction with cron-like timing. At fire time an exact alarm enqueues an expedited unique Worker that runs the agent loop with the read-only tool allowlist — never the send tool.
