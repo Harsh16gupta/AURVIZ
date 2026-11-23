@@ -77,6 +77,8 @@ data class AgentUiState(
     // The key values themselves never enter UI state — only these flags.
     val geminiKeySet: Boolean = false,
     val groqKeySet: Boolean = false,
+    val deepseekKeySet: Boolean = false,
+    val metaKeySet: Boolean = false,
     val sending: Boolean = false,
     // P0 single-flight: one Task Execution at a time. While true the
     // Composer sends nothing so a second command cannot replace the open

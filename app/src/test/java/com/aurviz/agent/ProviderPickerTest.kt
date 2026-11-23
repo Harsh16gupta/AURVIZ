@@ -28,18 +28,61 @@ class ProviderPickerTest {
 
     @Test
     fun unknownNameFallsBackToGemini() {
-        val config = resolveProvider("meta", settings())
+        val config = resolveProvider("not-a-provider", settings())
         assertEquals("gemini", config.name)
         assertEquals("https://generativelanguage.googleapis.com/v1beta/openai", config.baseUrl)
     }
 
     @Test
-    fun droppedDeepseekNameFallsBackToGemini() {
-        // ADR-0004: DeepSeek is unwired — the name no longer resolves and
-        // must fall back to Gemini like any other unknown name.
-        val config = resolveProvider("deepseek", settings())
-        assertEquals("gemini", config.name)
-        assertEquals("gemini-key", config.apiKey)
+    fun deepseekNameUsesDeepSeekAddressKeyModel() {
+        val deepseekSettings = settings().copy(
+            deepseekKey = "deepseek-key",
+            deepseekModel = "deepseek-flash",
+        )
+        val config = resolveProvider("deepseek", deepseekSettings)
+        assertEquals("deepseek", config.name)
+        assertEquals("https://api.deepseek.com", config.baseUrl)
+        assertEquals("deepseek-key", config.apiKey)
+        assertEquals("deepseek-flash", config.model)
+    }
+
+    @Test
+    fun metaNameUsesMetaAddressKeyModel() {
+        val metaSettings = settings().copy(
+            metaKey = "meta-key",
+            metaModel = "muse-spark-1.3",
+        )
+        val config = resolveProvider("meta", metaSettings)
+        assertEquals("meta", config.name)
+        assertEquals("https://api.meta.ai/v1", config.baseUrl)
+        assertEquals("meta-key", config.apiKey)
+        assertEquals("muse-spark-1.3", config.model)
+    }
+
+    @Test
+    fun defaultCandidatesOrdersShippedPairGeminiFirst() {
+        // ADR-0004 amended: DeepSeek + Meta are now wired alongside Gemini/Groq.
+        val candidates = defaultCandidates("gemini", LlmKeys(geminiKey = "g", groqKey = "q", deepseekKey = "d", metaKey = "m"))
+        assertEquals(listOf("gemini", "deepseek", "meta", "groq"), candidates.map { it.name })
+    }
+
+    @Test
+    fun defaultCandidatesPutsPreferredShippedProviderFirst() {
+        val candidates = defaultCandidates("groq", LlmKeys(geminiKey = "g", groqKey = "q", deepseekKey = "d", metaKey = "m"))
+        assertEquals(listOf("groq", "deepseek", "meta", "gemini"), candidates.map { it.name })
+    }
+
+    @Test
+    fun defaultCandidatesIncludesDeepSeekAndMeta() {
+        // ADR-0004 amended: DeepSeek and direct Meta are now wired providers.
+        for (preferred in listOf("gemini", "groq", "deepseek", "meta")) {
+            val names = defaultCandidates(preferred, LlmKeys(geminiKey = "g", groqKey = "q", deepseekKey = "d", metaKey = "m")).map { it.name }
+            assertTrue("preferred=$preferred -> $names", "deepseek" in names)
+            assertTrue("preferred=$preferred -> $names", "meta" in names)
+            assertEquals(preferred, names.first())
+        }
+        val blankNames = defaultCandidates("  ", LlmKeys(geminiKey = "g", groqKey = "q", deepseekKey = "d", metaKey = "m")).map { it.name }
+        assertEquals("gemini", blankNames.first())
     }
 
     private fun successOn(name: String): NamedProvider {

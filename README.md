@@ -25,17 +25,23 @@ sends as in-app approvals. Room-only memory; no cloud memory provider.
 ## `local.properties.sample`
 
 ```properties
-LLM_DEFAULT_PROVIDER=gemini
+LLM_DEFAULT_PROVIDER=deepseek
 GEMINI_API_KEY=
 GEMINI_MODEL=gemini-2.5-flash
 GROQ_API_KEY=
 GROQ_MODEL=llama-3.1-8b-instant
+DEEPSEEK_API_KEY=
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_MODEL=deepseek-flash
+META_API_KEY=
+META_BASE_URL=https://api.meta.ai/v1
+META_MODEL=muse-spark-1.3
 GOOGLE_OAUTH_CLIENT_ID=
 GOOGLE_OAUTH_CLIENT_SECRET=
 ```
 
 Debug builds compile these keys into `BuildConfig`. **Release builds always
-compile with empty API-key fields** — release users paste Gemini/Groq keys in
+compile with empty API-key fields** — release users paste Gemini/Groq/DeepSeek/Meta keys in
 Settings, stored encrypted in `TokenVault` on-device (ticket 36).
 
 ## Build
@@ -44,7 +50,7 @@ Settings, stored encrypted in `TokenVault` on-device (ticket 36).
 - Release (empty keys, verified ticket 37): `./gradlew :app:assembleRelease`
   → `app/build/outputs/apk/release/app-release-unsigned.apk` (~6.7 MB).
   Release `BuildConfig` fields `GEMINI_API_KEY`, `GROQ_API_KEY`,
-  `DEEPSEEK_API_KEY` are all `""`; OAuth IDs are `""` unless provided.
+  `DEEPSEEK_API_KEY`, `META_API_KEY` are all `""`; OAuth IDs are `""` unless provided.
 
 ## Test
 
@@ -66,9 +72,10 @@ Settings, stored encrypted in `TokenVault` on-device (ticket 36).
 - **#32 memory embeddings: cut.** Retrieval is keyword + importance/recency
   boosts with an offline FTS fallback (`Memory.kt`). No embedding column,
   no cosine ranking, no embedding cache.
-- **DeepSeek fallback still wired in code** (`ProviderPicker.kt`,
-  `LlmProvider.kt`) although ADR-0004 declares Groq the single fallback —
-  recorded as drift in `docs/VALIDATION_LOG.md`, not removed in this ticket.
+- **DeepSeek + Meta wired** (ADR-0004 re-amended 2026-11-23, issue #46):
+  DeepSeek (`deepseek-flash`) is the default with Gemini/Groq/Meta
+  (`muse-spark-1.3`) fallbacks over the shared OpenAI-compatible client.
+  Keys live in `TokenVault` + Settings; choice stays config-only.
 - **No TTS replies; no per-schedule run-now button** (P2, cut per gaps §5).
 - **No provider picker UI** — provider choice is config-only per ADR-0004.
 - **On-device scheduling proof + profiler screenshot** need a human device

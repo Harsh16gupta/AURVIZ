@@ -3,8 +3,8 @@
 ## How to run
 
 - `export ANDROID_HOME=$HOME/Library/Android/sdk`
-- `./gradlew :app:testDebugUnitTest` — NG-5: **340 tests, 0 failures**
-  (31 classes incl. `BrowserPolicyTest`; 336 at the 3-bracket landing).
+- `./gradlew :app:testDebugUnitTest` — DeepSeek re-wire (#46): **344 tests, 0 failures**
+  (31 classes incl. `BrowserPolicyTest`; 340 at NG-5).
 - Reports: `app/build/test-results/testDebugUnitTest/*.xml`.
 
 ## Coverage by area (representative, not exhaustive)

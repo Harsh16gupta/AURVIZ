@@ -26,9 +26,13 @@ android {
         versionCode = 1
         versionName = "0.1-t1"
 
-        buildConfigField("String", "LLM_DEFAULT_PROVIDER", "\"${prop("LLM_DEFAULT_PROVIDER", "gemini")}\"")
+        buildConfigField("String", "LLM_DEFAULT_PROVIDER", "\"${prop("LLM_DEFAULT_PROVIDER", "deepseek")}\"")
         buildConfigField("String", "GEMINI_MODEL", "\"${prop("GEMINI_MODEL", "gemini-2.5-flash")}\"")
         buildConfigField("String", "GROQ_MODEL", "\"${prop("GROQ_MODEL", "llama-3.1-8b-instant")}\"")
+        buildConfigField("String", "DEEPSEEK_BASE_URL", "\"${prop("DEEPSEEK_BASE_URL", "https://api.deepseek.com")}\"")
+        buildConfigField("String", "DEEPSEEK_MODEL", "\"${prop("DEEPSEEK_MODEL", "deepseek-flash")}\"")
+        buildConfigField("String", "META_BASE_URL", "\"${prop("META_BASE_URL", "https://api.meta.ai/v1")}\"")
+        buildConfigField("String", "META_MODEL", "\"${prop("META_MODEL", "muse-spark-1.3")}\"")
         buildConfigField("String", "GOOGLE_OAUTH_CLIENT_ID", "\"${prop("GOOGLE_OAUTH_CLIENT_ID")}\"")
         buildConfigField("String", "GOOGLE_OAUTH_CLIENT_SECRET", "\"${prop("GOOGLE_OAUTH_CLIENT_SECRET")}\"")
     }
@@ -40,10 +44,14 @@ android {
         debug {
             buildConfigField("String", "GEMINI_API_KEY", "\"${prop("GEMINI_API_KEY")}\"")
             buildConfigField("String", "GROQ_API_KEY", "\"${prop("GROQ_API_KEY")}\"")
+            buildConfigField("String", "DEEPSEEK_API_KEY", "\"${prop("DEEPSEEK_API_KEY")}\"")
+            buildConfigField("String", "META_API_KEY", "\"${prop("META_API_KEY", prop("META_LLAMA_API_KEY", ""))}\"")
         }
         release {
             buildConfigField("String", "GEMINI_API_KEY", "\"\"")
             buildConfigField("String", "GROQ_API_KEY", "\"\"")
+            buildConfigField("String", "DEEPSEEK_API_KEY", "\"\"")
+            buildConfigField("String", "META_API_KEY", "\"\"")
         }
     }
 

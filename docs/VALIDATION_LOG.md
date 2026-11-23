@@ -136,3 +136,22 @@ Every case where the AI was wrong and how it was caught. Add an entry with file:
   was lost to this and re-run. Fires kept ≥3 min apart (Doze quota).
 - Follow-ups live outside the stack: #46 (needs ADR ruling, untouched), #51
   (session-scoped conversational context + "myself" grounding).
+
+## 2026-11-23 — DeepSeek re-wire port (issue #46, reference `8ec669f`)
+
+- **Verification gate passed, suspicion was wrong.** `deepseek-flash` looked
+  like a wrong model ID (legacy IDs are `deepseek-chat`/`deepseek-reasoner`),
+  but current DeepSeek docs list `deepseek-flash` (served by
+  DeepSeek-V4.1-Flash-1017) on OpenAI base `api.deepseek.com` with tool calls;
+  Meta docs list `muse-spark-1.3` on OpenAI base `api.meta.ai/v1` with tool
+  calling. Both fit the shared `OpenAiChatProvider` (`baseUrl + "/chat/completions"`).
+  Caught by web check before wiring instead of assuming.
+- **#46 sketch == `8ec669f` 1:1, but `8ec669f` is NOT in main**
+  (`merge-base --is-ancestor` = NOT IN MAIN, only on `integration/ng-batch`).
+  Ported manually onto fresh `land/deepseek-rewire` from main — never
+  resurrected the stale branch. Dropped stale `README` drift note and
+  `RESEARCH_PATTERNS`/`VALIDATION_LOG` hunks from the reference.
+- **Main had no `defaultCandidates` order tests.** Bracket C unwire left only
+  `droppedDeepseekNameFallsBackToGemini` (`app/src/test/java/com/aurviz/agent/ProviderPickerTest.kt:37-43`);
+  the re-wire adds `deepseekName`/`metaName` + 3 order tests
+  (preferred → deepseek → meta → gemini → groq, blank → gemini).
