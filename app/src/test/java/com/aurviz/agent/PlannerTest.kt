@@ -152,7 +152,7 @@ class PlannerTest {
                         listOf(
                             ToolCall(
                                 "call_1",
-                                "createSchedule",
+                                "create_schedule",
                                 mapOf("task" to "read emails", "when" to "at 2:38 a.m."),
                             ),
                         ),
@@ -162,13 +162,36 @@ class PlannerTest {
         val outcome = planCommand("schedule email read at 2:38 a.m.", provider)
         assertTrue(outcome is PlannerOutcome.Ready)
         val ready = outcome as PlannerOutcome.Ready
-        assertEquals("createSchedule", ready.plan.steps[0].name)
+        assertEquals("create_schedule", ready.plan.steps[0].name)
     }
 
     @Test
     fun createScheduleMissingWhenAsks() {
-        val call = ToolCall("call_1", "createSchedule", mapOf("task" to "read emails"))
+        val call = ToolCall("call_1", "create_schedule", mapOf("task" to "read emails"))
         assertEquals(listOf("when"), missingSlots(call))
+    }
+
+    @Test
+    fun cancelScheduleMissingIdAsks() {
+        val provider =
+            StubLlmProvider(
+                LlmResult(
+                    toolCalls = listOf(ToolCall("call_1", "cancel_schedule", emptyMap())),
+                    content = null,
+                ),
+            )
+        val outcome = planCommand("delete my routine", provider)
+        assertTrue(outcome is PlannerOutcome.NeedsClarification)
+        assertEquals(
+            "Which routine should I delete?",
+            (outcome as PlannerOutcome.NeedsClarification).question,
+        )
+    }
+
+    @Test
+    fun listSchedulesNeedsNoSlots() {
+        val call = ToolCall("call_1", "list_schedules", emptyMap())
+        assertTrue(missingSlots(call).isEmpty())
     }
 
     @Test
@@ -176,7 +199,7 @@ class PlannerTest {
         val provider =
             StubLlmProvider(
                 LlmResult(
-                    toolCalls = listOf(ToolCall("call_1", "createSchedule", mapOf("when" to "at 9AM"))),
+                    toolCalls = listOf(ToolCall("call_1", "create_schedule", mapOf("when" to "at 9AM"))),
                     content = null,
                 ),
             )

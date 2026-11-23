@@ -1,6 +1,7 @@
 package com.aurviz.agent
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -50,14 +51,95 @@ class WebTest {
         assertTrue(js.contains("\\\"hi\\\""))
         assertTrue(js.contains("\\\\ bye") || js.contains("\\\\"))
     }
+
+    @Test
+    fun allowlistPermitsHttpAndHttps() {
+        assertTrue(isAllowedWebUrl("https://example.com"))
+        assertTrue(isAllowedWebUrl("http://example.com/path?q=1"))
+        assertTrue(isAllowedWebUrl("HTTPS://example.com"))
+    }
+
+    @Test
+    fun allowlistBlocksNonHttpAndBareHosts() {
+        assertFalse(isAllowedWebUrl("file:///etc/passwd"))
+        assertFalse(isAllowedWebUrl("FILE:///etc/passwd"))
+        assertFalse(isAllowedWebUrl("javascript:alert(1)"))
+        assertFalse(isAllowedWebUrl("data:text/html,hi"))
+        assertFalse(isAllowedWebUrl("ftp://example.com/x"))
+        assertFalse(isAllowedWebUrl("about:blank"))
+        assertFalse(isAllowedWebUrl("example.com"))
+        assertFalse(isAllowedWebUrl(""))
+    }
+
+    @Test
+    fun blockedUrlCarriesUrlForDisplay() {
+        try {
+            openPage(FakeWebBridge(mapOf()), "file:///etc/passwd")
+            assertTrue("must throw", false)
+        } catch (e: WebException) {
+            assertEquals("file:///etc/passwd", e.failure.url)
+            assertEquals("blocked", e.failure.reason)
+        }
+    }
+
+    @Test
+    fun clickJsTargetsSelectorAndReportsMatch() {
+        val js = buildClickJs("a.buy")
+        assertTrue(js.contains("querySelector"))
+        assertTrue(js.contains("a.buy"))
+        assertTrue(js.contains("no-match"))
+        assertTrue(js.contains("clicked"))
+    }
+
+    @Test
+    fun clickJsEscapesQuotes() {
+        val js = buildClickJs("a[title=\"hi\"\\]")
+        assertTrue(js.contains("\\\"hi\\\""))
+    }
+
+    @Test
+    fun scrollJsScrollsByPixels() {
+        val js = buildScrollJs(250)
+        assertTrue(js.contains("scrollBy(0,250)"))
+    }
 }
 
 class FakeWebBridge(
     private val pages: Map<String, String>,
     private val timeoutUrls: Set<String> = emptySet(),
+    private val loadFailUrls: Set<String> = emptySet(),
+    private val timeoutOps: Boolean = false,
+    private val noMatchSelectors: Set<String> = emptySet(),
 ) : WebBridge {
+    private var current: String? = null
+    private var currentPageUrl: String = ""
+
+    override fun currentUrl(): String = currentPageUrl
+
     override fun load(url: String): String {
         if (url in timeoutUrls) throw WebException(WebFailure(url, "timeout"))
-        return pages[url] ?: throw WebException(WebFailure(url, "not-found"))
+        if (url in loadFailUrls) throw WebException(WebFailure(url, "load-failed"))
+        val html = pages[url] ?: throw WebException(WebFailure(url, "not-found"))
+        current = html
+        currentPageUrl = url
+        return html
+    }
+
+    override fun pageText(): String {
+        if (timeoutOps) throw WebException(WebFailure("", "timeout"))
+        val html = current ?: throw WebException(WebFailure("", "no-page"))
+        return parsePage("", html).text
+    }
+
+    override fun click(selector: String): String {
+        if (timeoutOps) throw WebException(WebFailure("", "timeout"))
+        val html = current ?: throw WebException(WebFailure("", "no-page"))
+        if (selector in noMatchSelectors) throw WebException(WebFailure("", "no-match: $selector"))
+        return html
+    }
+
+    override fun scrollBy(px: Int): String {
+        if (timeoutOps) throw WebException(WebFailure("", "timeout"))
+        return current ?: throw WebException(WebFailure("", "no-page"))
     }
 }

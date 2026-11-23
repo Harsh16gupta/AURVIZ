@@ -8,17 +8,26 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.room.Room
 import com.aurviz.agent.AppDb
+import com.aurviz.agent.AgentEvent
+import com.aurviz.agent.AgentLoop
+import com.aurviz.agent.AgentLoopResult
+import com.aurviz.agent.ApprovalDecision
 import com.aurviz.agent.BuildConfig
-import com.aurviz.agent.EmailDraft
+import com.aurviz.agent.ChatLlmProvider
+import com.aurviz.agent.ChatMessage
+import com.aurviz.agent.FallbackResult
 import com.aurviz.agent.GMAIL_SCOPES
 import com.aurviz.agent.GmailException
 import com.aurviz.agent.GmailHttpApi
 import com.aurviz.agent.LoopbackReceiver
-import com.aurviz.agent.LlmProvider
+import com.aurviz.agent.LlmKeys
+import com.aurviz.agent.LlmResult
 import com.aurviz.agent.MIGRATION_1_2
+import com.aurviz.agent.MIGRATION_2_3
 import com.aurviz.agent.Memory
+import com.aurviz.agent.NamedProvider
 import com.aurviz.agent.Plan
-import com.aurviz.agent.PlannerOutcome
+import com.aurviz.agent.TimelineStep
 import com.aurviz.agent.RoomMemoryStore
 import com.aurviz.agent.RoomScheduleStore
 import com.aurviz.agent.TokenStore
@@ -26,8 +35,8 @@ import com.aurviz.agent.TokenVault
 import com.aurviz.agent.ToolCall
 import com.aurviz.agent.WebBridge
 import com.aurviz.agent.WebException
+import com.aurviz.agent.approvalCardFor
 import com.aurviz.agent.buildAuthUrl
-import com.aurviz.agent.buildRawMessage
 import com.aurviz.agent.buildTimeline
 import com.aurviz.agent.cancelRoutineAlarm
 import com.aurviz.agent.cancelRoutineWork
@@ -35,21 +44,26 @@ import com.aurviz.agent.codeChallenge
 import com.aurviz.agent.composeEmail
 import com.aurviz.agent.createSchedule
 import com.aurviz.agent.defaultCandidates
+import com.aurviz.agent.defaultToolRegistry
 import com.aurviz.agent.deleteSchedule
 import com.aurviz.agent.formatSchedulePreview
 import com.aurviz.agent.forgetPreview
+import com.aurviz.agent.knownAddressesFromInbox
 import com.aurviz.agent.listSchedules
 import com.aurviz.agent.newCodeVerifier
 import com.aurviz.agent.openPage
 import com.aurviz.agent.parseSchedule
-import com.aurviz.agent.planCommand
 import com.aurviz.agent.planWithFallback
+import com.aurviz.agent.refreshBatteryNeeded
+import com.aurviz.agent.scheduleTimingNote
 import com.aurviz.agent.readImportant
 import com.aurviz.agent.recallFor
 import com.aurviz.agent.registerRoutineAlarm
 import com.aurviz.agent.rememberFact
-import com.aurviz.agent.sendWithConfirm
+import com.aurviz.agent.retryDisclosure
+import com.aurviz.agent.toTimeline
 import com.aurviz.agent.ui.components.VoiceState as OrbState
+import java.util.concurrent.LinkedBlockingQueue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -60,6 +74,74 @@ import kotlinx.coroutines.launch
 // Thin orchestrator over the tested domain logic (Planner, Email, Web,
 // WebViewBridge, MemoryStore, VoiceInput, LoopbackAuth). All decisions stay
 // in those files; this class only moves results into AgentUiState.
+
+// Ticket 11/24: pure loop-wiring helpers (no Android) for the AgentLoop
+// path below. JVM-tested in ViewModelLoopWiringTest; the ViewModel only
+// folds AgentEvents through them and copies the outputs into state.
+
+// Live timeline for one Task Execution (GLOSSARY): the Tool calls the
+// loop has made so far, how many finished, and the terminal error.
+fun loopTimeline(calls: List<ToolCall>, doneCount: Int, error: String?): List<TimelineStep> =
+    buildTimeline(Plan(calls), doneCount, error)
+
+// Accumulator the ViewModel keeps per run: each AgentEvent folds into it
+// so the existing timeline rows render StepStarted/ToolRunning/
+// NeedsApproval/StepDone/Failed live (ADR-0005).
+data class LoopUiProgress(
+    val calls: List<ToolCall> = emptyList(),
+    val doneCount: Int = 0,
+    val error: String? = null,
+    val pendingApproval: ToolCall? = null,
+) {
+    fun timeline(): List<TimelineStep> = loopTimeline(calls, doneCount, error)
+}
+
+fun LoopUiProgress.withEvent(event: AgentEvent): LoopUiProgress =
+    when (event) {
+        is AgentEvent.StepStarted -> this
+        is AgentEvent.ToolRunning -> copy(calls = calls + event.call)
+        is AgentEvent.NeedsApproval -> copy(pendingApproval = event.call)
+        is AgentEvent.StepDone -> copy(doneCount = (doneCount + 1).coerceAtMost(calls.size))
+        is AgentEvent.Failed -> copy(error = event.error)
+    }
+
+// Deterministic messages→prompt rendering for the single-shot fallback
+// seam below: the system prompt (framing + delimited memories) stays
+// first, assistant turns keep their Tool names, tool turns keep their
+// JSON results tagged with the matching tool_call_id (ADR-0005).
+fun renderLoopPrompt(messages: List<ChatMessage>): String =
+    messages.joinToString("\n") { message ->
+        when (message.role) {
+            "system" -> "[system] ${message.content.orEmpty()}"
+            "assistant" ->
+                ("[assistant] " + message.content.orEmpty() +
+                    message.toolCalls.joinToString(" ", prefix = " ") { it.name }).trim()
+            "tool" -> "[tool ${message.toolCallId}] ${message.content.orEmpty()}"
+            else -> message.content.orEmpty()
+        }
+    }
+
+// ChatLlmProvider over the single-shot planWithFallback seam: every loop
+// turn replays the rendered messages through the candidates in order and
+// unions every provider that saw the prompt, so the ViewModel copies
+// providersTried verbatim and the retry is never silent (ADR-0004).
+// The candidate list is built once per run: rebuilding it per turn would
+// also rebuild each provider's HTTP client.
+class FallbackChatLlm(
+    private val candidates: List<NamedProvider>,
+) : ChatLlmProvider {
+    val tried: MutableList<String> = mutableListOf()
+    var lastProvider: String? = null
+        private set
+
+    override fun chat(messages: List<ChatMessage>): LlmResult {
+        val fb = planWithFallback(renderLoopPrompt(messages), candidates)
+        for (name in fb.tried) if (name !in tried) tried += name
+        lastProvider = fb.providerName
+        return fb.result
+    }
+}
+
 class AgentViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _state = MutableStateFlow(AgentUiState())
@@ -67,7 +149,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
 
     private val db: AppDb =
         Room.databaseBuilder(application, AppDb::class.java, "aurviz.db")
-            .addMigrations(MIGRATION_1_2)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
             .build()
     private val roomStore = RoomMemoryStore(db.memories())
     private val scheduleStore = RoomScheduleStore(db.schedules())
@@ -90,10 +172,12 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         tokenVault.loadInto(tokens)
+        refreshLlmKeyFlags()
         refreshGmailStatus()
         refreshMemories()
         refreshSchedules()
         refreshExactAlarmFlag()
+        refreshBatteryFlag()
     }
 
     fun attachWebBridge(bridge: WebBridge) {
@@ -126,7 +210,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
             lower.startsWith("schedule ") -> handleScheduleCreate(command.substring(9).trim())
             lower == "schedules" -> refreshSchedules(showLine = true)
             lower.startsWith("unschedule ") -> handleUnschedule(command.substring(11).trim())
-            else -> runRealPlan(command)
+            else -> runLoopCommand(command)
         }
     }
 
@@ -236,34 +320,30 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // Rebuilds the raw MIME from the EDITED fields, then sends once.
+    // Ticket 12/25: the sheet is the Confirmation, so this resolves the
+    // single gated path as Approved — the deterministic SendPolicy still
+    // runs before the transport, and a Deny surfaces instead of a send.
     fun approveEmail(to: String, subject: String, body: String) {
-        val draft = EmailDraft(to = listOf(to.trim()), subject = subject, body = body)
-        if (!draft.to.first().contains("@") || draft.body.isBlank()) {
-            _state.update { it.copy(statusLine = "Need a valid address and a message.") }
-            return
-        }
+        val call = ToolCall("ui_approve", "send_email", mapOf("to" to to.trim(), "subject" to subject, "body" to body))
         _state.update { it.copy(pendingEmail = null, sending = true, statusLine = "Sending…") }
         viewModelScope.launch(Dispatchers.IO) {
             val t0 = System.currentTimeMillis()
-            try {
-                val sent = sendWithConfirm(gmail, buildRawMessage(draft), confirmed = true)
-                val ms = System.currentTimeMillis() - t0
-                _state.update {
-                    it.copy(
-                        sending = false,
-                        statusLine = if (sent) "Sent ✓" else "Not sent.",
-                        timeline = buildTimeline(
-                            Plan(listOf(ToolCall("gmail", "sendEmail", mapOf("raw" to 12)))),
-                            doneCount = if (sent) 1 else 0,
-                            error = if (sent) null else "not confirmed",
-                        ),
-                        perf = it.perf.copy(toolMs = ms),
-                    )
-                }
-            } catch (e: Exception) {
-                _state.update {
-                    it.copy(sending = false, statusLine = "Send failed: ${e.message}", timeline = emptyList())
-                }
+            val registry = defaultToolRegistry(gmailApi = gmail, scheduleStore = scheduleStore, memoryStore = roomStore)
+            val gated = registry.executeGated(call) { ApprovalDecision.Approved }
+            val ms = System.currentTimeMillis() - t0
+            val sent = gated.result is com.aurviz.agent.ToolResult.Success
+            val error = (gated.result as? com.aurviz.agent.ToolResult.Failure)?.error
+            _state.update {
+                it.copy(
+                    sending = false,
+                    statusLine = if (sent) "Sent ✓" else (error ?: "Not sent."),
+                    timeline = buildTimeline(
+                        Plan(listOf(call.copy(arguments = gated.effectiveArgs))),
+                        doneCount = if (sent) 1 else 0,
+                        error = error,
+                    ),
+                    perf = it.perf.copy(toolMs = ms),
+                )
             }
         }
     }
@@ -440,6 +520,28 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // --- AI keys (ticket 36): user-entered, vault-persisted, never in UI state ---
+
+    fun saveLlmKeys(geminiKey: String, groqKey: String) {
+        tokenVault.saveLlmKeys(LlmKeys(geminiKey.trim(), groqKey.trim()))
+        refreshLlmKeyFlags()
+    }
+
+    fun clearLlmKeys() {
+        tokenVault.clearLlmKeys()
+        refreshLlmKeyFlags()
+    }
+
+    private fun refreshLlmKeyFlags() {
+        val keys = tokenVault.loadLlmKeys()
+        _state.update {
+            it.copy(
+                geminiKeySet = keys.geminiKey.isNotBlank(),
+                groqKeySet = keys.groqKey.isNotBlank(),
+            )
+        }
+    }
+
     // --- Web (in-app page behind BrowserScreen's retained WebView) ---
 
     fun openWeb(raw: String) {
@@ -521,9 +623,9 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
             _state.update {
                 it.copy(
                     statusLine = if (exact) {
-                        "Schedule saved (${saved.id}). Exact alarm set."
+                        "Schedule saved (${saved.id}). ${scheduleTimingNote(true)}"
                     } else {
-                        "Schedule saved (${saved.id}), but exact alarms are off — allow them in Settings."
+                        "Schedule saved (${saved.id}). ${scheduleTimingNote(false)}"
                     },
                 )
             }
@@ -581,72 +683,154 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(exactAlarmNeeded = needsAsk) }
     }
 
-    // --- Real Plan (LLM with fallback; recall timed separately) ---
+    fun refreshBatteryFlag() {
+        val app = getApplication<Application>()
+        val needsAsk = try {
+            refreshBatteryNeeded(app)
+        } catch (_: Exception) {
+            false
+        }
+        _state.update { it.copy(batteryOptimizationNeeded = needsAsk) }
+    }
 
-    private fun runRealPlan(cmd: String) {
+    // --- Loop (AgentLoop for reads; ADR-0005 §3A) ---
+    // Replaces runRealPlan's single plan() call plus createSchedule-only
+    // execution: every command the keyword routes above don't catch runs
+    // the loop, whose AgentEvents fold into the timeline live. The
+    // schedule preview flows (handleScheduleCreate/approve/reject) stay.
+    //
+    // Ticket 12/25: the loop's confirm hook suspends on the approval card.
+    // NeedsApproval publishes the exact call + unseen flags into state and
+    // blocks the loop thread until approvePendingSend/rejectPendingSend
+    // resolves it — the gate never auto-approves, and the deterministic
+    // SendPolicy still screens an approved send before the transport.
+    private var pendingDecisions: LinkedBlockingQueue<ApprovalDecision>? = null
+
+    fun approvePendingSend() {
+        pendingDecisions?.offer(ApprovalDecision.Approved)
+    }
+
+    fun rejectPendingSend() {
+        pendingDecisions?.offer(ApprovalDecision.Rejected)
+    }
+
+    private fun runLoopCommand(cmd: String) {
         _state.update {
             it.copy(
                 statusLine = "Command: $cmd\nAgent: thinking…",
                 timeline = emptyList(),
+                providerUsed = null,
+                providersTried = emptyList(),
             )
         }
         viewModelScope.launch(Dispatchers.IO) {
-            val recallT0 = System.currentTimeMillis()
-            val known = recallFor(roomStore, cmd).take(3)
-            val recallMs = System.currentTimeMillis() - recallT0
-            _state.update { it.copy(perf = it.perf.copy(recallMs = recallMs)) }
-            val knownLine = if (known.isEmpty()) "" else "\nKnown: " + known.joinToString("; ") { it.text }
-            _state.update { it.copy(statusLine = "Command: $cmd$knownLine\nAgent: thinking…") }
-            val effective =
-                if (known.isEmpty()) cmd else "Known: " + known.joinToString("; ") { it.text } + ". $cmd"
-            var used = ""
-            val provider = object : LlmProvider {
-                override fun plan(userText: String): com.aurviz.agent.LlmResult {
-                    val fb = planWithFallback(userText, defaultCandidates(BuildConfig.LLM_DEFAULT_PROVIDER))
-                    used = fb.providerName
-                    return fb.result
+            val runT0 = System.currentTimeMillis()
+            val chat =
+                FallbackChatLlm(
+                    defaultCandidates(BuildConfig.LLM_DEFAULT_PROVIDER, tokenVault.loadLlmKeys()),
+                )
+            val registry = defaultToolRegistry(gmailApi = gmail, scheduleStore = scheduleStore, memoryStore = roomStore)
+            val decisions = LinkedBlockingQueue<ApprovalDecision>(1)
+            pendingDecisions = decisions
+            val confirm: (ToolCall) -> ApprovalDecision = { call ->
+                val known =
+                    try {
+                        knownAddressesFromInbox(gmail.listInbox())
+                    } catch (_: Exception) {
+                        knownAddressesFromInbox(_state.value.emails)
+                    }
+                val unseen = approvalCardFor(call, known)?.unseen.orEmpty()
+                _state.update {
+                    it.copy(
+                        pendingApproval = call,
+                        pendingApprovalUnseen = unseen,
+                        statusLine = "Command: $cmd\nAgent: needs approval: ${call.name}",
+                    )
+                }
+                try {
+                    decisions.take()
+                } catch (_: InterruptedException) {
+                    ApprovalDecision.TimedOut
                 }
             }
-            try {
-                val planT0 = System.currentTimeMillis()
-                val outcome = planCommand(effective, provider)
-                val planMs = System.currentTimeMillis() - planT0
-                when (outcome) {
-                    is PlannerOutcome.NeedsClarification -> {
+            var progress = LoopUiProgress()
+            val loop =
+                AgentLoop(
+                    chat,
+                    registry,
+                    onEvent = { event ->
+                        progress = progress.withEvent(event)
+                        val snapshot = progress.timeline()
+                        val phase =
+                            when (event) {
+                                is AgentEvent.StepStarted -> "thinking…"
+                                is AgentEvent.ToolRunning -> "running ${event.call.name}…"
+                                is AgentEvent.NeedsApproval -> "needs approval: ${event.call.name}"
+                                is AgentEvent.StepDone -> "ran ${event.call.name}"
+                                is AgentEvent.Failed -> "failed: ${event.error}"
+                            }
                         _state.update {
                             it.copy(
-                                statusLine = "Command: $cmd$knownLine\nAgent: ${outcome.question}",
-                                timeline = buildTimeline(Plan(emptyList()), doneCount = 0, error = null),
-                                perf = it.perf.copy(planMs = planMs),
+                                statusLine = "Command: $cmd\nAgent: $phase",
+                                timeline = snapshot,
+                                // The decision landed: drop the card.
+                                pendingApproval = if (event is AgentEvent.StepDone) null else it.pendingApproval,
+                                pendingApprovalUnseen = if (event is AgentEvent.StepDone) emptyList() else it.pendingApprovalUnseen,
+                            )
+                        }
+                    },
+                    confirm = confirm,
+                )
+            try {
+                // Ticket 16/29: memories ride in the loop's delimited system
+                // section via recallFor — never concatenated into the command.
+                val memories = recallFor(roomStore, cmd)
+                when (val result = loop.run(cmd, memories)) {
+                    is AgentLoopResult.Answered -> {
+                        val tried = chat.tried.toList()
+                        val used = chat.lastProvider
+                        val disclosure =
+                            AgentUiState(providerUsed = used, providersTried = tried).retryLine()
+                        _state.update {
+                            it.copy(
+                                statusLine = "Command: $cmd\n${result.answer}" +
+                                    (disclosure?.let { d -> "\n$d" } ?: ""),
+                                timeline = result.toTimeline(),
+                                providerUsed = used,
+                                providersTried = tried,
+                                pendingApproval = null,
+                                pendingApprovalUnseen = emptyList(),
+                                perf = it.perf.copy(planMs = System.currentTimeMillis() - runT0),
                             )
                         }
                     }
-                    is PlannerOutcome.Ready -> {
-                        val first = outcome.plan.steps.firstOrNull()
-                        if (first?.name == "createSchedule") {
-                            val when_ = first.arguments["when"] as? String ?: ""
-                            val task = first.arguments["task"] as? String ?: ""
-                            handleScheduleCreate("$when_ $task".trim())
-                            _state.update { it.copy(perf = it.perf.copy(planMs = planMs)) }
-                        } else {
-                            _state.update {
-                                it.copy(
-                                    statusLine = "Command: $cmd$knownLine\nRan on: $used",
-                                    timeline = buildTimeline(outcome.plan, doneCount = 0, error = null),
-                                    providerUsed = used,
-                                    perf = it.perf.copy(planMs = planMs),
-                                )
-                            }
+                    is AgentLoopResult.Failed -> {
+                        _state.update {
+                            it.copy(
+                                statusLine = "Command: $cmd\nFailed: ${result.error}",
+                                timeline = result.toTimeline(),
+                                providerUsed = chat.lastProvider,
+                                providersTried = chat.tried.toList(),
+                                pendingApproval = null,
+                                pendingApprovalUnseen = emptyList(),
+                                perf = it.perf.copy(planMs = System.currentTimeMillis() - runT0),
+                            )
                         }
                     }
                 }
             } catch (e: Exception) {
                 _state.update {
                     it.copy(
-                        statusLine = "Command: $cmd$knownLine\nFailed: ${e.message}",
-                        timeline = emptyList(),
+                        statusLine = "Command: $cmd\nFailed: ${e.message}",
+                        timeline = progress.timeline(),
+                        providerUsed = chat.lastProvider,
+                        providersTried = chat.tried.toList(),
+                        pendingApproval = null,
+                        pendingApprovalUnseen = emptyList(),
                     )
                 }
+            } finally {
+                if (pendingDecisions === decisions) pendingDecisions = null
             }
         }
     }

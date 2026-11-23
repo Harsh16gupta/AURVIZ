@@ -82,9 +82,45 @@ class LlmProviderTest {
     @Test
     fun scheduleToolSchemaNamesTaskAndWhen() {
         val fn = scheduleToolSchema().getJSONObject("function")
-        assertEquals("createSchedule", fn.getString("name"))
+        assertEquals("create_schedule", fn.getString("name"))
         val required = fn.getJSONObject("parameters").getJSONArray("required")
         val names = (0 until required.length()).map { required.getString(it) }.toSet()
         assertEquals(setOf("task", "when"), names)
+    }
+
+    @Test
+    fun defaultLlmHttpClientHasConnectAndReadTimeouts() {
+        // ADR-0004: no bare OkHttpClient without timeouts on the LLM path.
+        val client = llmHttpClient()
+        assertEquals(15_000, client.connectTimeoutMillis)
+        assertEquals(60_000, client.readTimeoutMillis)
+    }
+
+    @Test
+    fun listSchedulesSchemaTakesNoRequiredArgs() {
+        val fn = listSchedulesToolSchema().getJSONObject("function")
+        assertEquals("list_schedules", fn.getString("name"))
+        val required = fn.getJSONObject("parameters").optJSONArray("required")
+        assertTrue(required == null || required.length() == 0)
+    }
+
+    @Test
+    fun cancelScheduleSchemaRequiresScheduleId() {
+        val fn = cancelScheduleToolSchema().getJSONObject("function")
+        assertEquals("cancel_schedule", fn.getString("name"))
+        val required = fn.getJSONObject("parameters").getJSONArray("required")
+        val names = (0 until required.length()).map { required.getString(it) }.toSet()
+        assertEquals(setOf("schedule_id"), names)
+    }
+
+    @Test
+    fun allToolSchemasExposeEmailPlusThreeScheduleTools() {
+        val names = (0 until allToolSchemas().length())
+            .map { allToolSchemas().getJSONObject(it).getJSONObject("function").getString("name") }
+            .toSet()
+        assertTrue(names.contains("getImportantEmails"))
+        assertTrue(names.contains("create_schedule"))
+        assertTrue(names.contains("list_schedules"))
+        assertTrue(names.contains("cancel_schedule"))
     }
 }

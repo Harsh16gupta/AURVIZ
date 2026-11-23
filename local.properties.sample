@@ -1,4 +1,7 @@
 # Copy to local.properties and fill in. Never commit real keys.
+# These keys are for debug builds only: release builds always compile with
+# empty API keys, and release users enter keys in Settings (stored encrypted
+# in TokenVault on-device).
 # sdk.dir=/Users/YOU/Library/Android/sdk
 LLM_DEFAULT_PROVIDER=gemini
 GEMINI_API_KEY=

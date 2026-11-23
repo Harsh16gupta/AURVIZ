@@ -11,7 +11,12 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 class WebViewBridge(private val webView: WebView) : WebBridge {
 
+    @Volatile private var lastUrl: String = ""
+
+    override fun currentUrl(): String = lastUrl
+
     override fun load(url: String): String {
+        lastUrl = url
         val done = CountDownLatch(1)
         val finished = AtomicBoolean(false)
         var html: String? = null
@@ -21,7 +26,7 @@ class WebViewBridge(private val webView: WebView) : WebBridge {
                 object : android.webkit.WebViewClient() {
                     override fun onPageFinished(view: WebView, u: String) {
                         if (!finished.compareAndSet(false, true)) return
-                        view.evaluateJavascript("(function(){return document.documentElement.outerHTML})()") { value ->
+                        view.evaluateJavascript(buildOuterHtmlJs()) { value ->
                             html = unquoteJs(value)
                             done.countDown()
                         }
@@ -50,6 +55,48 @@ class WebViewBridge(private val webView: WebView) : WebBridge {
         if (!done.await(25, TimeUnit.SECONDS)) throw WebException(WebFailure(url, "timeout"))
         if (failed) throw WebException(WebFailure(url, "load-failed"))
         return html ?: throw WebException(WebFailure(url, "load-failed"))
+    }
+
+    override fun pageText(): String =
+        evalJs(buildPageTextJs(), "text")
+            ?: throw WebException(WebFailure(lastUrl, "load-failed"))
+
+    override fun click(selector: String): String {
+        val status = evalJs(buildClickJs(selector), "click")
+        if (status == "no-match") throw WebException(WebFailure(lastUrl, "no-match: $selector"))
+        return evalJs(buildOuterHtmlJs(), "click")
+            ?: throw WebException(WebFailure(lastUrl, "load-failed"))
+    }
+
+    override fun scrollBy(px: Int): String {
+        evalJs(buildScrollJs(px), "scroll")
+        return evalJs(buildOuterHtmlJs(), "scroll")
+            ?: throw WebException(WebFailure(lastUrl, "load-failed"))
+    }
+
+    // One evaluateJavascript round-trip off the caller thread. The latch
+    // timeout is the "never hangs" guarantee: a silent page still resolves
+    // to a "timeout" WebException the loop can recover from.
+    private fun evalJs(script: String, op: String): String? {
+        val done = CountDownLatch(1)
+        val finished = AtomicBoolean(false)
+        var out: String? = null
+        var ok = false
+        webView.post {
+            try {
+                webView.evaluateJavascript(script) { value ->
+                    if (!finished.compareAndSet(false, true)) return@evaluateJavascript
+                    out = unquoteJs(value)
+                    ok = true
+                    done.countDown()
+                }
+            } catch (_: Exception) {
+                if (finished.compareAndSet(false, true)) done.countDown()
+            }
+        }
+        if (!done.await(25, TimeUnit.SECONDS)) throw WebException(WebFailure(lastUrl, "timeout"))
+        if (!ok) throw WebException(WebFailure(lastUrl, "load-failed"))
+        return out
     }
 
     // evaluateJavascript answers with a JSON-quoted string ("a\nb").

@@ -9,6 +9,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import com.aurviz.agent.OEM_AUTOSTART_GUIDANCE
 import com.aurviz.agent.ui.AgentUiState
 import com.aurviz.agent.ui.components.Button
 import com.aurviz.agent.ui.components.ButtonVariant
@@ -36,16 +37,26 @@ fun SettingsScreen(
     onRevokeGmail: () -> Unit,
     onPasteLink: (String) -> Unit,
     onDismissPasteFallback: () -> Unit,
+    onSaveLlmKeys: (String, String) -> Unit,
+    onClearLlmKeys: () -> Unit,
     onOpenExactAlarmSettings: () -> Unit,
     onRefreshExactAlarm: () -> Unit,
+    onOpenBatterySettings: () -> Unit,
+    onRefreshBattery: () -> Unit,
     onVoiceSettings: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var pasted by rememberSaveable { mutableStateOf("") }
     var haptics by rememberSaveable { mutableStateOf(true) }
+    // Key fields always start empty: saved keys are never read back into UI.
+    var geminiKey by rememberSaveable { mutableStateOf("") }
+    var groqKey by rememberSaveable { mutableStateOf("") }
 
-    LaunchedEffect(Unit) { onRefreshExactAlarm() }
+    LaunchedEffect(Unit) {
+        onRefreshExactAlarm()
+        onRefreshBattery()
+    }
 
     Page(title = "Settings", onBack = onBack, modifier = modifier) {
         Section(
@@ -113,6 +124,55 @@ fun SettingsScreen(
                 }
             }
         }
+        Section(
+            "AI keys",
+            footer = "Keys stay encrypted on this phone and are never baked into the app. " +
+                "Release builds ship with empty keys — enter them here to run the agent.",
+        ) {
+            OptionRow(
+                "Gemini",
+                onClick = {},
+                description = "Default provider.",
+                value = if (state.geminiKeySet) "Set" else "Not set",
+            )
+            TextField(
+                value = geminiKey,
+                onValueChange = { geminiKey = it },
+                label = "Paste Gemini API key",
+            )
+            OptionRow(
+                "Groq",
+                onClick = {},
+                description = "Fallback provider.",
+                value = if (state.groqKeySet) "Set" else "Not set",
+            )
+            TextField(
+                value = groqKey,
+                onValueChange = { groqKey = it },
+                label = "Paste Groq API key",
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(Space * 2)) {
+                Button(
+                    onClick = {
+                        onSaveLlmKeys(geminiKey, groqKey)
+                        geminiKey = ""
+                        groqKey = ""
+                    },
+                ) {
+                    Text("Save keys")
+                }
+                Button(
+                    onClick = {
+                        onClearLlmKeys()
+                        geminiKey = ""
+                        groqKey = ""
+                    },
+                    variant = ButtonVariant.Secondary,
+                ) {
+                    Text("Clear keys")
+                }
+            }
+        }
         Section("Performance") {
             OptionRow(
                 "Last Plan generation",
@@ -135,7 +195,9 @@ fun SettingsScreen(
         }
         Section(
             "Schedules",
-            footer = "Android 12+ needs exact-alarm permission for on-time firing.",
+            footer = "Revoked permission falls back to inexact timing — " +
+                "Schedules still run, just not exactly on time. " +
+                "Android 12+ needs exact-alarm permission for on-time firing.",
         ) {
             if (state.exactAlarmNeeded) {
                 OptionRow(
@@ -153,6 +215,32 @@ fun SettingsScreen(
                     icon = Icons.Bell,
                 )
             }
+        }
+        Section(
+            "Battery & background",
+            footer = "Doze and vendor battery managers can delay Schedules. " +
+                "Exempting Aurviz keeps fire times reliable.",
+        ) {
+            if (state.batteryOptimizationNeeded) {
+                OptionRow(
+                    "Allow background running",
+                    onClick = onOpenBatterySettings,
+                    description = "Battery optimization is restricting Aurviz — exempt it so Schedules fire on time.",
+                    icon = Icons.Bell,
+                    navigates = true,
+                )
+            } else {
+                OptionRow(
+                    "Background running allowed",
+                    onClick = {},
+                    description = "Battery optimization is not restricting Aurviz.",
+                    icon = Icons.Bell,
+                )
+            }
+            Text(
+                OEM_AUTOSTART_GUIDANCE,
+                color = Theme.colors.onBackgroundMuted,
+            )
         }
         Section("Voice") {
             OptionRow(
