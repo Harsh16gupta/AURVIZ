@@ -826,6 +826,9 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
             }
             refreshExactAlarmFlag()
             refreshBatteryFlag()
+            // A Worker may have saved held approvals while the app was away.
+            refreshSchedules()
+            refreshPendingApprovals()
         }
     }
 

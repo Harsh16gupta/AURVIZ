@@ -175,11 +175,22 @@ fun postScheduleNotification(context: Context, scheduleId: String, note: Schedul
     manager.createNotificationChannel(
         NotificationChannel(ROUTINE_CHANNEL_ID, "Routines", NotificationManager.IMPORTANCE_DEFAULT),
     )
+    // Tap routes into the app; the Schedules screen reloads held approvals
+    // on entry so the row the note refers to is visible.
+    val openApp =
+        android.app.PendingIntent.getActivity(
+            context,
+            routineNotificationId(scheduleId),
+            android.content.Intent(context, MainActivity::class.java)
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE,
+        )
     val androidNote =
         NotificationCompat.Builder(context, ROUTINE_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentTitle(note.title)
             .setContentText(note.text)
+            .setContentIntent(openApp)
             .setAutoCancel(true)
             .build()
     manager.notify(routineNotificationId(scheduleId), androidNote)
