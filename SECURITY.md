@@ -17,8 +17,10 @@
 Gmail tokens and user-entered LLM keys live in one `EncryptedSharedPreferences`
 file (`androidx.security:security-crypto:1.1.0`), backed by the Android Keystore
 (`MasterKey` AES256-GCM; AES256-SIV key encryption + AES256-GCM value
-encryption). Key values never enter Compose/UI state — Settings shows only
-set/not-set flags and clears fields after saving.
+encryption). Key drafts are memory-only Compose state (remember, never
+rememberSaveable, cleared on save and on screen exit) so they are never
+serialized into saved-instance state — Settings shows only set/not-set
+flags and clears fields after saving.
 
 ## `security-crypto` deprecation status (checked 2026-11-23)
 

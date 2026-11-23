@@ -3,9 +3,11 @@ package com.aurviz.agent.ui.screens
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -47,11 +49,23 @@ fun SettingsScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var pasted by rememberSaveable { mutableStateOf("") }
+    // P2: key drafts and the pasted OAuth link are memory-only (remember,
+    // never rememberSaveable) so they are never serialized into
+    // saved-instance state. Fields start empty, clear on save, and clear
+    // again when the screen leaves composition.
+    var pasted by remember { mutableStateOf("") }
     var haptics by rememberSaveable { mutableStateOf(true) }
     // Key fields always start empty: saved keys are never read back into UI.
-    var geminiKey by rememberSaveable { mutableStateOf("") }
-    var groqKey by rememberSaveable { mutableStateOf("") }
+    var geminiKey by remember { mutableStateOf("") }
+    var groqKey by remember { mutableStateOf("") }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            pasted = ""
+            geminiKey = ""
+            groqKey = ""
+        }
+    }
 
     LaunchedEffect(Unit) {
         onRefreshExactAlarm()
