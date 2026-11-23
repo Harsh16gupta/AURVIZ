@@ -60,6 +60,7 @@ import com.aurviz.agent.listSchedules
 import com.aurviz.agent.newCodeVerifier
 import com.aurviz.agent.openPage
 import com.aurviz.agent.parseSchedule
+import com.aurviz.agent.FallbackExhausted
 import com.aurviz.agent.planWithFallbackMessages
 import com.aurviz.agent.refreshBatteryNeeded
 import com.aurviz.agent.scheduleTimingNote
@@ -128,24 +129,38 @@ fun renderLoopPrompt(messages: List<ChatMessage>): String =
         }
     }
 
-// ChatLlmProvider over the single-shot planWithFallback seam: every loop
-// turn replays the rendered messages through the candidates in order and
-// unions every provider that saw the prompt, so the ViewModel copies
-// providersTried verbatim and the retry is never silent (ADR-0004).
-// The candidate list is built once per run: rebuilding it per turn would
-// also rebuild each provider's HTTP client.
+// ChatLlmProvider over the structured fallback seam: the loop's messages
+// ride intact and every provider that saw the prompt is unioned, so the
+// ViewModel copies providersTried verbatim and the retry is never silent
+// (ADR-0004). The candidate list is built once per run: rebuilding it per
+// turn would also rebuild each provider's HTTP client.
+// Provider pinning: the first provider that answers a run handles every
+// later turn, so the accumulated private transcript (memories, mail, tool
+// results) is never replayed to a second host mid-run. Tried is merged
+// even when the turn fails, so a terminal failure still discloses who saw it.
+// The advertised set defaults to allToolSchemas(); threading the run's
+// registry view through is follow-up work (kept out of this PR).
 class FallbackChatLlm(
     private val candidates: List<NamedProvider>,
 ) : ChatLlmProvider {
     val tried: MutableList<String> = mutableListOf()
     var lastProvider: String? = null
         private set
+    private var pinned: String? = null
 
     override fun chat(messages: List<ChatMessage>): LlmResult {
-        val fb = planWithFallbackMessages(messages, candidates)
-        for (name in fb.tried) if (name !in tried) tried += name
-        lastProvider = fb.providerName
-        return fb.result
+        val effective =
+            pinned?.let { name -> candidates.filter { it.name == name } } ?: candidates
+        try {
+            val fb = planWithFallbackMessages(messages, effective.ifEmpty { candidates })
+            for (name in fb.tried) if (name !in tried) tried += name
+            if (pinned == null) pinned = fb.providerName
+            lastProvider = fb.providerName
+            return fb.result
+        } catch (e: FallbackExhausted) {
+            for (name in e.tried) if (name !in tried) tried += name
+            throw e.cause as? Exception ?: RuntimeException(e)
+        }
     }
 }
 

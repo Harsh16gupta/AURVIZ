@@ -84,6 +84,8 @@ fun planWithFallback(
 // as planWithFallback, but the loop's messages ride intact. Providers
 // implementing StructuredLlmProvider get the real roles; legacy plan-only
 // doubles get the flattened string so scripted tests keep working.
+class FallbackExhausted(val tried: List<String>, cause: Exception) : Exception(cause.message, cause)
+
 fun planWithFallbackMessages(
     messages: List<ChatMessage>,
     candidates: List<NamedProvider>,
@@ -103,15 +105,15 @@ fun planWithFallbackMessages(
             tried += candidate.name
             return FallbackResult(result, candidate.name, tried.toList())
         } catch (e: LlmException) {
-            if (!e.failure.fallback) throw e
             tried += candidate.name
+            if (!e.failure.fallback) throw FallbackExhausted(tried.toList(), e)
             lastError = e
             val hasNext = candidates.drop(index + 1).any { it.apiKey.isNotBlank() }
             if (hasNext) sleeper(backoffDelayMs(e.failure.retryAfter, retries++))
         }
     }
     if (tried.isEmpty()) throw IllegalStateException("No provider with API key")
-    throw lastError ?: IllegalStateException("No provider with API key")
+    throw FallbackExhausted(tried.toList(), lastError ?: IllegalStateException("No provider with API key"))
 }
 
 // Visible "retried on Y" disclosure (ADR-0004): null when the first provider

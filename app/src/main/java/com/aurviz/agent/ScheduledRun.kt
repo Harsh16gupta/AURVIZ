@@ -252,31 +252,52 @@ private fun blockedScheduledTool(name: String): ToolResult =
 
 // Headless chat over the single-shot fallback seam (ADR-0004): every
 // loop turn replays the rendered messages through the candidates in
-// order. Same turn shape as the foreground FallbackChatLlm; this one
-// lives in the agent package so the Worker never imports UI.
-fun renderScheduledPrompt(messages: List<ChatMessage>): String =
-    messages.joinToString("\n") { message ->
-        when (message.role) {
-            "assistant" ->
-                ("[assistant] " + message.content.orEmpty() +
-                    message.toolCalls.joinToString(" ", prefix = " ") { it.name }).trim()
-            "tool" -> "[tool ${message.toolCallId}] ${message.content.orEmpty()}"
-            else -> message.content.orEmpty()
-        }
-    }
-
+// Headless chat over the structured fallback seam (ADR-0004): the loop's
+// messages ride intact. Same pinning as the foreground chat: the first
+// provider that answers handles every later turn, so private results are
+// never replayed to a second host mid-run. Tried unions every provider
+// that saw the prompt, even on failure, so the outcome can disclose it.
+// This class lives in the agent package so the Worker never imports UI.
+// The advertised set defaults to allToolSchemas(); threading the run's
+// registry view through is follow-up work (kept out of this PR).
 class HeadlessChatLlm(
     private val candidates: List<NamedProvider>,
 ) : ChatLlmProvider {
-    override fun chat(messages: List<ChatMessage>): LlmResult =
-        planWithFallbackMessages(messages, candidates).result
+    val tried: MutableList<String> = mutableListOf()
+    var lastProvider: String? = null
+        private set
+    private var pinned: String? = null
+
+    override fun chat(messages: List<ChatMessage>): LlmResult {
+        val effective =
+            pinned?.let { name -> candidates.filter { it.name == name } } ?: candidates
+        try {
+            val fb = planWithFallbackMessages(messages, effective.ifEmpty { candidates })
+            for (name in fb.tried) if (name !in tried) tried += name
+            if (pinned == null) pinned = fb.providerName
+            lastProvider = fb.providerName
+            return fb.result
+        } catch (e: FallbackExhausted) {
+            for (name in e.tried) if (name !in tried) tried += name
+            throw e.cause as? Exception ?: RuntimeException(e)
+        }
+    }
 }
 
 // What the summary note says: the loop's answer (or its error), plus
-// how many attempted writes are waiting for approval.
-fun scheduledSummary(answer: String?, error: String?, blockedCount: Int): String {
+// how many attempted writes are waiting for approval, plus the retry
+// disclosure when private context was replayed across providers (ADR-0004).
+fun scheduledSummary(
+    answer: String?,
+    error: String?,
+    blockedCount: Int,
+    providersTried: List<String> = emptyList(),
+    providerUsed: String? = null,
+): String {
     val base = answer ?: error.orEmpty()
-    return if (blockedCount > 0) "$base (${blockedCount} request(s) need your approval)" else base
+    val withBlocked = if (blockedCount > 0) "$base (${blockedCount} request(s) need your approval)" else base
+    if (providersTried.size <= 1 || providerUsed == null) return withBlocked
+    return "$withBlocked (retried on $providerUsed; tried ${providersTried.joinToString(", ")})"
 }
 
 fun scheduledRunNotification(
@@ -285,6 +306,8 @@ fun scheduledRunNotification(
     error: String?,
     blockedCount: Int,
     authFailed: Boolean,
+    providersTried: List<String> = emptyList(),
+    providerUsed: String? = null,
 ): ScheduleNotification =
     if (authFailed) {
         ScheduleNotification(
@@ -292,7 +315,7 @@ fun scheduledRunNotification(
             "Routine \"${schedule.instruction}\" couldn't reach Gmail (sign-in expired). Reconnect Gmail to resume routines.",
         )
     } else {
-        buildResultNotification(schedule, scheduledSummary(answer, error, blockedCount))
+        buildResultNotification(schedule, scheduledSummary(answer, error, blockedCount, providersTried, providerUsed))
     }
 
 sealed interface ScheduledRunOutcome {
@@ -300,6 +323,8 @@ sealed interface ScheduledRunOutcome {
         val run: ScheduleRun,
         val notification: ScheduleNotification,
         val blocked: List<PendingApproval>,
+        val providersTried: List<String> = emptyList(),
+        val providerUsed: String? = null,
     ) : ScheduledRunOutcome
 
     data class DuplicateSkipped(val run: ScheduleRun) : ScheduledRunOutcome
@@ -382,9 +407,13 @@ fun runScheduledRoutine(
     val run =
         runs.find(schedule.id, fireTime)
             ?: ScheduleRun(schedule.id, fireTime, status, error, resultText, durationMs)
+    val tried = (llm as? HeadlessChatLlm)?.tried?.toList().orEmpty()
+    val used = (llm as? HeadlessChatLlm)?.lastProvider
     return ScheduledRunOutcome.Ran(
         run,
-        scheduledRunNotification(schedule, answer, error, blockedCalls.size, authFailed),
+        scheduledRunNotification(schedule, answer, error, blockedCalls.size, authFailed, tried, used),
         blocked,
+        tried,
+        used,
     )
 }
