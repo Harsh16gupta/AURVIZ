@@ -59,9 +59,9 @@ class ScheduledRunTest {
     // --- Seam 1: the allowlist is exactly the ADR-0002 read set. ---
 
     @Test
-    fun allowlistIsExactlyTheFiveReadTools() {
+    fun allowlistIsExactlyTheReadTools() {
         assertEquals(
-            setOf("search_emails", "read_email", "get_page_text", "search_memory", "list_schedules"),
+            setOf("search_emails", "read_email", "getImportantEmails", "get_page_text", "search_memory", "list_schedules"),
             SCHEDULED_RUN_ALLOWLIST,
         )
     }
