@@ -508,7 +508,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
 
     fun revokeGmail() {
         tokens.revoke()
-        tokenVault.clear()
+        tokenVault.clearGmail()
         refreshGmailStatus()
         _state.update {
             it.copy(

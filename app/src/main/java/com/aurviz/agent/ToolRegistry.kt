@@ -110,6 +110,21 @@ private fun validateArgs(definition: ToolDefinition, args: Map<String, Any?>): T
     return null
 }
 
+/** Shared OpenAI function-tool envelope (ADR-0004): every LLM-visible
+ *  schema is {"type":"function","function":{name, description, parameters}}.
+ *  One builder for ToolRegistry, LlmProvider, and Memory schemas so the
+ *  shape cannot drift between them. */
+fun toolSchema(name: String, description: String, parameters: JSONObject): JSONObject =
+    JSONObject()
+        .put("type", "function")
+        .put(
+            "function",
+            JSONObject()
+                .put("name", name)
+                .put("description", description)
+                .put("parameters", parameters),
+        )
+
 class ToolRegistry {
     private val tools = mutableMapOf<String, ToolDefinition>()
 
@@ -130,15 +145,7 @@ class ToolRegistry {
     fun toolSchemas(): JSONArray =
         JSONArray(
             tools.values.map { definition ->
-                JSONObject()
-                    .put("type", "function")
-                    .put(
-                        "function",
-                        JSONObject()
-                            .put("name", definition.name)
-                            .put("description", definition.description)
-                            .put("parameters", definition.parameters),
-                    )
+                toolSchema(definition.name, definition.description, definition.parameters)
             },
         )
 

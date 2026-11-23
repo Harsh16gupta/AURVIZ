@@ -11,7 +11,3 @@ GROQ_MODEL=llama-3.1-8b-instant
 # Gmail OAuth (Desktop-app client, PKCE + loopback). Required for sign-in.
 GOOGLE_OAUTH_CLIENT_ID=
 GOOGLE_OAUTH_CLIENT_SECRET=
-# Legacy / unused (ADR-0004: Groq is the single fallback; DeepSeek entries
-# remain read by debug BuildConfig but are not part of the shipped path).
-DEEPSEEK_API_KEY=
-DEEPSEEK_BASE_URL=https://api.deepseek.com

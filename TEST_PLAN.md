@@ -3,8 +3,8 @@
 ## How to run
 
 - `export ANDROID_HOME=$HOME/Library/Android/sdk`
-- `./gradlew :app:testDebugUnitTest` — ticket 37: **294 tests, 0 failures**
-  (26 classes incl. `PerfTimingsTest`; 293 before this ticket).
+- `./gradlew :app:testDebugUnitTest` — fix-review: **295 tests, 0 failures**
+  (27 classes incl. `PerfTimingsTest`; 294 at ticket 37).
 - Reports: `app/build/test-results/testDebugUnitTest/*.xml`.
 
 ## Coverage by area (representative, not exhaustive)
@@ -16,6 +16,8 @@
 | Prompt shaping | `PromptShapingTest` | system framing, source-tagged results, delimited memory section |
 | Red team | `RedTeamTest` | evil-forward + memory-poisoning → foreground card / scheduled PendingApproval, never a send; policy denies even when gate approved |
 | Email | `EmailTest`, `EmailSearchReadTest`, `EmailSendTest` | PKCE/auth forms, search/read tools, send MIME + policy seam |
+| LLM provider | `LlmProviderTest` | tools request shape, tool-call parsing, 429/401 mapping, connect/read timeouts, schedule schemas |
+| Tool registry | `ToolRegistryTest` | schema/risk/gate declarations, arg validation, email/schedule/memory tools, `toolSchemas()` payload |
 | Web | `WebTest`, `WebToolsTest`, `WebBackgroundTest` | foreground bridge tools, background OkHttp/Jsoup path, domain allowlist |
 | Memory | `MemoryTest` | keyword ranking, importance/recency boosts, overlap-beats-boosts guard, `markUsed`, offline FTS prefix fallback, migration 2→3 |
 | Schedules | `ScheduleTest` | parse 12am/12pm, daily/weekly triggers, create/list/cancel tools |
