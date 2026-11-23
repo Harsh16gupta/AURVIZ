@@ -23,25 +23,25 @@ class ApprovalGateTest {
         val first = gate.openGate(run, "call_A")!!
         // Second gated call in the same run replaces the card.
         val second = gate.openGate(run, "call_B")!!
-        assertTrue(gate.resolve(run, "call_A", ApprovalDecision.Approved).not())
-        assertTrue(first.isEmpty())
-        assertTrue(gate.resolve(run, "call_B", ApprovalDecision.Approved))
-        assertEquals(ApprovalDecision.Approved, second.poll(1, TimeUnit.SECONDS))
+        assertFalse(gate.resolve(first.proposalId, ApprovalDecision.Approved))
+        assertTrue(first.queue.isEmpty())
+        assertTrue(gate.resolve(second.proposalId, ApprovalDecision.Approved))
+        assertEquals(ApprovalDecision.Approved, second.queue.poll(1, TimeUnit.SECONDS))
     }
 
     @Test
     fun decisionFromOldRunCannotReleaseNewRun() {
         val gate = ApprovalGate()
         val run1 = gate.startRun()!!
-        gate.openGate(run1, "call_A")
+        val stale = gate.openGate(run1, "call_A")!!
         gate.finishRun(run1)
         val run2 = gate.startRun()!!
-        val queue2 = gate.openGate(run2, "call_A")!!
-        // Stale run id never matches the open gate.
-        assertFalse(gate.resolve(run1, "call_A", ApprovalDecision.Approved))
-        assertTrue(queue2.isEmpty())
-        assertTrue(gate.resolve(run2, "call_A", ApprovalDecision.Approved))
-        assertEquals(ApprovalDecision.Approved, queue2.poll(1, TimeUnit.SECONDS))
+        val current = gate.openGate(run2, "call_A")!!
+        // Stale nonce never matches the open card, even for the same call id.
+        assertFalse(gate.resolve(stale.proposalId, ApprovalDecision.Approved))
+        assertTrue(current.queue.isEmpty())
+        assertTrue(gate.resolve(current.proposalId, ApprovalDecision.Approved))
+        assertEquals(ApprovalDecision.Approved, current.queue.poll(1, TimeUnit.SECONDS))
     }
 
     @Test
@@ -49,14 +49,58 @@ class ApprovalGateTest {
         val gate = ApprovalGate()
         val run = gate.startRun()!!
         val first = gate.openGate(run, "call_1")!!
-        assertTrue(gate.resolve(run, "call_1", ApprovalDecision.Approved))
+        assertTrue(gate.resolve(first.proposalId, ApprovalDecision.Approved))
         // Late second tap on the same card is dropped (one-shot).
-        assertFalse(gate.resolve(run, "call_1", ApprovalDecision.Approved))
-        assertEquals(ApprovalDecision.Approved, first.poll(1, TimeUnit.SECONDS))
+        assertFalse(gate.resolve(first.proposalId, ApprovalDecision.Approved))
+        assertEquals(ApprovalDecision.Approved, first.queue.poll(1, TimeUnit.SECONDS))
         // Next gated call opens a fresh empty queue — no queued decision.
         val second = gate.openGate(run, "call_2")!!
-        assertTrue(second.isEmpty())
-        assertNull(second.poll(200, TimeUnit.MILLISECONDS))
+        assertTrue(second.queue.isEmpty())
+        assertNull(second.queue.poll(200, TimeUnit.MILLISECONDS))
+    }
+
+    @Test
+    fun proposalIdsAreUniqueOpaqueAndUnrelatedToCallId() {
+        val gate = ApprovalGate()
+        val run = gate.startRun()!!
+        // Same (run, call id) opened twice: distinct non-blank nonces.
+        val first = gate.openGate(run, "call_s0_0")!!
+        val second = gate.openGate(run, "call_s0_0")!!
+        assertTrue(first.proposalId.isNotBlank())
+        assertTrue(second.proposalId.isNotBlank())
+        assertTrue(first.proposalId != second.proposalId)
+        // The nonce is opaque: replaying the Tool call id as the nonce fails.
+        assertFalse(gate.resolve("call_s0_0", ApprovalDecision.Approved))
+        assertFalse(gate.resolve("", ApprovalDecision.Approved))
+        assertTrue(second.queue.isEmpty())
+        gate.finishRun(run)
+    }
+
+    @Test
+    fun staleNonceCannotReleaseRecycledFallbackId() {
+        val gate = ApprovalGate()
+        val run1 = gate.startRun()!!
+        val staleNonce = gate.openGate(run1, "call_s0_0")!!.proposalId
+        gate.finishRun(run1)
+        // The next Task Execution regenerates the same fallback call id
+        // (AgentLoop call_s{step}_{index}); the old card's tap must not
+        // release the new card's Tool.
+        val run2 = gate.startRun()!!
+        val current = gate.openGate(run2, "call_s0_0")!!
+        assertTrue(staleNonce != current.proposalId)
+        assertFalse(gate.resolve(staleNonce, ApprovalDecision.Approved))
+        assertTrue(current.queue.isEmpty())
+        assertTrue(gate.resolve(current.proposalId, ApprovalDecision.Approved))
+        assertEquals(ApprovalDecision.Approved, current.queue.poll(1, TimeUnit.SECONDS))
+    }
+
+    @Test
+    fun resolveAfterFinishRunFails() {
+        val gate = ApprovalGate()
+        val run = gate.startRun()!!
+        val ticket = gate.openGate(run, "call_A")!!
+        gate.finishRun(run)
+        assertFalse(gate.resolve(ticket.proposalId, ApprovalDecision.Approved))
     }
 
     @Test

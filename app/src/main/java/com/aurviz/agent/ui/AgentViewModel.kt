@@ -823,28 +823,25 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
     // SendPolicy still screens an approved send before the transport.
     //
     // P0 binding: one ApprovalGate per ViewModel. Each gated call opens a
-    // fresh one-shot queue bound to (runId, callId); the card buttons pass
-    // the visible call id back and stale ids are ignored. One Task
-    // Execution runs at a time so a second command cannot replace the open
-    // card's queue.
+    // fresh one-shot ticket bound to an opaque per-proposal nonce; the card
+    // buttons echo the nonce back (never the Tool call id) and stale
+    // nonces are ignored. One Task Execution runs at a time so a second
+    // command cannot replace the open card's queue.
     private val approvalGate = ApprovalGate()
 
     @Volatile
     private var currentRunId: Long? = null
 
-    fun approvePendingSend(expectedCallId: String) {
-        val runId = currentRunId ?: return
-        approvalGate.resolve(runId, expectedCallId, ApprovalDecision.Approved)
+    fun approvePendingSend(proposalId: String) {
+        approvalGate.resolve(proposalId, ApprovalDecision.Approved)
     }
 
-    fun approvePendingSendEdited(expectedCallId: String, args: Map<String, Any?>) {
-        val runId = currentRunId ?: return
-        approvalGate.resolve(runId, expectedCallId, ApprovalDecision.ApprovedWithEdit(args))
+    fun approvePendingSendEdited(proposalId: String, args: Map<String, Any?>) {
+        approvalGate.resolve(proposalId, ApprovalDecision.ApprovedWithEdit(args))
     }
 
-    fun rejectPendingSend(expectedCallId: String) {
-        val runId = currentRunId ?: return
-        approvalGate.resolve(runId, expectedCallId, ApprovalDecision.Rejected)
+    fun rejectPendingSend(proposalId: String) {
+        approvalGate.resolve(proposalId, ApprovalDecision.Rejected)
     }
 
     private fun runLoopCommand(cmd: String) {
@@ -863,6 +860,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                 providerUsed = null,
                 providersTried = emptyList(),
                 pendingApproval = null,
+                pendingApprovalProposalId = null,
                 pendingApprovalUnseen = emptyList(),
                 agentRunning = true,
             )
@@ -876,8 +874,8 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
             val registry = defaultToolRegistry(gmailApi = gmail, scheduleStore = scheduleStore, memoryStore = roomStore)
             val confirm: (ToolCall) -> ApprovalDecision = { call ->
                 val callId = call.id.orEmpty()
-                val gate = approvalGate.openGate(runId, callId)
-                if (gate == null || callId.isEmpty()) {
+                val ticket = approvalGate.openGate(runId, callId)
+                if (ticket == null || callId.isEmpty()) {
                     ApprovalDecision.Rejected
                 } else {
                     val known =
@@ -890,6 +888,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                     _state.update {
                         it.copy(
                             pendingApproval = call,
+                            pendingApprovalProposalId = ticket.proposalId,
                             pendingApprovalUnseen = unseen,
                             statusLine = "Command: $cmd\nAgent: needs approval: ${call.name}",
                         )
@@ -898,7 +897,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                     // never an auto-approve. Interrupt also maps to TimedOut
                     // so cancellation never releases the Tool.
                     try {
-                        gate.poll(ApprovalGate.APPROVAL_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+                        ticket.queue.poll(ApprovalGate.APPROVAL_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
                             ?: ApprovalDecision.TimedOut
                     } catch (_: InterruptedException) {
                         ApprovalDecision.TimedOut
@@ -930,6 +929,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                                 timeline = snapshot,
                                 // The decision landed: drop the card.
                                 pendingApproval = if (event is AgentEvent.StepDone) null else it.pendingApproval,
+                                pendingApprovalProposalId = if (event is AgentEvent.StepDone) null else it.pendingApprovalProposalId,
                                 pendingApprovalUnseen = if (event is AgentEvent.StepDone) emptyList() else it.pendingApprovalUnseen,
                             )
                         }
@@ -955,6 +955,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                                 providerUsed = used,
                                 providersTried = tried,
                                 pendingApproval = null,
+                                pendingApprovalProposalId = null,
                                 pendingApprovalUnseen = emptyList(),
                                 perf = it.perf.copy(planMs = System.currentTimeMillis() - runT0),
                             )
@@ -968,6 +969,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                                 providerUsed = chat.lastProvider,
                                 providersTried = chat.tried.toList(),
                                 pendingApproval = null,
+                                pendingApprovalProposalId = null,
                                 pendingApprovalUnseen = emptyList(),
                                 perf = it.perf.copy(planMs = System.currentTimeMillis() - runT0),
                             )
@@ -982,6 +984,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                         providerUsed = chat.lastProvider,
                         providersTried = chat.tried.toList(),
                         pendingApproval = null,
+                        pendingApprovalProposalId = null,
                         pendingApprovalUnseen = emptyList(),
                     )
                 }
@@ -992,6 +995,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                     it.copy(
                         agentRunning = false,
                         pendingApproval = null,
+                        pendingApprovalProposalId = null,
                         pendingApprovalUnseen = emptyList(),
                     )
                 }

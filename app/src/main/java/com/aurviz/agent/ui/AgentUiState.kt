@@ -51,7 +51,11 @@ data class AgentUiState(
     // Confirmation). NeedsApproval raises pendingApproval with the
     // unseen flags computed at raise time; StepDone clears it.
     // Approve/Reject resolve the suspended gate — nothing runs before.
+    // P0: the card's capability is the opaque per-proposal nonce in
+    // pendingApprovalProposalId (never the Tool call id — fallback ids
+    // repeat every run). Buttons echo the nonce; a stale/guessed id fails.
     val pendingApproval: ToolCall? = null,
+    val pendingApprovalProposalId: String? = null,
     // Ticket 15/28: writes a scheduled run held for the user (GLOSSARY
     // Confirmation for unattended runs, ADR-0002). Each row renders its
     // approval card in-app; approving runs the held call exactly once,

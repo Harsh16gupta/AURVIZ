@@ -86,15 +86,20 @@ fun CommandScreen(
                 // Ticket 12/25: the Confirmation gate's card. Shows the
                 // exact send the model asked for plus the unseen-recipient
                 // highlight; Approve runs it once through the gated path,
-                // Reject discards it with no send.
-                state.pendingApproval?.let { call ->
+                // Reject discards it with no send. P0: the card echoes the
+                // opaque per-proposal nonce (never the Tool call id) and
+                // renders only when the nonce is present — no nonce, no card.
+                val pendingCall = state.pendingApproval
+                val proposalId = state.pendingApprovalProposalId
+                if (pendingCall != null && proposalId != null) {
                     item {
                         ApprovalCardRow(
-                            call = call,
+                            call = pendingCall,
+                            proposalId = proposalId,
                             unseen = state.pendingApprovalUnseen,
-                            onApprove = { onApprovePending(call.id.orEmpty()) },
-                            onApproveEdited = { args -> onApproveEdited(call.id.orEmpty(), args) },
-                            onReject = { onRejectPending(call.id.orEmpty()) },
+                            onApprove = { onApprovePending(proposalId) },
+                            onApproveEdited = { args -> onApproveEdited(proposalId, args) },
+                            onReject = { onRejectPending(proposalId) },
                         )
                     }
                 }
@@ -172,6 +177,7 @@ private fun TimelineRow(step: TimelineStep) {
 @Composable
 private fun ApprovalCardRow(
     call: ToolCall,
+    proposalId: String,
     unseen: List<String>,
     onApprove: () -> Unit,
     onApproveEdited: (Map<String, Any?>) -> Unit,
@@ -180,9 +186,9 @@ private fun ApprovalCardRow(
     val unseenSet = unseen.map { it.trim().lowercase() }.toSet()
     Section("Confirmation — ${call.name}") {
         if (call.name == "send_email") {
-            var to by remember(call.id) { mutableStateOf((call.arguments["to"] as? String).orEmpty()) }
-            var subject by remember(call.id) { mutableStateOf((call.arguments["subject"] as? String).orEmpty()) }
-            var body by remember(call.id) { mutableStateOf((call.arguments["body"] as? String).orEmpty()) }
+            var to by remember(proposalId) { mutableStateOf((call.arguments["to"] as? String).orEmpty()) }
+            var subject by remember(proposalId) { mutableStateOf((call.arguments["subject"] as? String).orEmpty()) }
+            var body by remember(proposalId) { mutableStateOf((call.arguments["body"] as? String).orEmpty()) }
             TextField(value = to, onValueChange = { to = it }, label = "To")
             TextField(value = subject, onValueChange = { subject = it }, label = "Subject")
             TextField(value = body, onValueChange = { body = it }, label = "Body", minLines = 3)
