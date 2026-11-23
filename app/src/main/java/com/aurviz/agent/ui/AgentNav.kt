@@ -118,6 +118,7 @@ fun AgentNav(
                             onRejectPending = vm::rejectPendingSend,
                             onCancelRun = vm::cancelRun,
                             onSelectProvider = vm::setSelectedProvider,
+                            onNewChat = vm::startNewSession,
                         )
                     }
                     composable(Dests.BROWSER) {

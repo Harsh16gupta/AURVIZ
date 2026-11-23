@@ -120,16 +120,32 @@ class AgentLoop(
         const val DEFAULT_TOTAL_TIMEOUT_MS = 300_000L
     }
 
-    fun run(userText: String, memories: List<Memory> = emptyList()): AgentLoopResult {
+    fun run(
+        userText: String,
+        memories: List<Memory> = emptyList(),
+        accountEmail: String? = null,
+        history: List<ChatMessage> = emptyList(),
+    ): AgentLoopResult {
         // Ticket 16/29: the system prompt opens the conversation (tool
         // content is data, never instructions) and memories ride in its
         // delimited section. The user message carries the bare command —
         // no memory concatenation on this path (ADR-0005).
+        // Issue #51: session history rides between system and the fresh
+        // user turn (first turn anchored, middle compacted at append time);
+        // scheduled runs pass empty history and stay stateless.
         val messages =
-            mutableListOf(
-                ChatMessage(role = "system", content = buildSystemPrompt(memories)),
-                ChatMessage(role = "user", content = userText),
-            )
+            if (history.isEmpty()) {
+                mutableListOf(
+                    ChatMessage(role = "system", content = buildSystemPrompt(memories, accountEmail)),
+                    ChatMessage(role = "user", content = userText),
+                )
+            } else {
+                buildSessionMessages(
+                    buildSystemPrompt(memories, accountEmail),
+                    history,
+                    userText,
+                ).toMutableList()
+            }
         val steps = mutableListOf<ExecutedStep>()
         val startMs = nowMs()
         fun failed(error: String): AgentLoopResult.Failed {

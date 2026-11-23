@@ -2,6 +2,21 @@
 
 Every case where the AI was wrong and how it was caught. Add an entry with file:line evidence before moving on.
 
+## 2026-11-23 — Issue #51 session context V1 (`agent/session-context-51`)
+
+- **ViewModel missed import broke compile.** First build failed with
+  unresolved `appendSessionTurn` in `AgentViewModel.kt:1312,1335` — the
+  ViewModel lives in `com.aurviz.agent.ui` while the helper lives in
+  `com.aurviz.agent`. Fixed with explicit
+  `import com.aurviz.agent.appendSessionTurn`; suite green after.
+- **Glossary avoided Session, issue requires it.** `GLOSSARY.md:29` said
+  Interaction avoids Session, but #51 is session-scoped. Added Session
+  term (sequence of Interactions sharing one transcript) instead of
+  fighting the wording in code review.
+- Tests: new `SessionContextTest` (5 tests: history carried, cold start,
+  identity grounding, compaction priority, tool-body drop). Full
+  `:app:testDebugUnitTest` green.
+
 ## 2026-11-23 — deep-review fix batch (against `8ec669f`, 11 commits)
 
 - **Fail-open default broke two loop tests after the fix, not before.**

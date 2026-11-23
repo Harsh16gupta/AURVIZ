@@ -112,6 +112,10 @@ data class AgentUiState(
     val interactions: List<InteractionRecord> = emptyList(),
     val activeCommand: String? = null,
     val activeRecalledMemories: List<String> = emptyList(),
+    // Session-scoped thread (Issue #51): which ChatGPT-style thread the
+    // model sees. New Session = empty transcript. Scheduled runs ignore it.
+    val sessionId: String = "s_default",
+    val sessionTurns: Int = 0,
     // Interactive AI provider override (null = Auto/Default).
     val selectedProvider: String? = null,
     val confirmSendEmail: Boolean = true,

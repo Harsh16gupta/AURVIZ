@@ -94,6 +94,7 @@ fun CommandScreen(
     onRejectPending: (String) -> Unit = {},
     onCancelRun: () -> Unit = {},
     onSelectProvider: (String?) -> Unit = {},
+    onNewChat: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val haptics = LocalHaptics.current
@@ -114,6 +115,16 @@ fun CommandScreen(
             ) {
                 Text("AURVIZ", style = Theme.typography.title)
                 Spacer(Modifier.weight(1f))
+                if (state.sessionTurns > 0) {
+                    Text(
+                        "thread ${state.sessionTurns}",
+                        style = Theme.typography.caption,
+                        color = Theme.colors.onBackgroundMuted,
+                    )
+                }
+                Button(onClick = onNewChat, variant = ButtonVariant.Secondary) {
+                    Text("New chat")
+                }
                 ModelPill(model = effectiveModel, onClick = { showProviderSheet = true })
             }
 
