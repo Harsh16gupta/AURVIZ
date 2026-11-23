@@ -57,6 +57,8 @@ import com.aurviz.agent.formatSchedulePreview
 import com.aurviz.agent.forgetPreview
 import com.aurviz.agent.knownAddressesFromInbox
 import com.aurviz.agent.listSchedules
+import com.aurviz.agent.loopScheduleSideEffect
+import com.aurviz.agent.LoopScheduleSideEffect
 import com.aurviz.agent.newCodeVerifier
 import com.aurviz.agent.openPage
 import com.aurviz.agent.parseSchedule
@@ -724,6 +726,40 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // Foreground loop side effects (ADR-0002): a create/cancel the Task
+    // Execution ran arms/disarms exactly like the manual and held-approval
+    // paths, so an approved natural-language Schedule fires without a
+    // later global re-arm. Runs on the loop's IO thread; failures are
+    // contained so they never break the Task Execution.
+    private fun syncLoopScheduleSideEffect(call: ToolCall, result: ToolResult) {
+        val success = result is ToolResult.Success
+        when (loopScheduleSideEffect(call.name, success)) {
+            LoopScheduleSideEffect.ARM -> {
+                val newId = (result as? ToolResult.Success)?.data
+                    .let { it as? Map<*, *> }?.get("id") as? String ?: return
+                try {
+                    val app = getApplication<Application>()
+                    listSchedules(scheduleStore).find { it.id == newId }
+                        ?.let { registerRoutineAlarm(app, it) }
+                    refreshSchedules()
+                    refreshExactAlarmFlag()
+                } catch (_: Exception) {
+                }
+            }
+            LoopScheduleSideEffect.DISARM -> {
+                val target = call.arguments["schedule_id"] as? String ?: return
+                try {
+                    val app = getApplication<Application>()
+                    cancelRoutineWork(app, target)
+                    cancelRoutineAlarm(app, target)
+                    refreshSchedules()
+                } catch (_: Exception) {
+                }
+            }
+            null -> Unit
+        }
+    }
+
     private fun handleUnschedule(raw: String) {
         val id = raw.trim().let { if (it.startsWith("sched_")) it else "sched_$it" }
         viewModelScope.launch(Dispatchers.IO) {
@@ -873,6 +909,9 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                     chat,
                     registry,
                     onEvent = { event ->
+                        if (event is AgentEvent.StepDone) {
+                            syncLoopScheduleSideEffect(event.call, event.result)
+                        }
                         progress = progress.withEvent(event)
                         val snapshot = progress.timeline()
                         val phase =

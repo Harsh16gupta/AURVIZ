@@ -263,4 +263,14 @@ class ScheduleTest {
         assertEquals(routineNotificationId("sched_1"), routineNotificationId("sched_1"))
         assertFalse(routineNotificationId("sched_1") == routineNotificationId("sched_2"))
     }
+
+    @Test
+    fun loopCreateArmsAndCancelDisarmsOnlyOnSuccess() {
+        assertEquals(LoopScheduleSideEffect.ARM, loopScheduleSideEffect("create_schedule", true))
+        assertEquals(LoopScheduleSideEffect.DISARM, loopScheduleSideEffect("cancel_schedule", true))
+        assertNull(loopScheduleSideEffect("create_schedule", false))
+        assertNull(loopScheduleSideEffect("cancel_schedule", false))
+        assertNull(loopScheduleSideEffect("send_email", true))
+        assertNull(loopScheduleSideEffect("search_emails", true))
+    }
 }

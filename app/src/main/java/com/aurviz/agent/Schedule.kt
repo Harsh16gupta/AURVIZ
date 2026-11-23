@@ -133,6 +133,21 @@ fun nextFireTime(schedule: Schedule, zone: ZoneId, now: ZonedDateTime): ZonedDat
     return null
 }
 
+// Loop-created schedule side effects (ADR-0002): a create/cancel that the
+// Task Execution ran must arm/disarm its alarm + Worker like the manual
+// and held-approval paths. Pure decision; the ViewModel maps ARM/DISARM
+// to register/cancel calls on the IO thread.
+enum class LoopScheduleSideEffect { ARM, DISARM }
+
+fun loopScheduleSideEffect(callName: String, success: Boolean): LoopScheduleSideEffect? {
+    if (!success) return null
+    return when (callName) {
+        "create_schedule" -> LoopScheduleSideEffect.ARM
+        "cancel_schedule" -> LoopScheduleSideEffect.DISARM
+        else -> null
+    }
+}
+
 // One routine = one background job: stable name per schedule id,
 // so re-saving never creates a double.
 fun uniqueWorkName(scheduleId: String): String = "schedule_$scheduleId"
