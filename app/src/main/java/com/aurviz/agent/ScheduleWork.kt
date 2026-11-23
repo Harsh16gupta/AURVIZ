@@ -109,7 +109,11 @@ class ScheduleWorker(context: Context, params: WorkerParameters) : Worker(contex
                 }
             }
         } catch (_: Exception) {
-            return Result.failure()
+            // Transient failure (DB/LLM throw): retry with the same
+            // fireTime. Safe by idempotency — a post-claim crash re-enters
+            // as DuplicateSkipped, a pre-claim crash retries for real — so
+            // the due run is preserved instead of terminally dropped.
+            return Result.retry()
         } finally {
             try {
                 db.close()

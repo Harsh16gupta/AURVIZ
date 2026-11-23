@@ -119,8 +119,15 @@ interface ScheduleRunDao {
     @Query("SELECT pid FROM schedule_runs WHERE scheduleId = :scheduleId AND fireTime = :fireTime LIMIT 1")
     fun findPid(scheduleId: String, fireTime: Long): Long?
 
-    @Query("SELECT status FROM schedule_runs WHERE pid = :pid LIMIT 1")
-    fun statusOf(pid: Long): String?
+    /**
+     * Reclaim a stale RUNNING row as a fresh lease in one conditional
+     * UPDATE: exactly one racing worker wins (returns 1), the rest see 0.
+     * The row stays RUNNING with a reclaim note — never terminally marked —
+     * so a second crash keeps the due run retryable until finish() records
+     * the real outcome. TTL ages from the alarm's fireTime (kept).
+     */
+    @Query("UPDATE schedule_runs SET status = 'RUNNING', `error` = 'stale RUNNING claim reclaimed; retrying' WHERE scheduleId = :scheduleId AND fireTime = :fireTime AND status = 'RUNNING' AND :nowMs - fireTime > :ttlMs")
+    fun reclaimStaleRunning(scheduleId: String, fireTime: Long, nowMs: Long, ttlMs: Long): Int
 }
 
 // One write a scheduled run attempted but never executed: the user
@@ -178,11 +185,10 @@ class RoomScheduleRunStore(private val dao: ScheduleRunDao) : ScheduleRunStore {
     override fun list(): List<ScheduleRun> = dao.listAll().map { it.toRun() }
 
     override fun resetStaleRunning(scheduleId: String, fireTime: Long, nowMs: Long, ttlMs: Long): Long? {
-        val pid = dao.findPid(scheduleId, fireTime) ?: return null
-        if (dao.statusOf(pid) != ScheduleRunStatus.RUNNING.name) return null
-        if (nowMs - fireTime <= ttlMs) return null
-        dao.finish(pid, ScheduleRunStatus.FAILED.name, "stale RUNNING claim reclaimed", null, 0L)
-        return pid
+        // One conditional UPDATE wins the lease atomically; the follow-up
+        // read only fetches the winner's pid.
+        if (dao.reclaimStaleRunning(scheduleId, fireTime, nowMs, ttlMs) == 0) return null
+        return dao.findPid(scheduleId, fireTime)
     }
 
     private fun ScheduleRunRow.toRun(): ScheduleRun =

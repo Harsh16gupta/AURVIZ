@@ -190,9 +190,11 @@ interface ScheduleRunStore {
 
     /**
      * Reclaim a stale RUNNING row (process death between claim and finish).
-     * Returns the existing pid when the row was RUNNING and older than ttlMs
-     * (marks it FAILED so the crash is recorded), else null. Genuinely
-     * concurrent duplicates stay DuplicateSkipped.
+     * Re-asserts the RUNNING lease and returns the existing pid when the
+     * row was RUNNING and older than ttlMs, else null. The row is never
+     * terminally marked here, so a second crash keeps the due run
+     * retryable; finish() alone records the outcome. Genuinely concurrent
+     * duplicates stay DuplicateSkipped.
      */
     fun resetStaleRunning(scheduleId: String, fireTime: Long, nowMs: Long, ttlMs: Long = STALE_RUN_TTL_MS): Long?
 }
@@ -225,7 +227,9 @@ class InMemoryScheduleRunStore : ScheduleRunStore {
         val (pid, run) = entry
         if (run.status != ScheduleRunStatus.RUNNING) return null
         if (nowMs - fireTime <= ttlMs) return null
-        rows[scheduleId to fireTime] = pid to run.copy(status = ScheduleRunStatus.FAILED, error = "stale RUNNING claim reclaimed")
+        // Synchronized = one winner; the lease is re-asserted, never
+        // terminally marked, so a second crash keeps the due run retryable.
+        rows[scheduleId to fireTime] = pid to run.copy(status = ScheduleRunStatus.RUNNING, error = "stale RUNNING claim reclaimed; retrying")
         return pid
     }
 

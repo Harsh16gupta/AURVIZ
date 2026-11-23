@@ -281,7 +281,16 @@ class ScheduledRunTest {
             rows.firstOrNull { it.scheduleId == scheduleId && it.fireTime == fireTime }
         override fun findPid(scheduleId: String, fireTime: Long): Long? =
             rows.firstOrNull { it.scheduleId == scheduleId && it.fireTime == fireTime }?.pid
-        override fun statusOf(pid: Long): String? = rows.firstOrNull { it.pid == pid }?.status
+        override fun reclaimStaleRunning(scheduleId: String, fireTime: Long, nowMs: Long, ttlMs: Long): Int {
+            val index =
+                rows.indexOfFirst {
+                    it.scheduleId == scheduleId && it.fireTime == fireTime &&
+                        it.status == ScheduleRunStatus.RUNNING.name && nowMs - fireTime > ttlMs
+                }
+            if (index < 0) return 0
+            rows[index] = rows[index].copy(status = ScheduleRunStatus.RUNNING.name, error = "stale RUNNING claim reclaimed; retrying")
+            return 1
+        }
         override fun listAll(): List<ScheduleRunRow> = rows.toList()
         override fun finish(pid: Long, status: String, error: String?, result: String?, durationMs: Long) {
             val index = rows.indexOfFirst { it.pid == pid }
@@ -313,6 +322,17 @@ class ScheduledRunTest {
         assertEquals(ScheduleRunStatus.BLOCKED_WRITE, found.status)
         assertEquals("held", found.result)
         assertEquals(7L, found.durationMs)
+    }
+
+    @Test
+    fun roomReclaimKeepsRunningLeaseForRetry() {
+        val dao = FakeScheduleRunDao()
+        val store = RoomScheduleRunStore(dao)
+        val fireTime = 1_000L
+        val pid = store.claim("sched_9", fireTime)!!
+        assertEquals(null, store.resetStaleRunning("sched_9", fireTime, fireTime + 60_000L))
+        assertEquals(pid, store.resetStaleRunning("sched_9", fireTime, fireTime + STALE_RUN_TTL_MS + 1))
+        assertEquals(ScheduleRunStatus.RUNNING, store.find("sched_9", fireTime)!!.status)
     }
 
     @Test
@@ -350,16 +370,20 @@ class ScheduledRunTest {
     // --- Seam 10: stale RUNNING claims are reclaimed; fresh ones skip. ---
 
     @Test
-    fun staleRunningClaimIsReclaimedAfterTtl() {
+    fun staleRunningClaimIsReclaimedAsFreshLease() {
         val runs = InMemoryScheduleRunStore()
         val fireTime = 1_000L
         val pid = runs.claim("sched_1", fireTime)!!
         // Fresh duplicate still loses the race.
         assertEquals(null, runs.resetStaleRunning("sched_1", fireTime, fireTime + 60_000L))
-        // After the TTL the crashed run is reclaimed and recorded FAILED.
+        // After the TTL the crashed run is reclaimed as a RUNNING lease —
+        // never terminally marked, so the due run retries instead of
+        // skipping forever.
         val reclaimed = runs.resetStaleRunning("sched_1", fireTime, fireTime + STALE_RUN_TTL_MS + 1)
         assertEquals(pid, reclaimed)
-        assertEquals(ScheduleRunStatus.FAILED, runs.find("sched_1", fireTime)!!.status)
+        val row = runs.find("sched_1", fireTime)!!
+        assertEquals(ScheduleRunStatus.RUNNING, row.status)
+        assertTrue(row.error!!.contains("reclaimed"))
     }
 
     @Test
