@@ -319,6 +319,8 @@ class HeadlessChatLlm(
 // What the summary note says: the loop's answer (or its error), plus
 // how many attempted writes are waiting for approval, plus the retry
 // disclosure when private context was replayed across providers (ADR-0004).
+// Total failure still discloses who saw the prompt — the line names the
+// tried hosts instead of going silent when no provider answered.
 fun scheduledSummary(
     answer: String?,
     error: String?,
@@ -328,8 +330,11 @@ fun scheduledSummary(
 ): String {
     val base = answer ?: error.orEmpty()
     val withBlocked = if (blockedCount > 0) "$base (${blockedCount} request(s) need your approval)" else base
-    if (providersTried.size <= 1 || providerUsed == null) return withBlocked
-    return "$withBlocked (retried on $providerUsed; tried ${providersTried.joinToString(", ")})"
+    if (providersTried.size <= 1) return withBlocked
+    val retryBit =
+        if (providerUsed != null) " (retried on $providerUsed; tried ${providersTried.joinToString(", ")})"
+        else " (tried ${providersTried.joinToString(", ")}; no provider answered)"
+    return "$withBlocked$retryBit"
 }
 
 fun scheduledRunNotification(

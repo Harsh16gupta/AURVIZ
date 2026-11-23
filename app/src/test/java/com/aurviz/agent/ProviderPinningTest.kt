@@ -100,4 +100,11 @@ class ProviderPinningTest {
         outcome as ScheduledRunOutcome.Ran
         assertEquals(listOf("gemini"), outcome.providersTried)
     }
+
+    @Test
+    fun scheduledFailureSummaryNamesTriedProviders() {
+        val summary = scheduledSummary("Routine failed: HTTP 500", "HTTP 500", 0, listOf("gemini", "groq"), null)
+        assertTrue(summary.contains("gemini, groq"))
+        assertTrue(summary.contains("no provider answered"))
+    }
 }

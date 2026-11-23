@@ -88,7 +88,7 @@ data class AgentUiState(
 // copied providersTried via retryDisclosure() (ticket 35). Null when the
 // first provider answered or nothing ran yet — no silent replay.
 fun AgentUiState.retryLine(): String? {
-    val used = providerUsed ?: return null
     if (providersTried.size <= 1) return null
+    val used = providerUsed ?: return "No provider answered (tried ${providersTried.joinToString(", ")})"
     return retryDisclosure(FallbackResult(LlmResult(emptyList(), null), used, providersTried))
 }

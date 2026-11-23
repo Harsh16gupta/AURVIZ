@@ -159,6 +159,12 @@ class ViewModelLoopWiringTest {
     }
 
     @Test
+    fun totalFailureStillDisclosesTriedProviders() {
+        val state = AgentUiState(providerUsed = null, providersTried = listOf("gemini", "groq"))
+        assertEquals("No provider answered (tried gemini, groq)", state.retryLine())
+    }
+
+    @Test
     fun checkMailWorksEndToEndThroughLoop() {
         val chat =
             FallbackChatLlm(
