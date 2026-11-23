@@ -8,6 +8,8 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -51,16 +54,17 @@ fun Composer(
     onSpeakClick: () -> Unit,
     onVoiceClick: () -> Unit,
     modifier: Modifier = Modifier,
-    placeholder: String = "Ask Vela",
+    placeholder: String = "Ask Aurviz",
     accessories: (@Composable RowScope.() -> Unit)? = null,
 ) {
+    val haptics = LocalHaptics.current
     Column(
         modifier
             .fillMaxWidth()
-            .clip(Theme.shapes.large)
-            .background(Theme.colors.surface)
-            .border(1.dp, Theme.colors.border, Theme.shapes.large)
-            .padding(Space * 2)
+            .clip(RoundedCornerShape(24.dp))
+            .background(Theme.colors.composer)
+            .border(1.dp, Theme.colors.composerRing, RoundedCornerShape(24.dp))
+            .padding(8.dp)
     ) {
         if (accessories != null) {
             Row(
@@ -78,7 +82,7 @@ fun Composer(
             modifier = Modifier.fillMaxWidth().semantics { contentDescription = placeholder },
             textStyle = Theme.typography.body.copy(color = Theme.colors.onSurface),
             cursorBrush = SolidColor(Theme.colors.primary),
-            maxLines = 6,
+            maxLines = 5,
             decorationBox = { field ->
                 Box(Modifier.padding(horizontal = Space * 2, vertical = Space * 2)) {
                     if (value.isEmpty()) Text(placeholder, color = Theme.colors.onBackgroundMuted)
@@ -129,20 +133,31 @@ fun Composer(
             ) { action ->
                 when (action) {
                     MainAction.Stop ->
-                        IconButton(
-                            onClick = onStop,
-                            contentDescription = "Stop response",
-                            variant = IconButtonVariant.Tonal,
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(Theme.shapes.fullyRounded)
+                                .background(Theme.colors.primary)
+                                .clickable {
+                                    haptics?.play(HapticKind.Medium)
+                                    onStop()
+                                }
+                                .semantics { contentDescription = "Stop response" },
+                            contentAlignment = Alignment.Center,
                         ) {
                             Icon(
                                 Icons.Stop,
                                 contentDescription = null,
-                                modifier = Modifier.size(16.dp),
+                                modifier = Modifier.size(32.dp),
+                                tint = Theme.colors.onPrimary,
                             )
                         }
                     MainAction.Send ->
                         IconButton(
-                            onClick = onSend,
+                            onClick = {
+                                haptics?.play(HapticKind.Light)
+                                onSend()
+                            },
                             contentDescription = "Send",
                             variant = IconButtonVariant.Filled,
                         ) {

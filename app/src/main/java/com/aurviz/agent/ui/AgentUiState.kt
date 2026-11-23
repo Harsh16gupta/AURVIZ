@@ -12,7 +12,9 @@ import com.aurviz.agent.TimelineStep
 import com.aurviz.agent.ToolCall
 import com.aurviz.agent.WebPage
 import com.aurviz.agent.retryDisclosure
+import com.aurviz.agent.ui.components.ConfirmationStatus
 import com.aurviz.agent.ui.components.VoiceState as OrbState
+import com.aurviz.agent.ui.theme.ThemeMode
 
 // One snapshot of everything the Compose screens render.
 // The ViewModel owns this; screens only read it and forward events.
@@ -27,6 +29,26 @@ data class VoiceUiState(
     val transcript: String = "",
     val listening: Boolean = false,
     val error: String? = null,
+)
+
+// One past command in the scrollable Interaction feed (GLOSSARY
+// Interaction): the command, recalled Memories, the Plan steps, the
+// response, and any settled Confirmation receipt.
+data class InteractionRecord(
+    val id: String,
+    val command: String,
+    val timestampMs: Long = System.currentTimeMillis(),
+    val recalledMemories: List<String> = emptyList(),
+    val steps: List<TimelineStep> = emptyList(),
+    val responseText: String = "",
+    val emails: List<EmailSummary> = emptyList(),
+    val webPage: WebPage? = null,
+    val providerUsed: String? = null,
+    val retryNotice: String? = null,
+    val confirmationTitle: String? = null,
+    val confirmationDetail: String? = null,
+    val confirmationStatus: ConfirmationStatus? = null,
+    val failed: Boolean = false,
 )
 
 data class AgentUiState(
@@ -84,6 +106,29 @@ data class AgentUiState(
     // Composer sends nothing so a second command cannot replace the open
     // Confirmation card's gate.
     val agentRunning: Boolean = false,
+    val themeMode: ThemeMode = ThemeMode.SYSTEM,
+    val hapticsEnabled: Boolean = true,
+    // Scrollable Interaction feed + in-flight command state.
+    val interactions: List<InteractionRecord> = emptyList(),
+    val activeCommand: String? = null,
+    val activeRecalledMemories: List<String> = emptyList(),
+    // Interactive AI provider override (null = Auto/Default).
+    val selectedProvider: String? = null,
+    val confirmSendEmail: Boolean = true,
+    // Disabled Schedule ids (UiPrefs-backed) + recent run history.
+    val disabledScheduleIds: Set<String> = emptySet(),
+    val scheduleRuns: List<ScheduleRunSummary> = emptyList(),
+)
+
+// One recorded scheduled run for the Recent Runs list (GLOSSARY Schedule):
+// mapped from RoomScheduleRunStore rows without changing domain entities.
+data class ScheduleRunSummary(
+    val id: String,
+    val scheduleId: String,
+    val status: String,
+    val durationMs: Long,
+    val summary: String?,
+    val timestampMs: Long,
 )
 
 // Ticket 11/24: visible retry line for CommandScreen, rendered from the
