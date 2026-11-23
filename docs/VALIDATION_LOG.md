@@ -155,3 +155,14 @@ Every case where the AI was wrong and how it was caught. Add an entry with file:
   `droppedDeepseekNameFallsBackToGemini` (`app/src/test/java/com/aurviz/agent/ProviderPickerTest.kt:37-43`);
   the re-wire adds `deepseekName`/`metaName` + 3 order tests
   (preferred → deepseek → meta → gemini → groq, blank → gemini).
+
+## 2026-11-23 — NG-3 landing (cherry-pick `0fa0f45` onto main)
+
+- **Only the docs hunk conflicted.** Code hunks (`ChatTimeline.kt` +Plan,
+  `Planner.kt`/`PlannerTest.kt` deletions, `AgentViewModel.kt` comment)
+  applied cleanly; `docs/VALIDATION_LOG.md` conflict resolved by keeping
+  main's version and writing this fresh entry instead of the stale hunk.
+- **Re-verified dead before deleting:** `grep planCommand|PlannerOutcome|
+  missingSlots|slotQuestion app/src` empty after the pick; single `Plan`
+  definition at `ChatTimeline.kt:11` (`PlanCard.kt:20` is unrelated
+  `PlanPrice`); `getImportantEmails` untouched (live registry tool).

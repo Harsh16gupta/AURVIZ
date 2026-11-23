@@ -85,7 +85,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 
-// Thin orchestrator over the tested domain logic (Planner, Email, Web,
+// Thin orchestrator over the tested domain logic (Email, Web,
 // WebViewBridge, MemoryStore, VoiceInput, LoopbackAuth). All decisions stay
 // in those files; this class only moves results into AgentUiState.
 
