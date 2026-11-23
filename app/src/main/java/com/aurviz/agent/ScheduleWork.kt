@@ -7,6 +7,7 @@ import androidx.core.app.NotificationCompat
 import androidx.room.Room
 import androidx.work.Data
 import androidx.work.ExistingWorkPolicy
+import androidx.work.ForegroundInfo
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkManager
@@ -28,6 +29,26 @@ const val FIRE_TIME_KEY = "fire_time"
 private const val ROUTINE_CHANNEL_ID = "routines"
 
 class ScheduleWorker(context: Context, params: WorkerParameters) : Worker(context, params) {
+    // Expedited work below API 31 runs as a foreground service: WorkManager
+    // calls this before doWork. Without the override the base Worker throws
+    // and the routine never runs on Android 8-11 (minSdk 26).
+    override fun getForegroundInfo(): ForegroundInfo {
+        val scheduleId = inputData.getString(SCHEDULE_ID_KEY) ?: "routine"
+        val manager =
+            applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.createNotificationChannel(
+            NotificationChannel(ROUTINE_CHANNEL_ID, "Routines", NotificationManager.IMPORTANCE_LOW),
+        )
+        val note =
+            NotificationCompat.Builder(applicationContext, ROUTINE_CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setContentTitle("Running routine")
+                .setContentText(scheduleId)
+                .setOngoing(true)
+                .build()
+        return ForegroundInfo(routineNotificationId(scheduleId), note)
+    }
+
     override fun doWork(): Result {
         val scheduleId = inputData.getString(SCHEDULE_ID_KEY) ?: return Result.failure()
         val fireTime = inputData.getLong(FIRE_TIME_KEY, 0L).takeIf { it > 0 } ?: System.currentTimeMillis()

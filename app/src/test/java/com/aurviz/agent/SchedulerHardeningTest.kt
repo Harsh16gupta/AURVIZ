@@ -215,4 +215,13 @@ class SchedulerHardeningTest {
             assertFalse("receivers must use the Worker path, found: $marker", marker in text)
         }
     }
+
+    @Test
+    fun expeditedWorkerOverridesForegroundInfo() {
+        // Android 8-11 runs expedited work as a foreground service: without
+        // this override the base Worker throws before doWork. Reflection
+        // pins the override (the runtime behavior needs a device).
+        val method = ScheduleWorker::class.java.getDeclaredMethod("getForegroundInfo")
+        assertEquals(ScheduleWorker::class.java, method.declaringClass)
+    }
 }
