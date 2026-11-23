@@ -125,4 +125,17 @@ class ChatRolesWireTest {
         assertEquals("ok", fb.result.content)
         assertTrue(seen.single().contains("hi"))
     }
+
+    @Test
+    fun advertisedToolsComeFromTheRegistryView() {
+        val captured = mutableListOf<String>()
+        val http = OpenAiChatProvider("https://example.com", "k", "m", capturingClient(captured))
+        val view = ToolRegistry().apply { register(searchEmailsTool(null)) }
+        val chat = FallbackChatLlm(listOf(NamedProvider("gemini", "k", http)), view.toolSchemas())
+        chat.chat(listOf(ChatMessage(role = "user", content = "hi")))
+        // The wire carries the run's view (1 Tool), not the 4 legacy schemas.
+        val tools = JSONObject(captured.single()).getJSONArray("tools")
+        assertEquals(1, tools.length())
+        assertEquals("search_emails", tools.getJSONObject(0).getJSONObject("function").getString("name"))
+    }
 }

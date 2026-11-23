@@ -42,6 +42,7 @@ import com.aurviz.agent.ToolCall
 import com.aurviz.agent.ToolResult
 import com.aurviz.agent.WebBridge
 import com.aurviz.agent.WebException
+import com.aurviz.agent.allToolSchemas
 import com.aurviz.agent.approvalCardFor
 import com.aurviz.agent.approvePendingApproval
 import com.aurviz.agent.buildAuthUrl
@@ -80,6 +81,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import org.json.JSONArray
 
 // Thin orchestrator over the tested domain logic (Planner, Email, Web,
 // WebViewBridge, MemoryStore, VoiceInput, LoopbackAuth). All decisions stay
@@ -150,10 +152,11 @@ fun renderLoopPrompt(messages: List<ChatMessage>): String =
 // later turn, so the accumulated private transcript (memories, mail, tool
 // results) is never replayed to a second host mid-run. Tried is merged
 // even when the turn fails, so a terminal failure still discloses who saw it.
-// The advertised set defaults to allToolSchemas(); threading the run's
-// registry view through is follow-up work (kept out of this PR).
+// The advertised set is the run's registry view (ticket 39): the model
+// sees exactly the Tools it can call, gated or not.
 class FallbackChatLlm(
     private val candidates: List<NamedProvider>,
+    private val tools: JSONArray = allToolSchemas(),
 ) : ChatLlmProvider {
     val tried: MutableList<String> = mutableListOf()
     var lastProvider: String? = null
@@ -164,7 +167,7 @@ class FallbackChatLlm(
         val effective =
             pinned?.let { name -> candidates.filter { it.name == name } } ?: candidates
         try {
-            val fb = planWithFallbackMessages(messages, effective.ifEmpty { candidates })
+            val fb = planWithFallbackMessages(messages, effective.ifEmpty { candidates }, tools)
             for (name in fb.tried) if (name !in tried) tried += name
             if (pinned == null) pinned = fb.providerName
             lastProvider = fb.providerName
@@ -880,11 +883,14 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch(Dispatchers.IO) {
             val runT0 = System.currentTimeMillis()
+            val registry = defaultToolRegistry(gmailApi = gmail, scheduleStore = scheduleStore, memoryStore = roomStore)
             val chat =
                 FallbackChatLlm(
                     defaultCandidates(BuildConfig.LLM_DEFAULT_PROVIDER, tokenVault.loadLlmKeys()),
+                    // Ticket 39 (minimal): the model sees this run's
+                    // registry view — every Tool it can call, gated or not.
+                    registry.toolSchemas(),
                 )
-            val registry = defaultToolRegistry(gmailApi = gmail, scheduleStore = scheduleStore, memoryStore = roomStore)
             val confirm: (ToolCall) -> ApprovalDecision = { call ->
                 val callId = call.id.orEmpty()
                 val ticket = approvalGate.openGate(runId, callId)

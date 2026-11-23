@@ -87,7 +87,14 @@ class ScheduleWorker(context: Context, params: WorkerParameters) : Worker(contex
                 } catch (_: Exception) {
                     LlmKeys()
                 }
-            val chat = HeadlessChatLlm(defaultCandidates(BuildConfig.LLM_DEFAULT_PROVIDER, vaultKeys))
+            val chat =
+                HeadlessChatLlm(
+                    defaultCandidates(BuildConfig.LLM_DEFAULT_PROVIDER, vaultKeys),
+                    // Ticket 39 (minimal): the scheduled model sees the
+                    // read-only view — allowed reads plus gated writes by
+                    // name, so attempts become PendingApproval rows.
+                    scheduledRegistry(full).toolSchemas(),
+                )
             return when (
                 val outcome =
                     runScheduledRoutine(

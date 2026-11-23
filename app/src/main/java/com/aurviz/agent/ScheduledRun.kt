@@ -1,5 +1,6 @@
 package com.aurviz.agent
 
+import org.json.JSONArray
 import org.json.JSONObject
 
 // Ticket 17/24: scheduled-run deferral seam (ADR-0002, gaps §3E). A
@@ -286,18 +287,18 @@ private fun blockedScheduledTool(name: String): ToolResult =
         retryable = false,
     )
 
-// Headless chat over the single-shot fallback seam (ADR-0004): every
-// loop turn replays the rendered messages through the candidates in
 // Headless chat over the structured fallback seam (ADR-0004): the loop's
 // messages ride intact. Same pinning as the foreground chat: the first
 // provider that answers handles every later turn, so private results are
 // never replayed to a second host mid-run. Tried unions every provider
 // that saw the prompt, even on failure, so the outcome can disclose it.
 // This class lives in the agent package so the Worker never imports UI.
-// The advertised set defaults to allToolSchemas(); threading the run's
-// registry view through is follow-up work (kept out of this PR).
+// The advertised set is the scheduled run's read-only registry view: the
+// model sees allowed reads plus gated writes by name, and attempts on the
+// latter become PendingApproval rows instead of silent refusals.
 class HeadlessChatLlm(
     private val candidates: List<NamedProvider>,
+    private val tools: JSONArray = allToolSchemas(),
 ) : ChatLlmProvider {
     val tried: MutableList<String> = mutableListOf()
     var lastProvider: String? = null
@@ -308,7 +309,7 @@ class HeadlessChatLlm(
         val effective =
             pinned?.let { name -> candidates.filter { it.name == name } } ?: candidates
         try {
-            val fb = planWithFallbackMessages(messages, effective.ifEmpty { candidates })
+            val fb = planWithFallbackMessages(messages, effective.ifEmpty { candidates }, tools)
             for (name in fb.tried) if (name !in tried) tried += name
             if (pinned == null) pinned = fb.providerName
             lastProvider = fb.providerName
