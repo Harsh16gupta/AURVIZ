@@ -58,7 +58,7 @@ class AgentLoopTest {
         val llm =
             FakeLlmProvider(
                 listOf(
-                    call("call_1", "getImportantEmails", mapOf("max_results" to 5)),
+                    call("call_1", "search_emails", mapOf("query" to "is:important is:unread", "max" to 5)),
                     call("call_2", "create_schedule", mapOf("task" to "check mail", "when" to "at 9am")),
                     answer("Done"),
                 ),
@@ -89,9 +89,9 @@ class AgentLoopTest {
         val llm =
             FakeLlmProvider(
                 listOf(
-                    // Missing max_results: registry validation fails this turn.
-                    call("call_1", "getImportantEmails", emptyMap()),
-                    call("call_2", "getImportantEmails", mapOf("max_results" to 5)),
+                    // Missing query: registry validation fails this turn.
+                    call("call_1", "search_emails", emptyMap()),
+                    call("call_2", "search_emails", mapOf("query" to "is:important is:unread", "max" to 5)),
                     answer("Here are your emails"),
                 ),
             )
@@ -107,14 +107,14 @@ class AgentLoopTest {
         val toolMessages = result.messages.filter { it.role == "tool" }
         val firstPayload = payload(toolMessages[0])
         assertEquals(false, firstPayload.getBoolean("ok"))
-        assertTrue(firstPayload.getString("error").contains("max_results"))
+        assertTrue(firstPayload.getString("error").contains("query"))
         assertTrue(result.steps[1].result is ToolResult.Success)
         assertEquals("Here are your emails", (result as AgentLoopResult.Answered).answer)
     }
 
     @Test
     fun maxStepsAbortEmitsFailedWithPartialTimeline() {
-        val script = (0 until 10).map { call("call_$it", "getImportantEmails", mapOf("max_results" to 1)) }
+        val script = (0 until 10).map { call("call_$it", "search_emails", mapOf("query" to "is:important is:unread", "max" to 1)) }
         val llm = FakeLlmProvider(script)
         val events = mutableListOf<AgentEvent>()
         val result = AgentLoop(llm, registry(), onEvent = events::add).run("never ends")
@@ -130,7 +130,7 @@ class AgentLoopTest {
 
         // Partial timeline: executed Tools stay DONE, tail row is the Error.
         val rows = result.toTimeline()
-        assertTrue(rows.any { it.title.startsWith("Tool 8 of 8: getImportantEmails") })
+        assertTrue(rows.any { it.title.startsWith("Tool 8 of 8: search_emails") })
         assertEquals(StepState.FAILED, rows.last().state)
         assertTrue(rows.last().title.startsWith("Error:"))
     }
@@ -220,7 +220,7 @@ class AgentLoopTest {
         val llm =
             FakeLlmProvider(
                 listOf(
-                    call(null, "getImportantEmails", mapOf("max_results" to 5)),
+                    call(null, "search_emails", mapOf("query" to "is:important is:unread", "max" to 5)),
                     answer("Done"),
                 ),
             )
@@ -239,7 +239,7 @@ class AgentLoopTest {
         val llm =
             FakeLlmProvider(
                 listOf(
-                    call("call_1", "getImportantEmails", mapOf("max_results" to 5)),
+                    call("call_1", "search_emails", mapOf("query" to "is:important is:unread", "max" to 5)),
                     call("call_2", "create_schedule", mapOf("task" to "check mail", "when" to "at 9am")),
                     answer("Done"),
                 ),
@@ -249,7 +249,7 @@ class AgentLoopTest {
         val rows = (result as AgentLoopResult.Answered).toTimeline()
         assertEquals("Heard command", rows[0].title)
         assertEquals("Planned 2 steps", rows[1].title)
-        assertEquals("Tool 1 of 2: getImportantEmails", rows[2].title)
+        assertEquals("Tool 1 of 2: search_emails", rows[2].title)
         assertEquals(StepState.DONE, rows[2].state)
         assertEquals("Tool 2 of 2: create_schedule", rows[3].title)
         assertEquals(StepState.DONE, rows[3].state)
@@ -282,7 +282,7 @@ class AgentLoopTest {
             ClockLlm(
                 script =
                     listOf(
-                        call("call_1", "getImportantEmails", mapOf("max_results" to 5)),
+                        call("call_1", "search_emails", mapOf("query" to "is:important is:unread", "max" to 5)),
                         answer("Done"),
                     ),
                 advanceMs = listOf(10_000L),
@@ -319,8 +319,8 @@ class AgentLoopTest {
             ClockLlm(
                 script =
                     listOf(
-                        call("call_1", "getImportantEmails", mapOf("max_results" to 5)),
-                        call("call_2", "getImportantEmails", mapOf("max_results" to 5)),
+                        call("call_1", "search_emails", mapOf("query" to "is:important is:unread", "max" to 5)),
+                        call("call_2", "search_emails", mapOf("query" to "is:important is:unread", "max" to 5)),
                         answer("Done"),
                     ),
                 advanceMs = listOf(10_000L, 10_000L),
@@ -346,7 +346,7 @@ class AgentLoopTest {
 
         // Partial timeline: the finished Tool stays DONE, tail is the Error.
         val rows = result.toTimeline()
-        assertTrue(rows.any { it.title == "Tool 1 of 1: getImportantEmails" && it.state == StepState.DONE })
+        assertTrue(rows.any { it.title == "Tool 1 of 1: search_emails" && it.state == StepState.DONE })
         assertEquals(StepState.FAILED, rows.last().state)
         assertTrue(rows.last().title.startsWith("Error:"))
     }
@@ -386,8 +386,8 @@ class AgentLoopTest {
                     LlmResult(
                         toolCalls =
                             listOf(
-                                ToolCall("c1", "getImportantEmails", mapOf("max_results" to 5)),
-                                ToolCall("c2", "getImportantEmails", mapOf("max_results" to 5)),
+                                ToolCall("c1", "search_emails", mapOf("query" to "is:important is:unread", "max" to 5)),
+                                ToolCall("c2", "search_emails", mapOf("query" to "is:important is:unread", "max" to 5)),
                             ),
                         content = null,
                     ),

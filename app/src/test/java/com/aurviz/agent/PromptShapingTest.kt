@@ -175,9 +175,9 @@ class PromptShapingTest {
     }
 
     @Test
-    fun legacyImportantEmailsRowsCarrySourceTags() {
+    fun searchEmailsRowsCarrySourceTags() {
         val result =
-            defaultToolRegistry(gmailApi = FakeGmail()).execute("getImportantEmails", mapOf("max_results" to 5))
+            defaultToolRegistry(gmailApi = FakeGmail()).execute("search_emails", mapOf("query" to "is:important is:unread", "max" to 5))
         assertTrue(result is ToolResult.Success)
         @Suppress("UNCHECKED_CAST")
         val rows = (result as ToolResult.Success).data as List<Map<String, Any?>>

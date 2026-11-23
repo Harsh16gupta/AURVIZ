@@ -88,7 +88,7 @@ class ProviderPickerTest {
     private fun successOn(name: String): NamedProvider {
         val result =
             LlmResult(
-                toolCalls = listOf(ToolCall("call_1", "getImportantEmails", mapOf("max_results" to 5))),
+                toolCalls = listOf(ToolCall("call_1", "search_emails", mapOf("query" to "is:important is:unread", "max" to 5))),
                 content = null,
             )
         return NamedProvider(name, "$name-key", StubProvider(result))
@@ -104,7 +104,7 @@ class ProviderPickerTest {
         val outcome = planWithFallback("check mail", listOf(first, second), sleeper = {})
         assertEquals("groq", outcome.providerName)
         assertEquals(listOf("gemini", "groq"), outcome.tried)
-        assertEquals("getImportantEmails", outcome.result.toolCalls[0].name)
+        assertEquals("search_emails", outcome.result.toolCalls[0].name)
     }
 
     @Test

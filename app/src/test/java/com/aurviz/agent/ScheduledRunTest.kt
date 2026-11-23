@@ -61,7 +61,7 @@ class ScheduledRunTest {
     @Test
     fun allowlistIsExactlyTheReadTools() {
         assertEquals(
-            setOf("search_emails", "read_email", "getImportantEmails", "get_page_text", "search_memory", "list_schedules"),
+            setOf("search_emails", "read_email", "get_page_text", "search_memory", "list_schedules"),
             SCHEDULED_RUN_ALLOWLIST,
         )
     }

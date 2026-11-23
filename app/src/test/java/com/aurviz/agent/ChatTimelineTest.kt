@@ -10,7 +10,7 @@ class ChatTimelineTest {
     private fun twoStepPlan() =
         Plan(
             steps = listOf(
-                ToolCall("call_1", "getImportantEmails", mapOf("max_results" to 5)),
+                ToolCall("call_1", "search_emails", mapOf("query" to "is:important is:unread", "max" to 5)),
                 ToolCall("call_2", "sendEmail", mapOf("to" to "a@b.com", "body" to "hi")),
             ),
         )
@@ -20,7 +20,7 @@ class ChatTimelineTest {
         val rows = buildTimeline(twoStepPlan(), doneCount = 0, error = null)
         assertEquals("Heard command", rows[0].title)
         assertEquals("Planned 2 steps", rows[1].title)
-        assertEquals("Tool 1 of 2: getImportantEmails", rows[2].title)
+        assertEquals("Tool 1 of 2: search_emails", rows[2].title)
         assertEquals("Tool 2 of 2: sendEmail", rows[3].title)
         assertEquals(StepState.RUNNING, rows[2].state)
         assertEquals(StepState.READY, rows[3].state)

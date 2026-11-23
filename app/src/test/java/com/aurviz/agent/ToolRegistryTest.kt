@@ -7,8 +7,8 @@ import org.junit.Test
 
 // Ticket 01/24: ToolRegistry validation paths. Seams: execute() dispatch +
 // validation + structured errors; registration metadata (schema, risk level,
-// requiresConfirmation, result type); built-in getImportantEmails +
-// createSchedule wiring behind injected fakes.
+// requiresConfirmation, result type); built-in search_emails +
+// create_schedule wiring behind injected fakes.
 class ToolRegistryTest {
 
     private class FakeGmail : GmailApi {
@@ -41,11 +41,11 @@ class ToolRegistryTest {
     @Test
     fun toolsDeclareSchemaRiskConfirmationAndResultType() {
         val registry = registry()
-        val emails = registry.find("getImportantEmails")!!
+        val emails = registry.find("search_emails")!!
         assertEquals(RiskLevel.LOW, emails.riskLevel)
         assertFalse(emails.requiresConfirmation)
         assertTrue(emails.resultType.isNotBlank())
-        assertTrue(emails.parameters.getJSONObject("properties").has("max_results"))
+        assertTrue(emails.parameters.getJSONObject("properties").has("query"))
 
         // ADR-0003: create_schedule and cancel_schedule are sensitive Tools,
         // gated per call; list_schedules is a read and ungated.
@@ -80,26 +80,26 @@ class ToolRegistryTest {
 
     @Test
     fun missingRequiredArgNamesTheViolation() {
-        val result = registry().execute("getImportantEmails", emptyMap())
+        val result = registry().execute("search_emails", emptyMap())
         assertTrue(result is ToolResult.Failure)
         result as ToolResult.Failure
-        assertTrue(result.error.contains("max_results"))
+        assertTrue(result.error.contains("query"))
         assertTrue(result.retryable)
     }
 
     @Test
     fun wrongArgTypeNamesTheViolation() {
-        val result = registry().execute("getImportantEmails", mapOf("max_results" to "five"))
+        val result = registry().execute("search_emails", mapOf("query" to "boss", "max" to "five"))
         assertTrue(result is ToolResult.Failure)
         result as ToolResult.Failure
-        assertTrue(result.error.contains("max_results"))
+        assertTrue(result.error.contains("max"))
         assertTrue(result.error.contains("integer"))
         assertTrue(result.retryable)
     }
 
     @Test
     fun validEmailCallSucceeds() {
-        val result = registry().execute("getImportantEmails", mapOf("max_results" to 5))
+        val result = registry().execute("search_emails", mapOf("query" to "boss", "max" to 5))
         assertTrue(result is ToolResult.Success)
     }
 
@@ -214,7 +214,7 @@ class ToolRegistryTest {
         val names = (0 until schemas.length())
             .map { schemas.getJSONObject(it).getJSONObject("function").getString("name") }
             .toSet()
-        assertEquals(setOf("search_emails", "read_email", "send_email", "getImportantEmails", "create_schedule", "list_schedules", "cancel_schedule", "save_memory", "search_memory", "open_url", "get_page_text", "click", "scroll", "extract"), names)
+        assertEquals(setOf("search_emails", "read_email", "send_email", "create_schedule", "list_schedules", "cancel_schedule", "save_memory", "search_memory", "open_url", "get_page_text", "click", "scroll", "extract"), names)
     }
 
     @Test

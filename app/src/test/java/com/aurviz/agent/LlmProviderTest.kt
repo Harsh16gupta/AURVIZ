@@ -15,12 +15,12 @@ class LlmProviderTest {
         val tools =
             JSONArray().put(
                 toolSchema(
-                    "getImportantEmails",
-                    "Fetch unread important emails.",
+                    "search_emails",
+                    "Search the Gmail mailbox.",
                     JSONObject()
                         .put("type", "object")
-                        .put("properties", JSONObject().put("max_results", JSONObject().put("type", "integer")))
-                        .put("required", JSONArray().put("max_results")),
+                        .put("properties", JSONObject().put("query", JSONObject().put("type", "string")))
+                        .put("required", JSONArray().put("query")),
                 ),
             )
         val body =
@@ -32,7 +32,7 @@ class LlmProviderTest {
         assertEquals("gemini-2.5-flash", body.getString("model"))
         assertEquals("auto", body.getString("tool_choice"))
         assertEquals(
-            "getImportantEmails",
+            "search_emails",
             body.getJSONArray("tools").getJSONObject(0).getJSONObject("function").getString("name"),
         )
         val messages = body.getJSONArray("messages")
@@ -46,13 +46,14 @@ class LlmProviderTest {
             JSONObject(
                 """{"choices": [{"message": {"role": "assistant", "content": null,
                 "tool_calls": [{"id": "call_abc123", "type": "function",
-                "function": {"name": "getImportantEmails", "arguments": "{\"max_results\": 5}"}}]}}]}""",
+                "function": {"name": "search_emails", "arguments": "{\"query\": \"is:important is:unread\", \"max\": 5}"}}]}}]}""",
             )
         val result = parseToolCalls(response)
         assertEquals(1, result.toolCalls.size)
         assertEquals("call_abc123", result.toolCalls[0].id)
-        assertEquals("getImportantEmails", result.toolCalls[0].name)
-        assertEquals(5, result.toolCalls[0].arguments["max_results"])
+        assertEquals("search_emails", result.toolCalls[0].name)
+        assertEquals("is:important is:unread", result.toolCalls[0].arguments["query"])
+        assertEquals(5, result.toolCalls[0].arguments["max"])
     }
 
     @Test
@@ -86,8 +87,9 @@ class LlmProviderTest {
     fun fakeReturnsCannedToolCall() {
         val result = FakeLlmProvider().plan("Check important emails")
         assertEquals(1, result.toolCalls.size)
-        assertEquals("getImportantEmails", result.toolCalls[0].name)
-        assertEquals(5, result.toolCalls[0].arguments["max_results"])
+        assertEquals("search_emails", result.toolCalls[0].name)
+        assertEquals("is:important is:unread", result.toolCalls[0].arguments["query"])
+        assertEquals(5, result.toolCalls[0].arguments["max"])
     }
 
     // Ticket 75 (part of #71): the schema bodies live in their owning
@@ -131,7 +133,7 @@ class LlmProviderTest {
         val names = (0 until schemas.length())
             .map { schemas.getJSONObject(it).getJSONObject("function").getString("name") }
             .toSet()
-        assertTrue(names.contains("getImportantEmails"))
+        assertTrue(names.contains("search_emails"))
         assertTrue(names.contains("create_schedule"))
         assertTrue(names.contains("list_schedules"))
         assertTrue(names.contains("cancel_schedule"))

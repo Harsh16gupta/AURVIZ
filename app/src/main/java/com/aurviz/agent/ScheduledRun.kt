@@ -249,14 +249,11 @@ fun runScheduled(
 // ADR-0002: scheduled runs see reads only. A scheduled send_email or
 // schedule/memory write is never executed: the loop records a
 // PendingApproval row and the user confirms in-app.
-// getImportantEmails is a read-only legacy fetch (ADR-0003: reads are
-// ungated), so it stays ungated here too — otherwise a read would be
-// held as a Confirmation row.
+// ADR-0003 gates only sensitive calls, so reads stay ungated here too.
 val SCHEDULED_RUN_ALLOWLIST: Set<String> =
     setOf(
         "search_emails",
         "read_email",
-        "getImportantEmails",
         "get_page_text",
         "search_memory",
         "list_schedules",

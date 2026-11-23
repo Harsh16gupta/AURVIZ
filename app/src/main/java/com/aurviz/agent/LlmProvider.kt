@@ -265,7 +265,7 @@ object Providers {
 class FakeLlmProvider(
     private val script: List<LlmResult> = listOf(
         LlmResult(
-            toolCalls = listOf(ToolCall("call_fake001", "getImportantEmails", mapOf("max_results" to 5))),
+            toolCalls = listOf(ToolCall("call_fake001", "search_emails", mapOf("query" to "is:important is:unread", "max" to 5))),
             content = null,
         ),
     ),

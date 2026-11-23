@@ -253,45 +253,6 @@ fun defaultToolRegistry(
         registry.register(tool)
     }
 
-    // Legacy demo read Tool (deleted in ticket 76, part of #71): its
-    // schema body lives here until then — no shared hardcoded schema
-    // list; the kernel's toolSchemas() view is the single advertised list.
-    registry.register(
-        ToolDefinition(
-            name = "getImportantEmails",
-            description = "Fetch unread important emails.",
-            parameters =
-                JSONObject()
-                    .put("type", "object")
-                    .put(
-                        "properties",
-                        JSONObject().put("max_results", JSONObject().put("type", "integer")),
-                    )
-                    .put("required", JSONArray().put("max_results")),
-            // Read-only fetch; ADR-0003 gates only sensitive calls.
-            riskLevel = RiskLevel.LOW,
-            requiresConfirmation = false,
-            resultType = "emails",
-            execute = { args ->
-                val api = gmailApi
-                    ?: return@ToolDefinition ToolResult.Failure("gmail is not connected", retryable = false)
-                val max = (args["max_results"] as Number).toInt()
-                val rows = readImportant(api, max)
-                ToolResult.Success(
-                    rows.map { row ->
-                        mapOf(
-                            "id" to row.id,
-                            "from" to row.from,
-                            "subject" to row.subject,
-                            "snippet" to row.snippet,
-                            "source" to emailSource(row.id),
-                        )
-                    },
-                )
-            },
-        ),
-    )
-
     // Ticket 73 (part of #71): Schedule adapter owns create/list/cancel;
     // each entry registers explicitly into the kernel, in adapter order.
     for (tool in scheduleTools(scheduleStore)) {

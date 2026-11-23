@@ -2,6 +2,58 @@
 
 Every case where the AI was wrong and how it was caught. Add an entry with file:line evidence before moving on.
 
+## 2026-11-24 — Issue #76 legacy getImportantEmails deletion (`main`)
+
+- **First AgentLoopTest edit targeted lines the replaceAll had already migrated.**
+  Two `edit` calls with `replaceAll: true` converted every
+  `call("call_N", "getImportantEmails", mapOf("max_results" to 5))`
+  line first (`AgentLoopTest.kt:61,242,285,322-323` and the c1/c2 batch
+  at `:389-390`); the follow-up edit for the error-recovery test then
+  failed to match because its `call_2` line was already
+  `search_emails`. Caught by the edit-tool mismatch error; re-read
+  `AgentLoopTest.kt:87-96` and repaired with a comment-only edit
+  (`Missing max_results` → `Missing query` plus the `call_1` line).
+  Post-edit grep confirms the migration.
+- **The negative-absence assertion was itself the last legacy reference.**
+  First draft of `registryViewExposesAllAdapterTools`
+  (`LlmProviderTest.kt:136`) pinned
+  `assertTrue(!names.contains("getImportantEmails"))`, which keeps the
+  deleted name in test sources and violates the ticket's zero-reference
+  criterion by construction. Removed the line: absence is already pinned
+  without naming it by the exact 13-Tool set assertion in
+  `ToolRegistryTest.toolSchemasExposeAllToolsForLlm`
+  (`ToolRegistryTest.kt:217`). Final `grep getImportantEmails app/src`
+  is empty.
+- **No behavior drift by construction.** Prod delta is pure deletion:
+  the 38-line `getImportantEmails` registration block removed from
+  `defaultToolRegistry` (`ToolRegistry.kt:256-293`), one entry dropped
+  from `SCHEDULED_RUN_ALLOWLIST` (`ScheduledRun.kt:255-263`, now 5
+  reads), `FakeLlmProvider` default script re-canned to the search Tool
+  (`LlmProvider.kt:268`: `search_emails` with `query`
+  `"is:important is:unread"`, `max` 5 — the Gmail-query-syntax
+  equivalent of the legacy "unread important" fetch). The `readImportant`
+  helper (`Email.kt:38`) stays: it is domain logic covered by
+  `EmailTest`, not the Tool wrapper; the ticket deletes the Tool only.
+  Fixture migration is mechanical (`max_results` → `query`+`max`) at
+  every scripted call site across `AgentLoopTest` (9 sites including the
+  max-step, null-id, timeout, and batch-timeout paths),
+  `ToolRegistryTest` (schema/validation/exact-set pins),
+  `LlmProviderTest` (request-build, wire-parse, canned-default, view
+  pins), `ProviderPickerTest`, `ChatTimelineTest`,
+  `PromptShapingTest` (renamed to `searchEmailsRowsCarrySourceTags`),
+  and `ScheduledRunTest` (5-entry allowlist).
+- **Foreign uncommitted work parked, not committed.** Same condition as
+  #72/#73/#74/#75: seven tracked schedule-path edits plus four
+  untracked files stashed/parked in /tmp before the test step and
+  restored untouched after — the commit holds only the three prod
+  files, the seven test files, and this log.
+- Tests: full `:app:testDebugUnitTest --rerun-tasks` green (430 tests,
+  0 failures; same count as #75, all migrated in place). Secret scan
+  clean on all ten touched files.
+  `spike/` and `docs/RESEARCH_PATTERNS.md` still name the legacy Tool;
+  out of scope — the ticket's zero-reference criterion covers main and
+  test sources (`app/src`).
+
 ## 2026-11-24 — Issue #75 schema-seam collapse to registry toolSchemas (`main`)
 
 - **Scheduled wire test asserted the wrong contract.** First draft of
