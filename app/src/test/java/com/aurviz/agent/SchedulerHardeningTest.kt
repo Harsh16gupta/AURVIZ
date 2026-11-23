@@ -128,8 +128,8 @@ class SchedulerHardeningTest {
     fun gmailAuthFailureVariantsAreRecognized() {
         for (error in listOf(
             "gmail is not connected: token expired",
-            "401 Unauthorized",
-            "request failed with 401",
+            "Gmail: HTTP 401 token expired",
+            "gmail request failed with 401",
             "invalid_grant: Token has been expired or revoked",
             "gmail token refresh failed",
             "Please Reconnect Gmail to continue",
@@ -137,6 +137,15 @@ class SchedulerHardeningTest {
             assertTrue("should be auth failure: $error", isGmailAuthFailure(error))
         }
         assertFalse(isGmailAuthFailure("timeout waiting for search results"))
+    }
+
+    @Test
+    fun bareLlm401IsNotAGmailAuthFailure() {
+        // A bad model key surfaces as "HTTP 401" with no Gmail shape: it
+        // must not post a misleading "Reconnect Gmail" notification.
+        assertFalse(isGmailAuthFailure("step 0 failed: HTTP 401"))
+        assertFalse(isGmailAuthFailure("scheduled run failed: HTTP 401"))
+        assertFalse(isGmailAuthFailure("401 Unauthorized"))
     }
 
     @Test

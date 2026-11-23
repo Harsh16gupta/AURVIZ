@@ -151,7 +151,11 @@ val SCHEDULED_RUN_ALLOWLIST: Set<String> =
 
 // Terminal run states, stored in schedule_runs.status. RUNNING is the
 // transient claim marker so a double-fire loses the race instead of
-// double-running; finish() always overwrites it.
+// double-running; finish() always overwrites it. A RUNNING row older than
+// STALE_RUN_TTL_MS means the process died between claim and finish (the
+// only path that leaves RUNNING behind): the next delivery reclaims it
+// instead of skipping forever.
+const val STALE_RUN_TTL_MS = 10 * 60_000L
 enum class ScheduleRunStatus {
     RUNNING,
     SUCCESS,
@@ -183,6 +187,14 @@ interface ScheduleRunStore {
     fun find(scheduleId: String, fireTime: Long): ScheduleRun?
 
     fun list(): List<ScheduleRun>
+
+    /**
+     * Reclaim a stale RUNNING row (process death between claim and finish).
+     * Returns the existing pid when the row was RUNNING and older than ttlMs
+     * (marks it FAILED so the crash is recorded), else null. Genuinely
+     * concurrent duplicates stay DuplicateSkipped.
+     */
+    fun resetStaleRunning(scheduleId: String, fireTime: Long, nowMs: Long, ttlMs: Long = STALE_RUN_TTL_MS): Long?
 }
 
 class InMemoryScheduleRunStore : ScheduleRunStore {
@@ -208,6 +220,16 @@ class InMemoryScheduleRunStore : ScheduleRunStore {
     override fun find(scheduleId: String, fireTime: Long): ScheduleRun? = rows[scheduleId to fireTime]?.second
 
     @Synchronized
+    override fun resetStaleRunning(scheduleId: String, fireTime: Long, nowMs: Long, ttlMs: Long): Long? {
+        val entry = rows[scheduleId to fireTime] ?: return null
+        val (pid, run) = entry
+        if (run.status != ScheduleRunStatus.RUNNING) return null
+        if (nowMs - fireTime <= ttlMs) return null
+        rows[scheduleId to fireTime] = pid to run.copy(status = ScheduleRunStatus.FAILED, error = "stale RUNNING claim reclaimed")
+        return pid
+    }
+
+    @Synchronized
     override fun list(): List<ScheduleRun> = rows.values.map { it.second }
 }
 
@@ -215,13 +237,19 @@ class InMemoryScheduleRunStore : ScheduleRunStore {
 // silent no-ops: the runner maps them to the Reconnect notification.
 fun isGmailAuthFailure(error: String): Boolean {
     val text = error.lowercase()
-    return text.contains("not connected") ||
-        text.contains("401") ||
-        text.contains("unauthorized") ||
-        text.contains("invalid_grant") ||
+    // Token/phrasing signals are inherently Gmail-shaped.
+    if (text.contains("invalid_grant") ||
         text.contains("token refresh") ||
         text.contains("token expired") ||
-        text.contains("reconnect gmail")
+        text.contains("reconnect gmail") ||
+        text.contains("not connected")
+    ) return true
+    // Bare codes ("HTTP 401") also come from the LLM transport (bad model
+    // key), so they only count inside a Gmail-shaped message
+    // ("Gmail: HTTP 401 ..."). Otherwise a bad LLM key would post a
+    // misleading "Reconnect Gmail" notification.
+    if (!text.contains("gmail")) return false
+    return text.contains("401") || text.contains("unauthorized")
 }
 
 // The loop's registry view for scheduled runs: allowlisted reads run
@@ -338,6 +366,9 @@ sealed interface ScheduledRunOutcome {
 // here, before any LLM call), run the AgentLoop on the read-only view
 // with a headless confirmer (no UI exists to approve: every write is
 // rejected and recorded), then store the run and build the note.
+// A stale RUNNING row (process death between claim and finish) is reclaimed
+// after STALE_RUN_TTL_MS instead of skipping forever; a fresh RUNNING row
+// is a genuine duplicate and skips.
 // Never throws: a transport failure becomes a FAILED run row.
 fun runScheduledRoutine(
     schedule: Schedule,
@@ -348,15 +379,9 @@ fun runScheduledRoutine(
     approvals: PendingApprovalStore,
     nowMs: () -> Long = System::currentTimeMillis,
 ): ScheduledRunOutcome {
-    runs.find(schedule.id, fireTime)?.let { return ScheduledRunOutcome.DuplicateSkipped(it) }
-    val pid =
-        runs.claim(schedule.id, fireTime)
-            ?: return ScheduledRunOutcome.DuplicateSkipped(
-                runs.find(schedule.id, fireTime)
-                    ?: ScheduleRun(schedule.id, fireTime, ScheduleRunStatus.RUNNING, null, null, 0L),
-            )
     val startMs = nowMs()
-    val blockedCalls = mutableListOf<ToolCall>()
+    fun executeWithPid(pid: Long): ScheduledRunOutcome {
+        val blockedCalls = mutableListOf<ToolCall>()
     val readOnly = scheduledRegistry(registry)
     val loop =
         AgentLoop(
@@ -420,4 +445,19 @@ fun runScheduledRoutine(
         tried,
         used,
     )
+    }
+
+    runs.find(schedule.id, fireTime)?.let { existing ->
+        if (existing.status != ScheduleRunStatus.RUNNING) return ScheduledRunOutcome.DuplicateSkipped(existing)
+        val reclaimed = runs.resetStaleRunning(schedule.id, fireTime, startMs)
+            ?: return ScheduledRunOutcome.DuplicateSkipped(existing)
+        return executeWithPid(reclaimed)
+    }
+    val pid =
+        runs.claim(schedule.id, fireTime)
+            ?: return ScheduledRunOutcome.DuplicateSkipped(
+                runs.find(schedule.id, fireTime)
+                    ?: ScheduleRun(schedule.id, fireTime, ScheduleRunStatus.RUNNING, null, null, 0L),
+            )
+    return executeWithPid(pid)
 }

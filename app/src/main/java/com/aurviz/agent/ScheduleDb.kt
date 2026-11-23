@@ -115,6 +115,12 @@ interface ScheduleRunDao {
 
     @Query("UPDATE schedule_runs SET status = :status, `error` = :error, `result` = :result, durationMs = :durationMs WHERE pid = :pid")
     fun finish(pid: Long, status: String, error: String?, result: String?, durationMs: Long)
+
+    @Query("SELECT pid FROM schedule_runs WHERE scheduleId = :scheduleId AND fireTime = :fireTime LIMIT 1")
+    fun findPid(scheduleId: String, fireTime: Long): Long?
+
+    @Query("SELECT status FROM schedule_runs WHERE pid = :pid LIMIT 1")
+    fun statusOf(pid: Long): String?
 }
 
 // One write a scheduled run attempted but never executed: the user
@@ -170,6 +176,14 @@ class RoomScheduleRunStore(private val dao: ScheduleRunDao) : ScheduleRunStore {
     override fun find(scheduleId: String, fireTime: Long): ScheduleRun? = dao.find(scheduleId, fireTime)?.toRun()
 
     override fun list(): List<ScheduleRun> = dao.listAll().map { it.toRun() }
+
+    override fun resetStaleRunning(scheduleId: String, fireTime: Long, nowMs: Long, ttlMs: Long): Long? {
+        val pid = dao.findPid(scheduleId, fireTime) ?: return null
+        if (dao.statusOf(pid) != ScheduleRunStatus.RUNNING.name) return null
+        if (nowMs - fireTime <= ttlMs) return null
+        dao.finish(pid, ScheduleRunStatus.FAILED.name, "stale RUNNING claim reclaimed", null, 0L)
+        return pid
+    }
 
     private fun ScheduleRunRow.toRun(): ScheduleRun =
         ScheduleRun(scheduleId, fireTime, ScheduleRunStatus.valueOf(status), error, result, durationMs)
