@@ -42,7 +42,9 @@ import com.aurviz.agent.ToolCall
 import com.aurviz.agent.ToolResult
 import com.aurviz.agent.WebBridge
 import com.aurviz.agent.WebException
+import com.aurviz.agent.BrowserRoute
 import com.aurviz.agent.allToolSchemas
+import com.aurviz.agent.routeBrowserUrl
 import com.aurviz.agent.approvalCardFor
 import com.aurviz.agent.approvePendingApproval
 import com.aurviz.agent.buildAuthUrl
@@ -551,10 +553,36 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
     // --- Web (in-app page behind BrowserScreen's retained WebView) ---
 
     fun openWeb(raw: String) {
-        var url = raw.trim()
-        if (url.isBlank()) return
-        if (!url.contains("://")) url = "https://$url"
-        val finalUrl = url
+        val typed = raw.trim()
+        if (typed.isBlank()) return
+        // Ticket 41/NG-5: the Browser tab routes through the shared allowlist
+        // (routeBrowserUrl/isAllowedWebUrl) — the same decision the Tool layer
+        // uses — and refuses non-web addresses with an explanation instead
+        // of loading them. No https:// upgrade: bare hosts refuse like the
+        // Tool layer. Web addresses pass through unchanged.
+        when (val route = routeBrowserUrl(typed)) {
+            is BrowserRoute.Refuse -> {
+                _state.update {
+                    it.copy(
+                        statusLine = "Not opening: ${route.reason}",
+                        webLoading = false,
+                        webError = route.reason,
+                        timeline = buildTimeline(
+                            Plan(listOf(ToolCall("call_web1", "open", mapOf("url" to typed)))),
+                            doneCount = 0,
+                            error = route.reason,
+                        ),
+                    )
+                }
+                return
+            }
+            is BrowserRoute.Load -> {
+                openWebUrl(route.url)
+            }
+        }
+    }
+
+    private fun openWebUrl(finalUrl: String) {
         val bridge = webBridge
         if (bridge == null) {
             _state.update { it.copy(statusLine = "Browser initializing — try again in a second.") }

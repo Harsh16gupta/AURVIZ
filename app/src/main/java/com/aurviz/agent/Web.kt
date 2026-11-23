@@ -53,6 +53,27 @@ fun isAllowedWebUrl(raw: String): Boolean {
     }
 }
 
+// Ticket 41/NG-5: Browser tab routing. The address bar is the second caller
+// of isAllowedWebUrl — not a second policy — so UI verdicts match the Tool
+// layer (openPage/openBackgroundPage). Web addresses pass through unchanged;
+// anything else refuses with an explanation the Browser tab can show.
+sealed interface BrowserRoute {
+    data class Load(val url: String) : BrowserRoute
+
+    data class Refuse(val reason: String) : BrowserRoute
+}
+
+fun routeBrowserUrl(raw: String): BrowserRoute {
+    val url = raw.trim()
+    if (url.isBlank()) {
+        return BrowserRoute.Refuse("Enter a web address starting with http:// or https://.")
+    }
+    if (!isAllowedWebUrl(url)) {
+        return BrowserRoute.Refuse("Only http:// and https:// addresses open here — \"$url\" was not loaded.")
+    }
+    return BrowserRoute.Load(url)
+}
+
 // Open a page: title + readable text + links out of raw HTML.
 // Failures come back typed (url included) so Retry knows what to retry.
 // Disallowed URLs fail with reason "blocked" (not retryable by the model).

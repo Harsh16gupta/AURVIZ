@@ -36,6 +36,11 @@ import com.aurviz.agent.ui.theme.Theme
 // panel. The WebView instance is retained in WebViewHolder and detached
 // from its previous parent on re-attach, so it survives tab switches and
 // `open` commands from Command never fail.
+//
+// Ticket 41/NG-5: the address bar and extracted-link buttons forward raw
+// text to onOpenUrl (AgentViewModel.openWeb), which routes through the
+// shared allowlist (routeBrowserUrl/isAllowedWebUrl) and refuses non-web
+// addresses with an explanation — the Browser tab holds no second policy.
 @Composable
 fun BrowserScreen(
     state: AgentUiState,
