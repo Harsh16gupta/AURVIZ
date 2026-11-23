@@ -3,8 +3,8 @@
 ## How to run
 
 - `export ANDROID_HOME=$HOME/Library/Android/sdk`
-- `./gradlew :app:testDebugUnitTest` — fix-review: **295 tests, 0 failures**
-  (27 classes incl. `PerfTimingsTest`; 294 at ticket 37).
+- `./gradlew :app:testDebugUnitTest` — NG-5: **340 tests, 0 failures**
+  (31 classes incl. `BrowserPolicyTest`; 336 at the 3-bracket landing).
 - Reports: `app/build/test-results/testDebugUnitTest/*.xml`.
 
 ## Coverage by area (representative, not exhaustive)
@@ -18,7 +18,7 @@
 | Email | `EmailTest`, `EmailSearchReadTest`, `EmailSendTest` | PKCE/auth forms, search/read tools, send MIME + policy seam |
 | LLM provider | `LlmProviderTest` | tools request shape, tool-call parsing, 429/401 mapping, connect/read timeouts, schedule schemas |
 | Tool registry | `ToolRegistryTest` | schema/risk/gate declarations, arg validation, email/schedule/memory tools, `toolSchemas()` payload |
-| Web | `WebTest`, `WebToolsTest`, `WebBackgroundTest` | foreground bridge tools, background OkHttp/Jsoup path, domain allowlist |
+| Web | `WebTest`, `WebToolsTest`, `WebBackgroundTest`, `BrowserPolicyTest` | foreground bridge tools, background OkHttp/Jsoup path, domain allowlist, Browser-tab routing reuses the allowlist |
 | Memory | `MemoryTest` | keyword ranking, importance/recency boosts, overlap-beats-boosts guard, `markUsed`, offline FTS prefix fallback, migration 2→3 |
 | Schedules | `ScheduleTest` | parse 12am/12pm, daily/weekly triggers, create/list/cancel tools |
 | Scheduled worker | `ScheduledRunTest` | 5-tool read-only allowlist, writes → PendingApproval, idempotency (same key once, new fireTime reruns), auth-error Reconnect path |
@@ -34,6 +34,10 @@
 `docs/PERF_TIMINGS.md`: on-device STT / first-token / end-to-end medians via
 the Settings `planMs`/`toolMs`/`recallMs` readout; profiler memory
 screenshot method.
+`docs/BROWSER_TEST.md`: page-host settings audit (file/content access off,
+mixed content pinned) + typed-URL matrix (http, https, file, javascript,
+bare host) — record device model + Android version; platform-doc
+requirements stay distinguished from OEM-specific behavior.
 
 ## Known gaps
 
