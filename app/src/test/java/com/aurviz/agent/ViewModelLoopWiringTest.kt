@@ -98,7 +98,7 @@ class ViewModelLoopWiringTest {
         progress = progress.withEvent(AgentEvent.NeedsApproval(call))
         assertEquals(call, progress.pendingApproval)
         assertEquals(before, progress.timeline())
-        progress = progress.withEvent(AgentEvent.StepDone(call, ToolResult.Success(mapOf("ok" to true))))
+        progress = progress.withEvent(AgentEvent.StepDone(call, ToolResult.Success(mapOf("ok" to true)), approved = true, effectiveArgs = call.arguments))
         assertEquals(1, progress.doneCount)
         assertTrue(progress.timeline().any { it.title.startsWith("Tool ") && it.state == StepState.DONE })
     }

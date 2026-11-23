@@ -57,7 +57,17 @@ sealed interface AgentEvent {
 
     data class NeedsApproval(val call: ToolCall) : AgentEvent
 
-    data class StepDone(val call: ToolCall, val result: ToolResult) : AgentEvent
+    data class StepDone(
+        val call: ToolCall,
+        val result: ToolResult,
+        // Gated Tools report reject/timeout as Success(cancelled_by_user)
+        // with approved=false: consumers must check approved, not just the
+        // result shape. effectiveArgs are the args that actually ran
+        // (edited-approve changes them) — consumers must read these, never
+        // the original call arguments.
+        val approved: Boolean,
+        val effectiveArgs: Map<String, Any?>,
+    ) : AgentEvent
 
     data class Failed(val error: String) : AgentEvent
 }
@@ -162,7 +172,7 @@ class AgentLoop(
                 }
                 val gated = registry.executeGated(call, confirm)
                 steps += ExecutedStep(call.copy(arguments = gated.effectiveArgs), gated.result, gated.approved)
-                onEvent(AgentEvent.StepDone(call, gated.result))
+                onEvent(AgentEvent.StepDone(call, gated.result, gated.approved, gated.effectiveArgs))
                 messages +=
                     ChatMessage(
                         role = "tool",

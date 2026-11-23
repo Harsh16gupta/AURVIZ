@@ -136,11 +136,15 @@ fun nextFireTime(schedule: Schedule, zone: ZoneId, now: ZonedDateTime): ZonedDat
 // Loop-created schedule side effects (ADR-0002): a create/cancel that the
 // Task Execution ran must arm/disarm its alarm + Worker like the manual
 // and held-approval paths. Pure decision; the ViewModel maps ARM/DISARM
-// to register/cancel calls on the IO thread.
+// to register/cancel calls on the IO thread. Only an approved Success
+// counts: reject/timeout arrive as Success(cancelled_by_user) with
+// approved=false, and acting on those would arm/disarm a routine the
+// user just rejected.
 enum class LoopScheduleSideEffect { ARM, DISARM }
 
-fun loopScheduleSideEffect(callName: String, success: Boolean): LoopScheduleSideEffect? {
-    if (!success) return null
+fun loopScheduleSideEffect(callName: String, approved: Boolean, result: ToolResult): LoopScheduleSideEffect? {
+    if (!approved) return null
+    if (result !is ToolResult.Success) return null
     return when (callName) {
         "create_schedule" -> LoopScheduleSideEffect.ARM
         "cancel_schedule" -> LoopScheduleSideEffect.DISARM

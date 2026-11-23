@@ -698,12 +698,15 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
     // Execution ran arms/disarms exactly like the manual and held-approval
     // paths, so an approved natural-language Schedule fires without a
     // later global re-arm. Runs on the loop's IO thread; failures are
-    // contained so they never break the Task Execution.
-    private fun syncLoopScheduleSideEffect(call: ToolCall, result: ToolResult) {
-        val success = result is ToolResult.Success
-        when (loopScheduleSideEffect(call.name, success)) {
+    // contained so they never break the Task Execution. Only an approved
+    // Success acts: reject/timeout report Success(cancelled_by_user) with
+    // approved=false, and the schedule id comes from the args that
+    // actually ran (edited-approve), never the model's original call.
+    private fun syncLoopScheduleSideEffect(event: AgentEvent.StepDone) {
+        val call = event.call.copy(arguments = event.effectiveArgs)
+        when (loopScheduleSideEffect(call.name, event.approved, event.result)) {
             LoopScheduleSideEffect.ARM -> {
-                val newId = (result as? ToolResult.Success)?.data
+                val newId = (event.result as? ToolResult.Success)?.data
                     .let { it as? Map<*, *> }?.get("id") as? String ?: return
                 try {
                     val app = getApplication<Application>()
@@ -911,7 +914,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                     registry,
                     onEvent = { event ->
                         if (event is AgentEvent.StepDone) {
-                            syncLoopScheduleSideEffect(event.call, event.result)
+                            syncLoopScheduleSideEffect(event)
                         }
                         progress = progress.withEvent(event)
                         val snapshot = progress.timeline()

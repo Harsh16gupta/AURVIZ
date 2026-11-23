@@ -168,6 +168,54 @@ class AgentLoopTest {
     }
 
     @Test
+    fun stepDoneCarriesRejectedApprovalFlag() {
+        val llm =
+            FakeLlmProvider(
+                listOf(
+                    call("call_1", "create_schedule", mapOf("task" to "check mail", "when" to "at 9am")),
+                    answer("dropped"),
+                ),
+            )
+        val events = mutableListOf<AgentEvent>()
+        AgentLoop(
+            llm,
+            registry(),
+            onEvent = events::add,
+            confirm = { ApprovalDecision.Rejected },
+        ).run("schedule mail check")
+        // Reject reports Success(cancelled_by_user): consumers must read
+        // approved, never the result shape alone.
+        val done = events.filterIsInstance<AgentEvent.StepDone>().single()
+        assertEquals(false, done.approved)
+        assertTrue(done.result is ToolResult.Success)
+    }
+
+    @Test
+    fun stepDoneCarriesEditedArgsThatRan() {
+        val edited = mapOf<String, Any?>("task" to "edited task", "when" to "at 10am")
+        val llm =
+            FakeLlmProvider(
+                listOf(
+                    call("call_1", "create_schedule", mapOf("task" to "check mail", "when" to "at 9am")),
+                    answer("saved"),
+                ),
+            )
+        val events = mutableListOf<AgentEvent>()
+        val result =
+            AgentLoop(
+                llm,
+                registry(),
+                onEvent = events::add,
+                confirm = { ApprovalDecision.ApprovedWithEdit(edited) },
+            ).run("schedule mail check")
+        assertTrue(result is AgentLoopResult.Answered)
+        assertTrue(result.steps[0].approved)
+        val done = events.filterIsInstance<AgentEvent.StepDone>().single()
+        assertEquals(edited, done.effectiveArgs)
+        assertEquals(edited, result.steps[0].call.arguments)
+    }
+
+    @Test
     fun nullToolCallIdIsGeneratedAndMatched() {
         val llm =
             FakeLlmProvider(
