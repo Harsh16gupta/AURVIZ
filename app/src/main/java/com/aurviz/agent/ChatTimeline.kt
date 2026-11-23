@@ -3,6 +3,13 @@ package com.aurviz.agent
 // T5: timeline = Plan in, rows out. Pure decision logic, JVM-testable.
 // The chat screen draws these rows later; it adds no decisions of its own.
 
+// Plan (GLOSSARY): the sequence of Tool calls the agent loop actually
+// made to satisfy one command, recorded with their results. Moved here
+// from the deleted up-front planner (ticket 43/NG-3): the draft never
+// exists up front, so a Plan is only ever built from executed steps
+// (AgentLoopResult.toTimeline) or the calls made so far (loopTimeline).
+data class Plan(val steps: List<ToolCall>)
+
 // What one row looks like on screen.
 enum class StepState {
     READY,
