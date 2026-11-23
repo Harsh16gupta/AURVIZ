@@ -49,7 +49,6 @@ import com.aurviz.agent.WebBridge
 import com.aurviz.agent.WebPage
 import com.aurviz.agent.WebException
 import com.aurviz.agent.BrowserRoute
-import com.aurviz.agent.allToolSchemas
 import com.aurviz.agent.appendSessionTurn
 import com.aurviz.agent.routeBrowserUrl
 import com.aurviz.agent.approvalCardFor
@@ -166,11 +165,13 @@ fun renderLoopPrompt(messages: List<ChatMessage>): String =
 // later turn, so the accumulated private transcript (memories, mail, tool
 // results) is never replayed to a second host mid-run. Tried is merged
 // even when the turn fails, so a terminal failure still discloses who saw it.
-// The advertised set is the run's registry view (ticket 39): the model
-// sees exactly the Tools it can call, gated or not.
+// The advertised set is the run's registry view (ticket 39, collapsed in
+// ticket 75 part of #71): the model sees exactly the Tools it can call,
+// gated or not. No default Tool list — runLoopCommand injects
+// registry.toolSchemas() explicitly.
 class FallbackChatLlm(
     private val candidates: List<NamedProvider>,
-    private val tools: JSONArray = allToolSchemas(),
+    private val tools: JSONArray = JSONArray(),
 ) : ChatLlmProvider {
     val tried: MutableList<String> = mutableListOf()
     var lastProvider: String? = null

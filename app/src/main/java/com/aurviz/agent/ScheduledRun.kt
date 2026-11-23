@@ -433,9 +433,11 @@ private fun blockedScheduledTool(name: String): ToolResult =
 // The advertised set is the scheduled run's read-only registry view: the
 // model sees allowed reads plus gated writes by name, and attempts on the
 // latter become PendingApproval rows instead of silent refusals.
+// Ticket 75 (part of #71): no default Tool list — the Worker injects the
+// scheduled run's read-only registry view explicitly.
 class HeadlessChatLlm(
     private val candidates: List<NamedProvider>,
-    private val tools: JSONArray = allToolSchemas(),
+    private val tools: JSONArray = JSONArray(),
 ) : ChatLlmProvider {
     val tried: MutableList<String> = mutableListOf()
     var lastProvider: String? = null

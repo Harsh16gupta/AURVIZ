@@ -2,6 +2,50 @@
 
 Every case where the AI was wrong and how it was caught. Add an entry with file:line evidence before moving on.
 
+## 2026-11-24 — Issue #75 schema-seam collapse to registry toolSchemas (`main`)
+
+- **Scheduled wire test asserted the wrong contract.** First draft of
+  `scheduledAdvertisedToolsComeFromTheScheduledRegistryView`
+  (`ChatRolesWireTest.kt:143-162`) asserted the wire tools equal
+  `SCHEDULED_RUN_ALLOWLIST` (6 reads). Full suite failed 1/430:
+  expected the allowlist but was all 14 names. Re-read of
+  `ScheduledRun.kt:372-419` showed `scheduledRegistry()` registers every
+  Tool by name — non-allowlisted entries keep name/schema but are forced
+  through the gate with neutered executors, so attempts become
+  PendingApproval rows. Fixed the test to pin the real contract: wire
+  names == `scheduled.toolSchemas()` names == `full.names()`, plus
+  `send_email.requiresConfirmation` and allowlist-subset assertions.
+  Re-run green (430 tests, 0 failures).
+- **No behavior drift by construction.** Schema bodies moved verbatim
+  into owning adapters: three Schedule bodies from `LlmProvider.kt:44-84`
+  into `ScheduleTools.kt:10-90` (inline `JSONObject`, same
+  names/descriptions/required sets); two Memory bodies from
+  `Memory.kt:197-225` into `MemoryTools.kt:12-64` (deleted from
+  `Memory.kt`, which now imports no JSON); legacy demo body from
+  `LlmProvider.kt:27-38` into `ToolRegistry.kt:255-276` (kept until #76
+  deletes the Tool). Deleted `demoToolSchema`, `scheduleToolSchema`,
+  `listSchedulesToolSchema`, `cancelScheduleToolSchema`, `allToolSchemas`
+  (`LlmProvider.kt:26-91`); `OpenAiChatProvider.plan()` now sends an
+  empty tools array (`LlmProvider.kt:228-239`) since production uses the
+  `chatMessages()` path. All three `tools` defaults that pointed at the
+  hardcoded list now default to empty and require explicit injection:
+  `planWithFallbackMessages` (`ProviderPicker.kt:93-98`),
+  `HeadlessChatLlm` (`ScheduledRun.kt:436-441`), `FallbackChatLlm`
+  (`AgentViewModel.kt:171-174`); both production sites already inject the
+  view (`AgentViewModel.kt:1257`, `ScheduleWork.kt:91-96`). Grep over
+  `app/src` confirms zero remaining references to the deleted builders.
+- **Foreign uncommitted work parked, not committed.** Same condition as
+  #67/#70/#72/#73/#74: an unrelated in-progress schedule refactor (tracked
+  edits + untracked `ScheduleIds.kt`/`ScheduleRuntime.kt`) was stashed
+  before the work and stays stashed — the commit holds only the schema
+  collapse, its tests, and this log.
+- Tests: updated `LlmProviderTest` (registry-view pins replacing the four
+  deleted-builder tests, plus a no-hardcoded-default pin), extended
+  `ChatRolesWireTest` (scheduled-view wire pin alongside the existing
+  foreground pin). Full `:app:testDebugUnitTest` green (430 tests, 0
+  failures; 428 at #74 + 2 new). Secret scan clean (no key/secret
+  patterns in touched files).
+
 ## 2026-11-24 — Issue #74 Memory + Web adapter extraction (`main`)
 
 - **No behavior drift by construction.** The two Memory builders moved

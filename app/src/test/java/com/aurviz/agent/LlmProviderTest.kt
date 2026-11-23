@@ -12,11 +12,22 @@ class LlmProviderTest {
 
     @Test
     fun buildsValidToolsRequest() {
+        val tools =
+            JSONArray().put(
+                toolSchema(
+                    "getImportantEmails",
+                    "Fetch unread important emails.",
+                    JSONObject()
+                        .put("type", "object")
+                        .put("properties", JSONObject().put("max_results", JSONObject().put("type", "integer")))
+                        .put("required", JSONArray().put("max_results")),
+                ),
+            )
         val body =
             buildToolsRequestBody(
                 "gemini-2.5-flash",
                 "Check important emails",
-                JSONArray().put(demoToolSchema()),
+                tools,
             )
         assertEquals("gemini-2.5-flash", body.getString("model"))
         assertEquals("auto", body.getString("tool_choice"))
@@ -79,11 +90,14 @@ class LlmProviderTest {
         assertEquals(5, result.toolCalls[0].arguments["max_results"])
     }
 
+    // Ticket 75 (part of #71): the schema bodies live in their owning
+    // adapters and the kernel's toolSchemas() view is the single
+    // advertised list — no hardcoded builders. These pin the registry
+    // view's schedule entries with independent literals.
     @Test
-    fun scheduleToolSchemaNamesTaskAndWhen() {
-        val fn = scheduleToolSchema().getJSONObject("function")
-        assertEquals("create_schedule", fn.getString("name"))
-        val required = fn.getJSONObject("parameters").getJSONArray("required")
+    fun registryViewNamesCreateTaskAndWhen() {
+        val parameters = defaultToolRegistry().find("create_schedule")!!.parameters
+        val required = parameters.getJSONArray("required")
         val names = (0 until required.length()).map { required.getString(it) }.toSet()
         assertEquals(setOf("task", "when"), names)
     }
@@ -97,30 +111,54 @@ class LlmProviderTest {
     }
 
     @Test
-    fun listSchedulesSchemaTakesNoRequiredArgs() {
-        val fn = listSchedulesToolSchema().getJSONObject("function")
-        assertEquals("list_schedules", fn.getString("name"))
-        val required = fn.getJSONObject("parameters").optJSONArray("required")
+    fun registryViewListSchedulesTakesNoRequiredArgs() {
+        val parameters = defaultToolRegistry().find("list_schedules")!!.parameters
+        val required = parameters.optJSONArray("required")
         assertTrue(required == null || required.length() == 0)
     }
 
     @Test
-    fun cancelScheduleSchemaRequiresScheduleId() {
-        val fn = cancelScheduleToolSchema().getJSONObject("function")
-        assertEquals("cancel_schedule", fn.getString("name"))
-        val required = fn.getJSONObject("parameters").getJSONArray("required")
+    fun registryViewCancelScheduleRequiresScheduleId() {
+        val parameters = defaultToolRegistry().find("cancel_schedule")!!.parameters
+        val required = parameters.getJSONArray("required")
         val names = (0 until required.length()).map { required.getString(it) }.toSet()
         assertEquals(setOf("schedule_id"), names)
     }
 
     @Test
-    fun allToolSchemasExposeEmailPlusThreeScheduleTools() {
-        val names = (0 until allToolSchemas().length())
-            .map { allToolSchemas().getJSONObject(it).getJSONObject("function").getString("name") }
+    fun registryViewExposesAllAdapterTools() {
+        val schemas = defaultToolRegistry().toolSchemas()
+        val names = (0 until schemas.length())
+            .map { schemas.getJSONObject(it).getJSONObject("function").getString("name") }
             .toSet()
         assertTrue(names.contains("getImportantEmails"))
         assertTrue(names.contains("create_schedule"))
         assertTrue(names.contains("list_schedules"))
         assertTrue(names.contains("cancel_schedule"))
+        assertTrue(names.contains("search_emails"))
+        assertTrue(names.contains("save_memory"))
+        assertTrue(names.contains("get_page_text"))
+    }
+
+    @Test
+    fun structuredFallbackDefaultsToNoHardcodedTools() {
+        // Ticket 75: no caller may rely on a hardcoded default Tool list —
+        // every model-request site injects the registry view explicitly.
+        val seen = mutableListOf<JSONArray>()
+        val capturing =
+            object : StructuredLlmProvider {
+                override fun plan(userText: String): LlmResult = LlmResult(emptyList(), "ok")
+                override fun chatMessages(messages: List<ChatMessage>, tools: JSONArray): LlmResult {
+                    seen += tools
+                    return LlmResult(emptyList(), "ok")
+                }
+            }
+        planWithFallbackMessages(
+            listOf(ChatMessage(role = "user", content = "hi")),
+            listOf(NamedProvider("gemini", "k", capturing)),
+            sleeper = {},
+        )
+        assertEquals(1, seen.size)
+        assertEquals(0, seen[0].length())
     }
 }

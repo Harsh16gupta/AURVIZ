@@ -142,7 +142,8 @@ class ToolRegistry {
      *  Confirmation card off this is not a path around the gate. */
     fun requiresConfirmation(name: String): Boolean = find(name)?.requiresConfirmation == true
 
-    /** LLM request payload, same OpenAI function shape as allToolSchemas(). */
+    /** LLM request payload: the single advertised Tool list. Every
+     *  model-request site injects this view — no separate hardcoded list. */
     fun toolSchemas(): JSONArray =
         JSONArray(
             tools.values.map { definition ->
@@ -252,12 +253,21 @@ fun defaultToolRegistry(
         registry.register(tool)
     }
 
-    val emailFn = demoToolSchema().getJSONObject("function")
+    // Legacy demo read Tool (deleted in ticket 76, part of #71): its
+    // schema body lives here until then — no shared hardcoded schema
+    // list; the kernel's toolSchemas() view is the single advertised list.
     registry.register(
         ToolDefinition(
-            name = emailFn.getString("name"),
-            description = emailFn.getString("description"),
-            parameters = emailFn.getJSONObject("parameters"),
+            name = "getImportantEmails",
+            description = "Fetch unread important emails.",
+            parameters =
+                JSONObject()
+                    .put("type", "object")
+                    .put(
+                        "properties",
+                        JSONObject().put("max_results", JSONObject().put("type", "integer")),
+                    )
+                    .put("required", JSONArray().put("max_results")),
             // Read-only fetch; ADR-0003 gates only sensitive calls.
             riskLevel = RiskLevel.LOW,
             requiresConfirmation = false,

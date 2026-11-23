@@ -88,12 +88,14 @@ fun planWithFallback(
 // as planWithFallback, but the loop's messages ride intact. Providers
 // implementing StructuredLlmProvider get the real roles; legacy plan-only
 // doubles get the flattened string so scripted tests keep working.
+// Ticket 75 (part of #71): no default Tool list — every caller injects
+// the registry view (foreground) or the scheduled read-only view.
 class FallbackExhausted(val tried: List<String>, cause: Exception) : Exception(cause.message, cause)
 
 fun planWithFallbackMessages(
     messages: List<ChatMessage>,
     candidates: List<NamedProvider>,
-    tools: JSONArray = allToolSchemas(),
+    tools: JSONArray = JSONArray(),
     sleeper: (Long) -> Unit = { Thread.sleep(it) },
 ): FallbackResult {
     val tried = mutableListOf<String>()

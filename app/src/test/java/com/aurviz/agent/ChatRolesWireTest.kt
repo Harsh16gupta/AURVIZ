@@ -133,9 +133,37 @@ class ChatRolesWireTest {
         val view = ToolRegistry().apply { register(searchEmailsTool(null)) }
         val chat = FallbackChatLlm(listOf(NamedProvider("gemini", "k", http)), view.toolSchemas())
         chat.chat(listOf(ChatMessage(role = "user", content = "hi")))
-        // The wire carries the run's view (1 Tool), not the 4 legacy schemas.
+        // The wire carries the run's view (1 Tool), not a hardcoded list.
         val tools = JSONObject(captured.single()).getJSONArray("tools")
         assertEquals(1, tools.length())
         assertEquals("search_emails", tools.getJSONObject(0).getJSONObject("function").getString("name"))
+    }
+
+    @Test
+    fun scheduledAdvertisedToolsComeFromTheScheduledRegistryView() {
+        // Ticket 75 (part of #71): the scheduled request site injects the
+        // scheduled run's read-only registry view — the model sees allowed
+        // reads plus gated writes by name (attempts become PendingApproval
+        // rows), never a hardcoded list.
+        val captured = mutableListOf<String>()
+        val http = OpenAiChatProvider("https://example.com", "k", "m", capturingClient(captured))
+        val full = defaultToolRegistry()
+        val scheduled = scheduledRegistry(full)
+        val chat = HeadlessChatLlm(listOf(NamedProvider("gemini", "k", http)), scheduled.toolSchemas())
+        chat.chat(listOf(ChatMessage(role = "user", content = "hi")))
+        val tools = JSONObject(captured.single()).getJSONArray("tools")
+        val names = (0 until tools.length())
+            .map { tools.getJSONObject(it).getJSONObject("function").getString("name") }
+            .toSet()
+        val viewNames = (0 until scheduled.toolSchemas().length())
+            .map { scheduled.toolSchemas().getJSONObject(it).getJSONObject("function").getString("name") }
+            .toSet()
+        // The wire carries the scheduled view exactly — every Tool by name.
+        assertEquals(viewNames, names)
+        assertEquals(full.names(), names)
+        // Writes stay gated in the scheduled view: attempts become
+        // PendingApproval rows instead of executions.
+        assertTrue(scheduled.find("send_email")!!.requiresConfirmation)
+        assertTrue(SCHEDULED_RUN_ALLOWLIST.all { it in names })
     }
 }

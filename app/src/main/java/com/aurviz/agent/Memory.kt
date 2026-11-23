@@ -1,8 +1,5 @@
 package com.aurviz.agent
 
-import org.json.JSONArray
-import org.json.JSONObject
-
 // Session 1: memory = what the app remembers across restarts.
 // Pure decision logic, JVM-testable. The on-phone database (Room)
 // and the cloud (Supermemory) plug in through MemoryStore later.
@@ -189,37 +186,9 @@ fun renderMemorySection(memories: List<Memory>): String {
     return "$MEMORY_SECTION_START\n$body\n$MEMORY_SECTION_END"
 }
 
-// Ticket 05/24: LLM-visible memory tool schemas. Room-only via
-// MemoryStore (ADR-0001): the registry injects RoomMemoryStore on the
-// phone and InMemoryStore in tests. Keyword plus recency/importance
-// boosts with an offline FTS fallback (ticket #31); embeddings belong
-// to ticket #32.
-fun saveMemoryToolSchema(): JSONObject =
-    toolSchema(
-        "save_memory",
-        "Save a fact about the user for future commands, e.g. their boss's name.",
-        JSONObject()
-            .put("type", "object")
-            .put(
-                "properties",
-                JSONObject()
-                    .put("text", JSONObject().put("type", "string").put("description", "The fact to remember, e.g. my boss is Priya"))
-                    .put("source", JSONObject().put("type", "string").put("description", "Where the fact came from, e.g. you told me")),
-            )
-            .put("required", JSONArray().put("text")),
-    )
-
-fun searchMemoryToolSchema(): JSONObject =
-    toolSchema(
-        "search_memory",
-        "Search remembered facts sharing words with the query, best match first.",
-        JSONObject()
-            .put("type", "object")
-            .put(
-                "properties",
-                JSONObject()
-                    .put("query", JSONObject().put("type", "string").put("description", "What to look for, e.g. who is my boss?"))
-                    .put("max_results", JSONObject().put("type", "integer")),
-            )
-            .put("required", JSONArray().put("query")),
-    )
+// Ticket 05/24: memory retrieval. Room-only via MemoryStore (ADR-0001):
+// the registry injects RoomMemoryStore on the phone and InMemoryStore
+// in tests. Keyword plus recency/importance boosts with an offline FTS
+// fallback (ticket #31); embeddings belong to ticket #32.
+// Ticket 75 (part of #71): the LLM-visible memory schemas live in the
+// Memory adapter (MemoryTools.kt) — no schema builders here.

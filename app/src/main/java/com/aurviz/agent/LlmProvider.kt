@@ -23,72 +23,11 @@ interface LlmProvider {
     fun plan(userText: String): LlmResult
 }
 
-/** Demo Tool: read-only, safe for the spike. Real Tools land in T3+. */
-fun demoToolSchema(): JSONObject =
-    toolSchema(
-        "getImportantEmails",
-        "Fetch unread important emails.",
-        JSONObject()
-            .put("type", "object")
-            .put(
-                "properties",
-                JSONObject().put("max_results", JSONObject().put("type", "integer")),
-            )
-            .put("required", JSONArray().put("max_results")),
-    )
-
-/** Scheduling Tool: the LLM proposes WHAT + WHEN in words; the app parses
- *  the time with its tested parser and shows a preview for Confirm.
- *  The LLM never sets alarms itself — same Confirm gate as email send
- *  (ADR-0003: requiresConfirmation). */
-fun scheduleToolSchema(): JSONObject =
-    toolSchema(
-        "create_schedule",
-        "Save a recurring routine that runs later. Split the request into WHAT to do (task) and WHEN it runs (when, in the user's own words).",
-        JSONObject()
-            .put("type", "object")
-            .put(
-                "properties",
-                JSONObject()
-                    .put("task", JSONObject().put("type", "string").put("description", "What the routine does, e.g. read emails"))
-                    .put("when", JSONObject().put("type", "string").put("description", "When it runs, in the user's own words, e.g. at 2:38 a.m.")),
-            )
-            .put("required", JSONArray().put("task").put("when")),
-    )
-
-/** Scheduling Tool: read-only list, no Confirmation (ADR-0003: reads,
- *  searches, and lists are ungated). */
-fun listSchedulesToolSchema(): JSONObject =
-    toolSchema(
-        "list_schedules",
-        "List the saved recurring routines with their ids, instructions, and times.",
-        JSONObject()
-            .put("type", "object")
-            .put("properties", JSONObject()),
-    )
-
-/** Scheduling Tool: deleting a routine is state-changing, so it carries
- *  the same Confirm gate as creation (ADR-0003: requiresConfirmation). */
-fun cancelScheduleToolSchema(): JSONObject =
-    toolSchema(
-        "cancel_schedule",
-        "Delete a saved recurring routine. Use the schedule_id from list_schedules.",
-        JSONObject()
-            .put("type", "object")
-            .put(
-                "properties",
-                JSONObject()
-                    .put("schedule_id", JSONObject().put("type", "string").put("description", "The routine id, e.g. sched_1")),
-            )
-            .put("required", JSONArray().put("schedule_id")),
-    )
-
-fun allToolSchemas(): JSONArray =
-    JSONArray()
-        .put(demoToolSchema())
-        .put(scheduleToolSchema())
-        .put(listSchedulesToolSchema())
-        .put(cancelScheduleToolSchema())
+// Ticket 75 (part of #71): no hardcoded Tool schema list. The kernel's
+// toolSchemas() view is the single advertised Tool list — every
+// model-request site injects it explicitly (foreground FallbackChatLlm,
+// scheduled HeadlessChatLlm). toolSchema() stays as the shared OpenAI
+// function-tool envelope builder only.
 
 // Ticket 16/29: injection framing (ADR-0005, gaps §3E). Email and page
 // text reach the model only inside source-tagged, JSON-encoded tool
@@ -287,15 +226,16 @@ class OpenAiChatProvider(
     }
 
     override fun plan(userText: String): LlmResult {
-        // Legacy single-shot path: same shape as before (system framing +
-        // bare user text over the full advertised set) via the structured
-        // body. The loop's chat path uses chatMessages() so roles survive.
+        // Legacy single-shot path (ticket 75, part of #71): no hardcoded
+        // Tool list — production runs the loop's chatMessages() path with
+        // the registry view injected. plan() keeps the same shape (system
+        // framing + bare user text) with no advertised Tools.
         return chatMessages(
             listOf(
                 ChatMessage(role = "system", content = buildSystemPrompt()),
                 ChatMessage(role = "user", content = userText),
             ),
-            allToolSchemas(),
+            JSONArray(),
         )
     }
 }

@@ -1,17 +1,31 @@
 package com.aurviz.agent
 
+import org.json.JSONArray
+import org.json.JSONObject
+
 // Ticket 74 (part of #71): Memory Tool adapter. Owns the two Memory Tool
 // declarations — on-device save and ranked search — and explicitly
 // registers them into the small validate-and-gate kernel (ToolRegistry).
 // No behavior change: both stay LOW risk ungated, a missing store still
 // returns a non-retryable Failure, and the kernel still refuses gated
 // Tools on the ungated path (neither Memory Tool is gated).
+// Ticket 75 (part of #71): the schema bodies live here in the owning
+// adapter — no shared hardcoded schema list; the kernel's toolSchemas()
+// view is the single advertised Tool list.
 fun saveMemoryTool(memoryStore: MemoryStore?): ToolDefinition {
-    val saveMemoryFn = saveMemoryToolSchema().getJSONObject("function")
     return ToolDefinition(
-        name = saveMemoryFn.getString("name"),
-        description = saveMemoryFn.getString("description"),
-        parameters = saveMemoryFn.getJSONObject("parameters"),
+        name = "save_memory",
+        description = "Save a fact about the user for future commands, e.g. their boss's name.",
+        parameters =
+            JSONObject()
+                .put("type", "object")
+                .put(
+                    "properties",
+                    JSONObject()
+                        .put("text", JSONObject().put("type", "string").put("description", "The fact to remember, e.g. my boss is Priya"))
+                        .put("source", JSONObject().put("type", "string").put("description", "Where the fact came from, e.g. you told me")),
+                )
+                .put("required", JSONArray().put("text")),
         // On-device write, reversible via delete; not a sensitive
         // call, so no per-call Confirmation (ADR-0003 gates sends).
         riskLevel = RiskLevel.LOW,
@@ -35,11 +49,19 @@ fun saveMemoryTool(memoryStore: MemoryStore?): ToolDefinition {
 }
 
 fun searchMemoryTool(memoryStore: MemoryStore?): ToolDefinition {
-    val searchMemoryFn = searchMemoryToolSchema().getJSONObject("function")
     return ToolDefinition(
-        name = searchMemoryFn.getString("name"),
-        description = searchMemoryFn.getString("description"),
-        parameters = searchMemoryFn.getJSONObject("parameters"),
+        name = "search_memory",
+        description = "Search remembered facts sharing words with the query, best match first.",
+        parameters =
+            JSONObject()
+                .put("type", "object")
+                .put(
+                    "properties",
+                    JSONObject()
+                        .put("query", JSONObject().put("type", "string").put("description", "What to look for, e.g. who is my boss?"))
+                        .put("max_results", JSONObject().put("type", "integer")),
+                )
+                .put("required", JSONArray().put("query")),
         // Read-only recall over on-device Room.
         riskLevel = RiskLevel.LOW,
         requiresConfirmation = false,
