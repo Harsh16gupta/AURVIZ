@@ -54,6 +54,7 @@ object UiPrefs {
     private const val KEY_PROVIDER = "selected_provider"
     private const val KEY_CONFIRM_EMAIL = "confirm_send_email"
     private const val KEY_DISABLED_SCHEDULES = "disabled_schedule_ids"
+    private const val KEY_ALLOW_ALWAYS = "allow_always_recipients"
 
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -76,6 +77,14 @@ object UiPrefs {
         prefs(context).getStringSet(KEY_DISABLED_SCHEDULES, emptySet()).orEmpty().toSet()
     fun setDisabledScheduleIds(context: Context, ids: Set<String>) =
         prefs(context).edit().putStringSet(KEY_DISABLED_SCHEDULES, ids).apply()
+
+    // Ticket #68: revocable per-recipient allow-always grants
+    // (GLOSSARY Preference). Stored normalized; the live store is the
+    // decision input, these prefs are just persistence.
+    fun allowAlways(context: Context): Set<String> =
+        prefs(context).getStringSet(KEY_ALLOW_ALWAYS, emptySet()).orEmpty().toSet()
+    fun setAllowAlways(context: Context, addresses: Set<String>) =
+        prefs(context).edit().putStringSet(KEY_ALLOW_ALWAYS, addresses).apply()
 }
 
 val LocalHaptics = staticCompositionLocalOf<AurvizHaptics?> { null }

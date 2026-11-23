@@ -59,6 +59,8 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onSetThemeMode: (ThemeMode) -> Unit = {},
     onSetHapticsEnabled: (Boolean) -> Unit = {},
+    onAllowAlwaysAdd: (String) -> Unit = {},
+    onAllowAlwaysRevoke: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     // P2: key drafts and the pasted OAuth link are memory-only (remember,
@@ -66,6 +68,9 @@ fun SettingsScreen(
     // saved-instance state. Fields start empty, clear on save, and clear
     // again when the screen leaves composition.
     var pasted by remember { mutableStateOf("") }
+    // Ticket #68: allow-always grant draft. An address is not a secret,
+    // so it may live in composition state (unlike the key fields above).
+    var newAllow by remember { mutableStateOf("") }
     // Key fields always start empty: saved keys are never read back into UI.
     var geminiKey by remember { mutableStateOf("") }
     var groqKey by remember { mutableStateOf("") }
@@ -273,6 +278,36 @@ fun SettingsScreen(
                 description = "Unattended writes wait in Schedules.",
                 value = "Hold for Confirmation",
             )
+            // Ticket #68: revocable per-recipient allow-always grants
+            // (GLOSSARY Preference). One listed address skips the send
+            // card; revocation applies to the next send. SendPolicy still
+            // blocks bulk and forwarded mail for listed addresses.
+            OptionRow(
+                title = "Always-allowed recipients",
+                description = "Sends to one listed address skip the card. Policy still applies.",
+                value = if (state.allowAlways.isEmpty()) "None" else "${state.allowAlways.size} set",
+            )
+            state.allowAlways.sorted().forEach { address ->
+                OptionRow(
+                    title = address,
+                    description = "Tap to revoke — takes effect immediately.",
+                    onClick = { onAllowAlwaysRevoke(address) },
+                    destructive = true,
+                )
+            }
+            TextField(
+                value = newAllow,
+                onValueChange = { newAllow = it },
+                label = "Always allow sends to…",
+            )
+            Button(
+                onClick = {
+                    onAllowAlwaysAdd(newAllow)
+                    newAllow = ""
+                },
+            ) {
+                Text("Always allow")
+            }
         }
         Section(
             "Permissions & Background",

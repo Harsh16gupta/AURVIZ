@@ -238,3 +238,23 @@ Every case where the AI was wrong and how it was caught. Add an entry with file:
   `:app:testDebugUnitTest` green (344 tests, 0 failures). No red-green
   cycle: the guards pre-existed (`Email.kt:373-378`, `Email.kt:303-314`),
   so the tests pin behavior rather than drive new code.
+
+## 2026-11-24 — Issue #68 allow-always Preference (`main`)
+
+- **Wildcard grant reached the store.** First `InMemoryAllowAlwaysStore.allow`
+  persisted any non-blank string, so `allow("*")` landed in the grant set
+  (`app/src/main/java/com/aurviz/agent/AllowAlways.kt`). Eligibility still
+  rejected it (not plausible), but a direct `isAllowed` consumer would have
+  honored a blanket. Caught by
+  `blankAndWildcardAreNeverStoredOrEligible`
+  (`app/src/test/java/com/aurviz/agent/AllowAlwaysTest.kt`): `allow` now
+  persists only plausible addresses, and eligibility re-checks. 14/14 green.
+- **`allowAlwaysStore` declared after `init`.** `init` hydrates the store
+  from prefs, so the property must precede it — compile error
+  (`AgentViewModel.kt:227,235`) caught at build; moved above `init`.
+- Tests: new `AllowAlwaysTest` (14 tests: allow, revoke/immediate, policy
+  over allow, no blanket, loop parity). Full `:app:testDebugUnitTest`
+  green (366 tests, 0 failures) plus `:app:assembleDebug`.
+- Note: auto-approve without suspending contradicts ADR-0003's letter
+  ("suspends the loop until the UI returns approve, edit, or reject") —
+  permitted by spec #65 Q5; ADR amendment lands in #70, not here.

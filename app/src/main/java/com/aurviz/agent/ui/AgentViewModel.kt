@@ -13,6 +13,8 @@ import com.aurviz.agent.AgentLoop
 import com.aurviz.agent.AgentLoopResult
 import com.aurviz.agent.ApprovalDecision
 import com.aurviz.agent.ApprovalGate
+import com.aurviz.agent.InMemoryAllowAlwaysStore
+import com.aurviz.agent.allowAlwaysEligible
 import com.aurviz.agent.BuildConfig
 import com.aurviz.agent.ChatLlmProvider
 import com.aurviz.agent.ChatMessage
@@ -219,9 +221,16 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
     private var lastExchangedCode: String? = null
     private var signInDone = false
 
+    // Ticket #68: the live allow-always grant set. The confirm hook reads
+    // this same instance, so allow/revoke take effect on the next decision
+    // with no restart. UiPrefs is persistence only. Declared before init:
+    // the init block hydrates it from prefs.
+    private val allowAlwaysStore = InMemoryAllowAlwaysStore()
+
     init {
         tokenVault.loadInto(tokens)
         val appCtx = application.applicationContext
+        UiPrefs.allowAlways(appCtx).forEach(allowAlwaysStore::allow)
         _state.update {
             it.copy(
                 themeMode = UiPrefs.themeMode(appCtx),
@@ -229,6 +238,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                 selectedProvider = UiPrefs.selectedProvider(appCtx),
                 confirmSendEmail = UiPrefs.confirmSendEmail(appCtx),
                 disabledScheduleIds = UiPrefs.disabledScheduleIds(appCtx),
+                allowAlways = allowAlwaysStore.list(),
             )
         }
         refreshScheduleRuns()
@@ -254,6 +264,20 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
     fun setSelectedProvider(name: String?) {
         UiPrefs.setSelectedProvider(getApplication<Application>().applicationContext, name)
         _state.update { it.copy(selectedProvider = name) }
+    }
+
+    fun allowAlwaysAllow(address: String) {
+        allowAlwaysStore.allow(address)
+        val updated = allowAlwaysStore.list()
+        UiPrefs.setAllowAlways(getApplication<Application>().applicationContext, updated)
+        _state.update { it.copy(allowAlways = updated) }
+    }
+
+    fun allowAlwaysRevoke(address: String) {
+        allowAlwaysStore.revoke(address)
+        val updated = allowAlwaysStore.list()
+        UiPrefs.setAllowAlways(getApplication<Application>().applicationContext, updated)
+        _state.update { it.copy(allowAlways = updated) }
     }
 
     private fun effectiveProvider(): String =
@@ -1232,7 +1256,13 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                     registry.toolSchemas(),
                 )
             val confirm: (ToolCall) -> ApprovalDecision = { call ->
-                val callId = call.id.orEmpty()
+                // Ticket #68: allow-always skips the card for one listed
+                // recipient. This only skips the ask — the gated path still
+                // runs SendPolicy, so policy denial wins over the grant.
+                if (allowAlwaysEligible(call, allowAlwaysStore)) {
+                    ApprovalDecision.Approved
+                } else {
+                    val callId = call.id.orEmpty()
                 val ticket = approvalGate.openGate(runId, callId)
                 if (ticket == null || callId.isEmpty()) {
                     ApprovalDecision.Rejected
@@ -1263,6 +1293,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                             ?: ApprovalDecision.TimedOut
                     } catch (_: InterruptedException) {
                         ApprovalDecision.TimedOut
+                    }
                     }
                 }
             }

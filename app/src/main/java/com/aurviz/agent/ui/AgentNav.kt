@@ -176,6 +176,8 @@ fun AgentNav(
                             onBack = goCommand,
                             onSetThemeMode = vm::setThemeMode,
                             onSetHapticsEnabled = vm::setHapticsEnabled,
+                            onAllowAlwaysAdd = vm::allowAlwaysAllow,
+                            onAllowAlwaysRevoke = vm::allowAlwaysRevoke,
                         )
                     }
                 }

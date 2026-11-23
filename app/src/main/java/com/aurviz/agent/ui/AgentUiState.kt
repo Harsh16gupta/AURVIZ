@@ -121,6 +121,10 @@ data class AgentUiState(
     val confirmSendEmail: Boolean = true,
     // Disabled Schedule ids (UiPrefs-backed) + recent run history.
     val disabledScheduleIds: Set<String> = emptySet(),
+    // Ticket #68: revocable per-recipient allow-always grants
+    // (GLOSSARY Preference, UiPrefs-backed). Sends to one listed address
+    // skip the Confirmation card; SendPolicy still applies.
+    val allowAlways: Set<String> = emptySet(),
     val scheduleRuns: List<ScheduleRunSummary> = emptyList(),
 )
 
