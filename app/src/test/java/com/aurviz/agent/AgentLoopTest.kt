@@ -64,7 +64,7 @@ class AgentLoopTest {
                 ),
             )
         val events = mutableListOf<AgentEvent>()
-        val result = AgentLoop(llm, registry(), onEvent = events::add).run("morning routine")
+        val result = AgentLoop(llm, registry(), onEvent = events::add, confirm = { ApprovalDecision.Approved }).run("morning routine")
         assertTrue(result is AgentLoopResult.Answered)
         assertEquals("Done", (result as AgentLoopResult.Answered).answer)
         assertEquals(2, result.steps.size)
@@ -196,7 +196,7 @@ class AgentLoopTest {
                     answer("Done"),
                 ),
             )
-        val result = AgentLoop(llm, registry()).run("morning routine")
+        val result = AgentLoop(llm, registry(), confirm = { ApprovalDecision.Approved }).run("morning routine")
         assertTrue(result is AgentLoopResult.Answered)
         val rows = (result as AgentLoopResult.Answered).toTimeline()
         assertEquals("Heard command", rows[0].title)

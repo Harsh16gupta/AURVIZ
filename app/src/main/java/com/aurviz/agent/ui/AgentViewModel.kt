@@ -12,6 +12,7 @@ import com.aurviz.agent.AgentEvent
 import com.aurviz.agent.AgentLoop
 import com.aurviz.agent.AgentLoopResult
 import com.aurviz.agent.ApprovalDecision
+import com.aurviz.agent.ApprovalGate
 import com.aurviz.agent.BuildConfig
 import com.aurviz.agent.ChatLlmProvider
 import com.aurviz.agent.ChatMessage
@@ -70,7 +71,6 @@ import com.aurviz.agent.rememberFact
 import com.aurviz.agent.retryDisclosure
 import com.aurviz.agent.toTimeline
 import com.aurviz.agent.ui.components.VoiceState as OrbState
-import java.util.concurrent.LinkedBlockingQueue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -777,23 +777,45 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
     // blocks the loop thread until approvePendingSend/rejectPendingSend
     // resolves it — the gate never auto-approves, and the deterministic
     // SendPolicy still screens an approved send before the transport.
-    private var pendingDecisions: LinkedBlockingQueue<ApprovalDecision>? = null
+    //
+    // P0 binding: one ApprovalGate per ViewModel. Each gated call opens a
+    // fresh one-shot queue bound to (runId, callId); the card buttons pass
+    // the visible call id back and stale ids are ignored. One Task
+    // Execution runs at a time so a second command cannot replace the open
+    // card's queue.
+    private val approvalGate = ApprovalGate()
 
-    fun approvePendingSend() {
-        pendingDecisions?.offer(ApprovalDecision.Approved)
+    @Volatile
+    private var currentRunId: Long? = null
+
+    fun approvePendingSend(expectedCallId: String) {
+        val runId = currentRunId ?: return
+        approvalGate.resolve(runId, expectedCallId, ApprovalDecision.Approved)
     }
 
-    fun rejectPendingSend() {
-        pendingDecisions?.offer(ApprovalDecision.Rejected)
+    fun rejectPendingSend(expectedCallId: String) {
+        val runId = currentRunId ?: return
+        approvalGate.resolve(runId, expectedCallId, ApprovalDecision.Rejected)
     }
 
     private fun runLoopCommand(cmd: String) {
+        val runId = approvalGate.startRun()
+        if (runId == null) {
+            _state.update {
+                it.copy(statusLine = "Already running — resolve the current Confirmation first.")
+            }
+            return
+        }
+        currentRunId = runId
         _state.update {
             it.copy(
                 statusLine = "Command: $cmd\nAgent: thinking…",
                 timeline = emptyList(),
                 providerUsed = null,
                 providersTried = emptyList(),
+                pendingApproval = null,
+                pendingApprovalUnseen = emptyList(),
+                agentRunning = true,
             )
         }
         viewModelScope.launch(Dispatchers.IO) {
@@ -803,27 +825,31 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                     defaultCandidates(BuildConfig.LLM_DEFAULT_PROVIDER, tokenVault.loadLlmKeys()),
                 )
             val registry = defaultToolRegistry(gmailApi = gmail, scheduleStore = scheduleStore, memoryStore = roomStore)
-            val decisions = LinkedBlockingQueue<ApprovalDecision>(1)
-            pendingDecisions = decisions
             val confirm: (ToolCall) -> ApprovalDecision = { call ->
-                val known =
-                    try {
-                        knownAddressesFromInbox(gmail.listInbox())
-                    } catch (_: Exception) {
-                        knownAddressesFromInbox(_state.value.emails)
+                val callId = call.id.orEmpty()
+                val gate = approvalGate.openGate(runId, callId)
+                if (gate == null) {
+                    ApprovalDecision.Rejected
+                } else {
+                    val known =
+                        try {
+                            knownAddressesFromInbox(gmail.listInbox())
+                        } catch (_: Exception) {
+                            knownAddressesFromInbox(_state.value.emails)
+                        }
+                    val unseen = approvalCardFor(call, known)?.unseen.orEmpty()
+                    _state.update {
+                        it.copy(
+                            pendingApproval = call,
+                            pendingApprovalUnseen = unseen,
+                            statusLine = "Command: $cmd\nAgent: needs approval: ${call.name}",
+                        )
                     }
-                val unseen = approvalCardFor(call, known)?.unseen.orEmpty()
-                _state.update {
-                    it.copy(
-                        pendingApproval = call,
-                        pendingApprovalUnseen = unseen,
-                        statusLine = "Command: $cmd\nAgent: needs approval: ${call.name}",
-                    )
-                }
-                try {
-                    decisions.take()
-                } catch (_: InterruptedException) {
-                    ApprovalDecision.TimedOut
+                    try {
+                        gate.take()
+                    } catch (_: InterruptedException) {
+                        ApprovalDecision.TimedOut
+                    }
                 }
             }
             var progress = LoopUiProgress()
@@ -903,7 +929,15 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
             } finally {
-                if (pendingDecisions === decisions) pendingDecisions = null
+                approvalGate.finishRun(runId)
+                if (currentRunId == runId) currentRunId = null
+                _state.update {
+                    it.copy(
+                        agentRunning = false,
+                        pendingApproval = null,
+                        pendingApprovalUnseen = emptyList(),
+                    )
+                }
             }
         }
     }

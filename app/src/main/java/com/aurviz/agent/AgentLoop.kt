@@ -94,7 +94,7 @@ class AgentLoop(
     private val registry: ToolRegistry,
     private val maxSteps: Int = MAX_STEPS,
     private val onEvent: (AgentEvent) -> Unit = {},
-    private val confirm: (ToolCall) -> ApprovalDecision = { ApprovalDecision.Approved },
+    private val confirm: (ToolCall) -> ApprovalDecision = { ApprovalDecision.Rejected },
     // Ticket 10/24: per-step and total timeouts (ADR-0005, gaps §3H).
     // The blocking calls underneath are already bounded by the OkHttp
     // connect/read timeouts; the loop turns an overrun or a transport

@@ -2,6 +2,23 @@
 
 Every case where the AI was wrong and how it was caught. Add an entry with file:line evidence before moving on.
 
+## 2026-11-23 — P0 approval binding fix (deep-review finding verified, against `8ec669f`)
+
+- **One replaceable queue let card A release call B.** `AgentViewModel.kt:855`
+  held a single `pendingDecisions` replaced per `runLoopCommand` (`:887`),
+  `CommandScreen.kt:84-92` sent approve/reject with no call id, and the
+  Composer stayed live (`:123-129`) so a second command overwrote the queue.
+  Fixed with `ApprovalGate` (`app/src/main/java/com/aurviz/agent/ApprovalGate.kt`):
+  per-call one-shot queue bound to (runId, callId), stale ids ignored,
+  double-tap dropped, single-flight runs.
+- **Default confirmer was fail-open.** `AgentLoop.kt:97` defaulted to
+  `Approved`; headless already used `Rejected` (`ScheduledRun.kt:112`).
+  Changed to `Rejected`; `AgentLoopTest` gated cases now pass explicit
+  `Approved` (`app/src/test/java/com/aurviz/agent/AgentLoopTest.kt:67,199`).
+  New `ApprovalGateTest` (6 tests) pins stale-callback, cross-run,
+  double-tap, single-flight, fail-closed default, and two-call two-approval
+  paths. Full suite: 312 tests / 30 classes, 0 failures.
+
 ## 2026-11-23 — ADR/code drift found during grill (against HEAD `3fcfbff`)
 
 - **ADR-0002 said periodic work; code uses one-time work.** `docs/adr/0002-workmanager-alarm-scheduling.md` claimed "WorkManager periodic work", but `enqueueRoutineWork` (`app/src/main/java/com/aurviz/agent/ScheduleWork.kt:40-51`) builds a `OneTimeWorkRequest` with `enqueueUniqueWork` — no periodic builder anywhere in `app/src`. Fixed by ADR-0002 rewrite.

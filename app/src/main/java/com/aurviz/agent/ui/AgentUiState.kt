@@ -74,6 +74,10 @@ data class AgentUiState(
     val geminiKeySet: Boolean = false,
     val groqKeySet: Boolean = false,
     val sending: Boolean = false,
+    // P0 single-flight: one Task Execution at a time. While true the
+    // Composer sends nothing so a second command cannot replace the open
+    // Confirmation card's gate.
+    val agentRunning: Boolean = false,
 )
 
 // Ticket 11/24: visible retry line for CommandScreen, rendered from the

@@ -40,8 +40,8 @@ fun CommandScreen(
     onMicTap: () -> Unit,
     onVoiceClick: () -> Unit,
     onOpenBrowser: () -> Unit,
-    onApprovePending: () -> Unit = {},
-    onRejectPending: () -> Unit = {},
+    onApprovePending: (String) -> Unit = {},
+    onRejectPending: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     ScreenScaffold(modifier) {
@@ -86,8 +86,8 @@ fun CommandScreen(
                         ApprovalCardRow(
                             call = call,
                             unseen = state.pendingApprovalUnseen,
-                            onApprove = onApprovePending,
-                            onReject = onRejectPending,
+                            onApprove = { onApprovePending(call.id.orEmpty()) },
+                            onReject = { onRejectPending(call.id.orEmpty()) },
                         )
                     }
                 }
@@ -124,8 +124,8 @@ fun CommandScreen(
                     value = state.inputText,
                     onValueChange = onInputChange,
                     model = state.providerUsed ?: "Aurviz",
-                    responding = state.sending,
-                    canSend = state.inputText.isNotBlank(),
+                    responding = state.sending || state.agentRunning,
+                    canSend = state.inputText.isNotBlank() && !state.sending && !state.agentRunning,
                     onSend = { onSend(state.inputText) },
                     onStop = {},
                     onAddClick = {},
