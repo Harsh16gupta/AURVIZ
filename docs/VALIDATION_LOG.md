@@ -173,3 +173,14 @@ Every case where the AI was wrong and how it was caught. Add an entry with file:
   Old code called `api.listInbox()` twice (two full scans); new code
   partitions a single scan. Re-verified against main: `readImportant`
   is the only `listInbox` double-call site.
+
+## 2026-11-23 — NG-4 landing (RedTeamTest from `8d583a5` onto main)
+
+- **Tests-only pick, no prod change.** Took only
+  `app/src/test/java/com/aurviz/agent/RedTeamTest.kt` (+249) from the
+  reference commit; dropped its stale `TEST_PLAN.md` count hunk and
+  `VALIDATION_LOG.md` hunk (both refreshed below for the current tree).
+- **Prompt-injection red-team path (per repo rule for send-path-adjacent
+  changes):** EchoLeak-variant cases pin 3 sinks — no send execution, no
+  exfil link in rendered answer text, no exfil data in scheduled
+  summary/notification. Dummy markers only (`evil.example`, RFC-2606).
