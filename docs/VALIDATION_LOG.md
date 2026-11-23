@@ -2,6 +2,42 @@
 
 Every case where the AI was wrong and how it was caught. Add an entry with file:line evidence before moving on.
 
+## 2026-11-23 — deep-review fix batch (against `8ec669f`, 11 commits)
+
+- **Fail-open default broke two loop tests after the fix, not before.**
+  Changing `AgentLoop` default confirm to `Rejected`
+  (`app/src/main/java/com/aurviz/agent/AgentLoop.kt:97`) turned
+  `multiStepLoopMatchesToolCallIds` and `loopTimelineShowsExecutedTools`
+  red — both script a gated `create_schedule` and relied on the old
+  auto-approve. Fixed by passing explicit `Approved` in those tests
+  (`app/src/test/java/com/aurviz/agent/AgentLoopTest.kt:67,199`); the new
+  `ApprovalGateTest.defaultConfirmerIsFailClosed` pins the fail-closed default.
+- **Per-call deadline check was too strict on the first call.** Checking the
+  total budget before every batched call broke
+  `totalTimeoutAbortsToFailedKeepingFinishedSteps` (expected 1 finished step,
+  got 0): the LLM turn itself had consumed the budget and the first Tool
+  still ran. Scoped the check to `callIndex > 0`
+  (`app/src/main/java/com/aurviz/agent/AgentLoop.kt:152-160`) — a slow first
+  Tool/Confirmation cannot start another call, matching the review wording;
+  `secondCallInBatchDoesNotStartAfterTotalTimeout` pins it.
+- **Room `@Query` is CLASS-retention: reflection sees null.** The FTS test
+  first read the DAO annotation via reflection and failed on
+  `assertTrue(ann != null)`. Rewrote as a source assertion with the
+  `moduleDir()` walk used by the manifest tests
+  (`app/src/test/java/com/aurviz/agent/MemoryTest.kt:226-241`).
+- **Commit message said FTS5, code uses FTS4.** Fixed by amend before pushing
+  (`ffc9369`).
+- **Stale RUNNING recovery needs the pid, but `find()` hides it.** The
+  `ScheduleRun` record carries no pid, so reclaim goes through a new
+  `resetStaleRunning` returning the existing pid (marked FAILED for the
+  record) instead of deleting the row
+  (`app/src/main/java/com/aurviz/agent/ScheduledRun.kt:212-224`,
+  `app/src/main/java/com/aurviz/agent/ScheduleDb.kt:184-191`).
+- **Not fixed here (no device attached):** the scheduled-run device exercise,
+  profiler capture, and live Gmail/LLM calls. `docs/SCHEDULING_TEST.md` and
+  `docs/PERF_TIMINGS.md` record the green unit subset plus the human-pass
+  method instead of fabricating on-device results.
+
 ## 2026-11-23 — P0 approval binding fix (deep-review finding verified, against `8ec669f`)
 
 - **One replaceable queue let card A release call B.** `AgentViewModel.kt:855`
