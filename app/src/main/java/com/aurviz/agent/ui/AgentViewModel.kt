@@ -255,11 +255,6 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(selectedProvider = name) }
     }
 
-    fun setConfirmSendEmail(on: Boolean) {
-        UiPrefs.setConfirmSendEmail(getApplication<Application>().applicationContext, on)
-        _state.update { it.copy(confirmSendEmail = on) }
-    }
-
     private fun effectiveProvider(): String =
         state.value.selectedProvider ?: BuildConfig.LLM_DEFAULT_PROVIDER
 

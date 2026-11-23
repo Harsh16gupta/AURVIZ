@@ -175,7 +175,6 @@ fun AgentNav(
                             onBack = goCommand,
                             onSetThemeMode = vm::setThemeMode,
                             onSetHapticsEnabled = vm::setHapticsEnabled,
-                            onSetConfirmSendEmail = vm::setConfirmSendEmail,
                         )
                     }
                 }

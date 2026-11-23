@@ -12,8 +12,11 @@ agent loop, receivers doing no DB work.
 ```mermaid
 flowchart TB
     subgraph UI["Compose UI (renders state, collects approvals)"]
-        CMD[CommandScreen]
-        CARD[ApprovalCard / sheets]
+        CMD[CommandScreen<br/>Interaction feed + Composer]
+        CARD[ConfirmationCard<br/>approve / edit / reject]
+        BROW[BrowserScreen]
+        SCHS[SchedulesScreen]
+        MEM[MemoryScreen]
         SET[SettingsScreen]
     end
     subgraph AG["Agent (orchestrates, holds no tool impls)"]
@@ -88,15 +91,17 @@ Recall = keyword overlap, ties broken by importance, then recency
 `docs/PERF_TIMINGS.md`). **Embeddings (#32) are cut**: no embedding column,
 no cosine, no cache.
 
-## 4. LLM providers and fallback (ADR-0004)
+## 4. LLM providers and fallback (ADR-0004, re-amended #46)
 
-Gemini Flash default + Groq-hosted `llama-3.1-8b-instant` fallback over one
+DeepSeek (`deepseek-flash`) default with Gemini Flash, Groq-hosted
+`llama-3.1-8b-instant`, and Meta (`muse-spark-1.3`) fallbacks over one
 OpenAI-shape OkHttp client (connect 15 s, read 60 s, backoff honouring
 `retry-after`). Fallback triggers on 429/5xx (never 401), never silently
 mid-conversation with private context — the UI shows "retried on Y" from
-`providersTried`. No key → Room + app still work. Provider choice is
-config-only (no picker UI). Known drift: DeepSeek entries remain wired in
-`ProviderPicker.kt`/`LlmProvider.kt` despite the ADR; see validation log.
+`providersTried`. No key → Room + app still work. The Command screen
+provider sheet switches the runtime override (`selectedProvider`, `null`
+= Auto/Default); `BuildConfig.LLM_DEFAULT_PROVIDER` remains the fallback.
+User-entered keys live in `TokenVault`, set/not-set flags only in state.
 
 ## 5. Confirmation, injection defence, unattended runs (ADR-0003)
 
@@ -117,10 +122,13 @@ criterion.
 
 ## 6. UI, state, and secrets
 
-Compose screens render `AgentUiState` and forward events; they never
-execute tools or hold keys (key fields show set/not-set flags and clear
-after save). `AgentViewModel` owns state, including live `PerfTimings`
-(`planMs`/`toolMs`/`recallMs`) shown in Settings. Gmail tokens and
+Compose screens (Command, Browser, Schedules, Memory, Settings) render
+`AgentUiState` and forward events; they never execute tools or hold keys
+(key fields show set/not-set flags and clear after save). The Command
+screen additionally keeps a scrollable in-memory `Interaction` feed
+(latest 50) with settled Confirmation receipts. `AgentViewModel` owns
+state, including live `PerfTimings` (`planMs`/`toolMs`/`recallMs`) shown
+in Settings. Gmail tokens and
 user-entered LLM keys live in `TokenVault` (EncryptedSharedPreferences,
 Keystore-backed; `security-crypto:1.1.0` deprecated-but-working — see
 `SECURITY.md`). `allowBackup="false"` + `data_extraction_rules` deny all

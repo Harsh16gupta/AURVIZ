@@ -59,7 +59,6 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onSetThemeMode: (ThemeMode) -> Unit = {},
     onSetHapticsEnabled: (Boolean) -> Unit = {},
-    onSetConfirmSendEmail: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     // P2: key drafts and the pasted OAuth link are memory-only (remember,
@@ -250,11 +249,14 @@ fun SettingsScreen(
             }
         }
         Section("Confirmation Rules") {
-            OptionToggle(
-                title = "Require Confirmation for send_email",
-                checked = state.confirmSendEmail,
-                onCheckedChange = onSetConfirmSendEmail,
-                description = "Each send_email Tool call waits for approval.",
+            // send_email is always gated by ToolRegistry.executeGated: the
+            // gate suspends until the user approves, and SendPolicy
+            // re-checks before the transport. There is no bypass, so this
+            // is a read-only Enforced row — never a toggle.
+            OptionRow(
+                title = "send_email",
+                description = "Always requires explicit Confirmation",
+                value = "Enforced",
             )
             OptionRow(
                 title = "Read Emails",
