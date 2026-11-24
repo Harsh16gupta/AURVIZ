@@ -17,7 +17,7 @@ Single real-world capability the Agent can invoke, such as sending email or open
 _Avoid_: Plugin, action, function
 
 **Memory**:
-User-specific information stored in Room on-device and used to personalize future commands. No cloud memory provider in the shipped path.
+User-specific information stored in Room on-device and used to personalize future commands; optional opt-in Mem0 sync mirrors best-effort when enabled, Room stays source of truth for reads.
 _Avoid_: History, cache, log
 
 **Preference**:

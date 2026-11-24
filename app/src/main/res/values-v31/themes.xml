@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- API 31+ overlay: splash-screen attributes only exist on API 31+.
+         Base Theme.AIRA in values/themes.xml covers API 26-30. -->
+    <style name="Theme.AIRA" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#0D0D0E</item>
+        <item name="android:statusBarColor">#0D0D0E</item>
+        <item name="android:navigationBarColor">#0D0D0E</item>
+        <item name="android:windowSplashScreenBackground">#0D0D0E</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+    </style>
+</resources>
