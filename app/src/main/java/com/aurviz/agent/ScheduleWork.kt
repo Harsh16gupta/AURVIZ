@@ -129,8 +129,17 @@ class ScheduleWorker(context: Context, params: WorkerParameters) : Worker(contex
             } catch (_: Exception) {
                 LlmKeys()
             }
+        // Ticket #90: headless runs auto-select like the foreground loop —
+        // a keyless default provider falls back to whichever provider is
+        // Set instead of failing the run on a blank key.
+        val effective =
+            try {
+                firstConfiguredProvider(BuildConfig.LLM_DEFAULT_PROVIDER, effectiveSettings(settingsFromBuildConfig(), vaultKeys))
+            } catch (_: Exception) {
+                BuildConfig.LLM_DEFAULT_PROVIDER
+            }
         return PinnedFallbackChatLlm(
-            defaultCandidates(BuildConfig.LLM_DEFAULT_PROVIDER, vaultKeys),
+            defaultCandidates(effective, vaultKeys),
             scheduledRegistry(full).toolSchemas(),
         )
     }

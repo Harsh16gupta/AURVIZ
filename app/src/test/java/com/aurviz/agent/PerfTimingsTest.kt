@@ -1,5 +1,8 @@
 package com.aurviz.agent
 
+import com.aurviz.agent.ui.PerfTimings
+import com.aurviz.agent.ui.recordRun
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -107,5 +110,40 @@ class PerfTimingsTest {
         assertTrue("prompt median too slow: $promptMed ms", promptMed < 50.0)
         assertTrue("registry median too slow: $validationMed ms", validationMed < 250.0)
         assertTrue("trimmed prompt must be smaller than full prompt", trimmedMed <= fullMed + 5.0)
+    }
+
+    // Ticket #90: rolling averages roll forward and last-run fields survive
+    // runs that do not measure their stage.
+    @Test
+    fun recordRunRollsAveragesAndPreservesLastRunFields() {
+        var timings = PerfTimings()
+        timings = timings.recordRun(planMs = 100, toolMs = 50, recallMs = 20, success = true)
+        assertEquals(100L, timings.planMs)
+        assertEquals(50L, timings.toolMs)
+        assertEquals(20L, timings.recallMs)
+        assertEquals(100L, timings.planAvgMs)
+        assertEquals(50L, timings.toolAvgMs)
+        assertEquals(20L, timings.recallAvgMs)
+        assertEquals(1, timings.runs)
+        assertEquals(1.0, timings.successRate, 1e-9)
+
+        timings = timings.recordRun(planMs = 300, success = false)
+        assertEquals(300L, timings.planMs)
+        assertEquals(50L, timings.toolMs)
+        assertEquals(20L, timings.recallMs)
+        assertEquals(200L, timings.planAvgMs)
+        assertEquals(50L, timings.toolAvgMs)
+        assertEquals(20L, timings.recallAvgMs)
+        assertEquals(2, timings.runs)
+        assertEquals(0.5, timings.successRate, 1e-9)
+    }
+
+    @Test
+    fun recordRunKeepsDefaultsUntilMeasured() {
+        val timings = PerfTimings().recordRun(success = true)
+        assertEquals(null, timings.planMs)
+        assertEquals(null, timings.planAvgMs)
+        assertEquals(1, timings.runs)
+        assertEquals(1.0, timings.successRate, 1e-9)
     }
 }

@@ -846,3 +846,19 @@ Every case where the AI was wrong and how it was caught. Add an entry with file:
   importance, useCount) now round-trip via `restoreMemoryRow()`
   (`Memory.kt`), covered by `ScheduleMemoryPolishTest` (11 tests).
   Full gate: 485/485 green + assembleDebug green.
+
+## 2026-11-24 — Issue #90 Settings density + auto-select + telemetry (`feat/ui-batch-b`)
+
+- **Edit merged comment into `fun` line, breaking compilation.** A comment-only
+  edit in `ProviderPicker.kt` dropped the newline before `fun resolveProvider`,
+  producing `...never crashes.fun resolveProvider(...)` and 5 compile errors at
+  `ProviderPicker.kt:140-161`. Caught by `./gradlew testDebugUnitTest` failing
+  in `kaptGenerateStubsDebugKotlin`; fixed by restoring the newline.
+- **Duplicate-context edits need disambiguation.** Two identical
+  `perf.copy(planMs = ...)` blocks (Answered vs Failed) rejected a context edit
+  as ambiguous; fixed by including the distinct `statusLine` line in each
+  `oldString`. Both now route through `recordRun(..., success = true/false)`.
+- **Pre-existing copy note:** `AgentUiState.kt:158` comment says "recent run
+  history" — code comment only, never rendered; no GLOSSARY UI-copy violation.
+  Settings UI copy verified free of History/chatbot/assistant/cron-job/
+  dictation/job-run and of `.alpha()` on settled cards.

@@ -63,7 +63,9 @@ import com.aurviz.agent.createSchedule
 import com.aurviz.agent.defaultCandidates
 import com.aurviz.agent.defaultToolRegistry
 import com.aurviz.agent.deleteSchedule
+import com.aurviz.agent.effectiveSettings
 import com.aurviz.agent.formatSchedulePreview
+import com.aurviz.agent.firstConfiguredProvider
 import com.aurviz.agent.forgetPreview
 import com.aurviz.agent.knownAddressesFromInbox
 import com.aurviz.agent.listSchedules
@@ -76,6 +78,7 @@ import com.aurviz.agent.PinnedFallbackChatLlm
 import com.aurviz.agent.flattenChatMessages
 import com.aurviz.agent.refreshBatteryNeeded
 import com.aurviz.agent.scheduleTimingNote
+import com.aurviz.agent.settingsFromBuildConfig
 import com.aurviz.agent.recallFor
 import com.aurviz.agent.registerRoutineAlarm
 import com.aurviz.agent.rejectPendingApproval
@@ -233,8 +236,15 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(allowAlways = updated) }
     }
 
-    private fun effectiveProvider(): String =
-        state.value.selectedProvider ?: BuildConfig.LLM_DEFAULT_PROVIDER
+    private fun effectiveProvider(): String {
+        val preferred = state.value.selectedProvider ?: BuildConfig.LLM_DEFAULT_PROVIDER
+        return try {
+            val keys = tokenVault.loadLlmKeys()
+            firstConfiguredProvider(preferred, effectiveSettings(settingsFromBuildConfig(), keys))
+        } catch (_: Exception) {
+            preferred.trim().lowercase().takeIf { it in setOf("gemini", "deepseek", "meta") } ?: "gemini"
+        }
+    }
 
     // The currently running loop/command coroutine — cancelRun() stops it.
     private var activeJob: Job? = null
@@ -428,7 +438,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
             _state.update {
                 it.copy(
                     statusLine = "Saved: $fact",
-                    perf = it.perf.copy(recallMs = recallMs),
+                    perf = it.perf.recordRun(recallMs = recallMs),
                 )
             }
             recordCompleted(responseText = "Saved: $fact")
@@ -448,7 +458,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                     } else {
                         "Delete these?\n" + preview.joinToString("\n") { m -> "• ${m.text} (${m.source})" }
                     },
-                    perf = it.perf.copy(recallMs = ms),
+                    perf = it.perf.recordRun(recallMs = ms),
                 )
             }
             recordCompleted()
@@ -570,7 +580,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                         doneCount = if (sent) 1 else 0,
                         error = error,
                     ),
-                    perf = it.perf.copy(toolMs = ms),
+                    perf = it.perf.recordRun(toolMs = ms, success = sent),
                 )
             }
             recordCompleted(
@@ -751,6 +761,26 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         refreshLlmKeyFlags()
     }
 
+    // Ticket #90: per-provider key edits from the single key-editor sheet.
+    // Merges into the stored set so saving one provider never blanks the
+    // other two (saveLlmKeys overwrites all three at once).
+    fun saveSingleLlmKey(provider: String, key: String) {
+        val current = tokenVault.loadLlmKeys()
+        val trimmed = key.trim()
+        tokenVault.saveLlmKeys(
+            when (provider.trim().lowercase()) {
+                "deepseek" -> current.copy(deepseekKey = trimmed)
+                "meta" -> current.copy(metaKey = trimmed)
+                else -> current.copy(geminiKey = trimmed)
+            },
+        )
+        refreshLlmKeyFlags()
+    }
+
+    fun clearSingleLlmKey(provider: String) {
+        saveSingleLlmKey(provider, "")
+    }
+
     private fun refreshLlmKeyFlags() {
         val keys = tokenVault.loadLlmKeys()
         _state.update {
@@ -818,7 +848,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                             doneCount = 1,
                             error = null,
                         ),
-                        perf = it.perf.copy(toolMs = ms),
+                        perf = it.perf.recordRun(toolMs = ms),
                     )
                 }
                 recordCompleted(responseText = page.title.ifBlank { finalUrl })
@@ -1300,7 +1330,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                                 pendingApproval = null,
                                 pendingApprovalProposalId = null,
                                 pendingApprovalUnseen = emptyList(),
-                                perf = it.perf.copy(planMs = System.currentTimeMillis() - runT0),
+                                perf = it.perf.recordRun(planMs = System.currentTimeMillis() - runT0, success = true),
                                 sessionId = activeSessionId,
                                 sessionTurns = synchronized(sessionTranscript) { sessionTranscript.size / 2 },
                             )
@@ -1318,7 +1348,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                                 pendingApproval = null,
                                 pendingApprovalProposalId = null,
                                 pendingApprovalUnseen = emptyList(),
-                                perf = it.perf.copy(planMs = System.currentTimeMillis() - runT0),
+                                perf = it.perf.recordRun(planMs = System.currentTimeMillis() - runT0, success = false),
                                 sessionId = activeSessionId,
                                 sessionTurns = synchronized(sessionTranscript) { sessionTranscript.size / 2 },
                             )

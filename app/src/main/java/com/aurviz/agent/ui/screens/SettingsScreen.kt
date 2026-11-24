@@ -1,9 +1,12 @@
 package com.aurviz.agent.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -14,9 +17,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import com.aurviz.agent.BuildConfig
 import com.aurviz.agent.OEM_AUTOSTART_GUIDANCE
+import com.aurviz.agent.ProviderSettings
+import com.aurviz.agent.firstConfiguredProvider
 import com.aurviz.agent.toolLabel
 import com.aurviz.agent.ui.AgentUiState
 import com.aurviz.agent.ui.components.Button
@@ -24,7 +30,7 @@ import com.aurviz.agent.ui.components.ButtonVariant
 import com.aurviz.agent.ui.components.ChoiceTile
 import com.aurviz.agent.ui.components.HapticKind
 import com.aurviz.agent.ui.components.LocalHaptics
-import com.aurviz.agent.ui.components.OptionGroup
+import com.aurviz.agent.ui.components.ModalBottomSheet
 import com.aurviz.agent.ui.components.OptionRow
 import com.aurviz.agent.ui.components.OptionToggle
 import com.aurviz.agent.ui.components.Page
@@ -33,9 +39,9 @@ import com.aurviz.agent.ui.theme.Space
 import com.aurviz.agent.ui.components.Text
 import com.aurviz.agent.ui.components.TextField
 import com.aurviz.agent.ui.theme.Bell
+import com.aurviz.agent.ui.theme.DeviceMobile
 import com.aurviz.agent.ui.theme.EnvelopeSimple
 import com.aurviz.agent.ui.theme.Icons
-import com.aurviz.agent.ui.theme.Sparkle
 import com.aurviz.agent.ui.theme.Theme
 import com.aurviz.agent.ui.theme.ThemeMode
 import com.aurviz.agent.ui.theme.Waveform
@@ -43,6 +49,11 @@ import com.aurviz.agent.ui.theme.Waveform
 // Preferences, Gmail sign-in, and latency telemetry. The loopback OAuth
 // keeps its pasted link fallback here in a collapsible section so a
 // browser that never returns to the app cannot strand the user.
+//
+// Ticket #90: the three provider key forms collapse to 52dp disclosure
+// rows opening one reusable masked key-editor sheet; Gmail identity sits
+// inside the connection block; telemetry renders as labeled progress
+// bars with Last + Avg; the OEM prose folds into one accordion row.
 @Composable
 fun SettingsScreen(
     state: AgentUiState,
@@ -50,8 +61,9 @@ fun SettingsScreen(
     onRevokeGmail: () -> Unit,
     onPasteLink: (String) -> Unit,
     onDismissPasteFallback: () -> Unit,
-    onSaveLlmKeys: (String, String, String) -> Unit,
-    onClearLlmKeys: () -> Unit,
+    onSaveSingleLlmKey: (String, String) -> Unit,
+    onClearSingleLlmKey: (String) -> Unit,
+    onSetSelectedProvider: (String?) -> Unit = {},
     onOpenExactAlarmSettings: () -> Unit,
     onRefreshExactAlarm: () -> Unit,
     onOpenBatterySettings: () -> Unit,
@@ -63,26 +75,28 @@ fun SettingsScreen(
     onAllowAlwaysRevoke: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    // P2: key drafts and the pasted OAuth link are memory-only (remember,
+    // P2: drafts and the pasted OAuth link are memory-only (remember,
     // never rememberSaveable) so they are never serialized into
     // saved-instance state. Fields start empty, clear on save, and clear
-    // again when the screen leaves composition.
+    // again when the screen leaves composition. Saved keys are never read
+    // back into UI — the sheet only ever shows Set / Not set.
     var pasted by remember { mutableStateOf("") }
     // Ticket #68: allow-always grant draft. An address is not a secret,
     // so it may live in composition state (unlike the key fields above).
     var newAllow by remember { mutableStateOf("") }
-    // Key fields always start empty: saved keys are never read back into UI.
-    var geminiKey by remember { mutableStateOf("") }
-    var deepseekKey by remember { mutableStateOf("") }
-    var metaKey by remember { mutableStateOf("") }
+    // Ticket #90: which provider the single key-editor sheet is editing
+    // (null = closed), plus its memory-only paste draft.
+    var keyEditor by remember { mutableStateOf<String?>(null) }
+    var keyDraft by remember { mutableStateOf("") }
+    var guideExpanded by remember { mutableStateOf(false) }
     val haptics = LocalHaptics.current
 
     DisposableEffect(Unit) {
         onDispose {
             pasted = ""
-            geminiKey = ""
-            deepseekKey = ""
-            metaKey = ""
+            newAllow = ""
+            keyDraft = ""
+            keyEditor = null
         }
     }
 
@@ -90,6 +104,36 @@ fun SettingsScreen(
         onRefreshExactAlarm()
         onRefreshBattery()
     }
+
+    // Ticket #90: the visible Default mirrors the auto-select seam — the
+    // preferred provider while its key is Set, else the first Set provider.
+    // Flags only (never key values) decide the badge.
+    val preferredName =
+        (state.selectedProvider ?: BuildConfig.LLM_DEFAULT_PROVIDER).trim().lowercase()
+            .takeIf { it in setOf("gemini", "deepseek", "meta") } ?: "gemini"
+    val defaultName =
+        firstConfiguredProvider(
+            preferredName,
+            ProviderSettings(
+                geminiKey = if (state.geminiKeySet) "set" else "",
+                deepseekKey = if (state.deepseekKeySet) "set" else "",
+                metaKey = if (state.metaKeySet) "set" else "",
+            ),
+        )
+
+    fun isSet(name: String): Boolean =
+        when (name) {
+            "deepseek" -> state.deepseekKeySet
+            "meta" -> state.metaKeySet
+            else -> state.geminiKeySet
+        }
+
+    fun providerLabel(name: String): String =
+        when (name) {
+            "deepseek" -> "DeepSeek"
+            "meta" -> "Meta"
+            else -> "Gemini"
+        }
 
     Page(title = "Settings", modifier = modifier) {
         Section("Appearance & Feedback") {
@@ -121,15 +165,16 @@ fun SettingsScreen(
         Section(
             "Connections",
             footer = if (state.gmailConnected) {
-                "Signed in as ${state.gmailAccount ?: "connected"} · Scopes: gmail.readonly · gmail.send."
+                null
             } else {
                 "Connect once — the login survives restarts."
             },
         ) {
             if (state.gmailConnected) {
                 OptionRow(
-                    title = "Gmail: ${state.gmailAccount ?: "connected"}",
-                    description = "Tap Revoke below to disconnect the mailbox.",
+                    title = "Gmail",
+                    description = "Signed in as ${state.gmailAccount ?: "connected"} · " +
+                        "Scopes: gmail.readonly · gmail.send.",
                     icon = Icons.EnvelopeSimple,
                 )
                 OptionRow(
@@ -181,62 +226,45 @@ fun SettingsScreen(
                     }
                 }
             }
-            OptionRow(
-                title = "Gemini",
-                description = "Default provider.",
-                badge = if (state.geminiKeySet) "Set" else null,
-                value = if (state.geminiKeySet) null else "Not set",
-            )
-            TextField(
-                value = geminiKey,
-                onValueChange = { geminiKey = it },
-                label = "Paste Gemini API key",
-            )
-            OptionRow(
-                title = "DeepSeek",
-                description = "DeepSeek flash provider.",
-                badge = if (state.deepseekKeySet) "Set" else null,
-                value = if (state.deepseekKeySet) null else "Not set",
-            )
-            TextField(
-                value = deepseekKey,
-                onValueChange = { deepseekKey = it },
-                label = "Paste DeepSeek API key",
-            )
-            OptionRow(
-                title = "Meta",
-                description = "Meta Muse Spark provider.",
-                badge = if (state.metaKeySet) "Set" else null,
-                value = if (state.metaKeySet) null else "Not set",
-            )
-            TextField(
-                value = metaKey,
-                onValueChange = { metaKey = it },
-                label = "Paste Meta API key",
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(Space * 2)) {
-                Button(
+            listOf("gemini", "deepseek", "meta").forEach { name ->
+                val set = isSet(name)
+                OptionRow(
+                    title = providerLabel(name),
                     onClick = {
-                        onSaveLlmKeys(geminiKey, deepseekKey, metaKey)
-                        geminiKey = ""
-                        deepseekKey = ""
-                        metaKey = ""
+                        keyDraft = ""
+                        keyEditor = name
                     },
-                ) {
-                    Text("Save keys")
-                }
-                Button(
-                    onClick = {
-                        onClearLlmKeys()
-                        geminiKey = ""
-                        deepseekKey = ""
-                        metaKey = ""
+                    value = when {
+                        set && name == defaultName -> "Set · Default"
+                        set -> "Set"
+                        name == defaultName -> "Not set · Default"
+                        else -> "Not set"
                     },
-                    variant = ButtonVariant.Secondary,
-                ) {
-                    Text("Clear keys")
-                }
+                    navigates = true,
+                )
             }
+        }
+        Section("Performance Telemetry") {
+            val perf = state.perf
+            val scale =
+                maxOf(
+                    perf.planMs ?: 0L,
+                    perf.toolMs ?: 0L,
+                    perf.recallMs ?: 0L,
+                    perf.planAvgMs ?: 0L,
+                    perf.toolAvgMs ?: 0L,
+                    perf.recallAvgMs ?: 0L,
+                    1L,
+                ).toFloat()
+            TelemetryBar("Plan", perf.planMs, perf.planAvgMs, scale)
+            TelemetryBar("Tool", perf.toolMs, perf.toolAvgMs, scale)
+            TelemetryBar("Recall", perf.recallMs, perf.recallAvgMs, scale)
+            OptionRow(
+                title = "Provider",
+                description = "${state.interactions.size} Interactions recorded · " +
+                    "${(perf.successRate * 100).toInt()}% success over ${perf.runs} runs.",
+                value = state.selectedProvider ?: state.providerUsed ?: BuildConfig.LLM_DEFAULT_PROVIDER,
+            )
         }
         Section("Confirmation Rules") {
             // send_email is always gated by ToolRegistry.executeGated: the
@@ -249,7 +277,7 @@ fun SettingsScreen(
                 value = "Enforced",
             )
             OptionRow(
-                title = "Read Emails",
+                title = "Read emails",
                 description = "Mailbox reads run without a Confirmation.",
                 value = "Auto-run",
             )
@@ -259,7 +287,7 @@ fun SettingsScreen(
                 value = "Preview & Confirm",
             )
             OptionRow(
-                title = "Scheduled Writes",
+                title = "Scheduled writes",
                 description = "Unattended writes wait in Schedules.",
                 value = "Hold for Confirmation",
             )
@@ -296,15 +324,12 @@ fun SettingsScreen(
         }
         Section(
             "Permissions & Background",
-            footer = "Revoked permission falls back to inexact timing — " +
-                "Schedules still run, just not exactly on time. " +
-                "Android 12+ needs exact-alarm permission for on-time firing. " +
-                "Doze and vendor battery managers can delay Schedules. " +
-                OEM_AUTOSTART_GUIDANCE,
+            footer = "Without the system permission, Schedules still run via inexact timing — " +
+                "just not exactly on time.",
         ) {
             if (state.exactAlarmNeeded) {
                 OptionRow(
-                    title = "Exact alarms",
+                    title = "On-time Schedules",
                     onClick = onOpenExactAlarmSettings,
                     description = "Schedules still run without it — just not exactly on time.",
                     icon = Icons.Bell,
@@ -314,7 +339,7 @@ fun SettingsScreen(
                 )
             } else {
                 OptionRow(
-                    title = "Exact alarms",
+                    title = "On-time Schedules",
                     description = "Schedules fire at their saved time.",
                     icon = Icons.Bell,
                     value = "Granted",
@@ -326,7 +351,7 @@ fun SettingsScreen(
                     title = "Background running",
                     onClick = onOpenBatterySettings,
                     description = "Battery optimization is restricting Aurviz — exempt it so Schedules fire on time.",
-                    icon = Icons.Bell,
+                    icon = Icons.DeviceMobile,
                     value = "Action needed",
                     valueColor = Theme.colors.warning,
                     navigates = true,
@@ -335,7 +360,7 @@ fun SettingsScreen(
                 OptionRow(
                     title = "Background running",
                     description = "Battery optimization is not restricting Aurviz.",
-                    icon = Icons.Bell,
+                    icon = Icons.DeviceMobile,
                     value = "Granted",
                     valueColor = Theme.colors.success,
                 )
@@ -347,42 +372,130 @@ fun SettingsScreen(
                 icon = Icons.Waveform,
                 navigates = true,
             )
+            OptionRow(
+                title = "Device battery & autostart guide",
+                onClick = { guideExpanded = !guideExpanded },
+                description = "Vendor steps for Xiaomi, Oppo, Vivo, Huawei, Samsung.",
+                navigates = true,
+            )
+            if (guideExpanded) {
+                Text(
+                    OEM_AUTOSTART_GUIDANCE,
+                    color = Theme.colors.onBackgroundMuted,
+                )
+            }
         }
-        Section("Performance Telemetry") {
-            OptionGroup {
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
+    }
+
+    // Ticket #90: one reusable masked key-editor sheet for all three
+    // providers. Saved keys are never shown — only Set / Not set.
+    val editing = keyEditor
+    ModalBottomSheet(
+        visible = editing != null,
+        onDismiss = {
+            keyEditor = null
+            keyDraft = ""
+        },
+        title = if (editing != null) "${providerLabel(editing)} key" else "Provider key",
+    ) {
+        if (editing != null) {
+            val set = isSet(editing)
+            Text(
+                if (set) {
+                    "Key saved — paste a new key to replace it. Saved keys are never shown."
+                } else {
+                    "No key saved yet — paste a key to connect ${providerLabel(editing)}."
+                },
+                color = Theme.colors.onBackgroundMuted,
+            )
+            TextField(
+                value = keyDraft,
+                onValueChange = { keyDraft = it },
+                label = "Paste ${providerLabel(editing)} API key",
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(Space * 2)) {
+                Button(
+                    onClick = {
+                        onSaveSingleLlmKey(editing, keyDraft)
+                        keyDraft = ""
+                        keyEditor = null
+                    },
+                    enabled = keyDraft.isNotBlank(),
+                    modifier = Modifier.weight(1f),
                 ) {
-                    MetricColumn("Plan", state.perf.planMs)
-                    MetricColumn("Tool", state.perf.toolMs)
-                    MetricColumn("Recall", state.perf.recallMs)
+                    Text("Save")
+                }
+                Button(
+                    onClick = {
+                        onClearSingleLlmKey(editing)
+                        keyDraft = ""
+                        keyEditor = null
+                    },
+                    variant = ButtonVariant.Secondary,
+                    enabled = set,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("Clear")
                 }
             }
             OptionRow(
-                title = "Provider",
-                description = "${state.interactions.size} Interactions recorded",
-                value = state.selectedProvider ?: state.providerUsed ?: BuildConfig.LLM_DEFAULT_PROVIDER,
+                title = "Set Default",
+                onClick = {
+                    onSetSelectedProvider(editing)
+                    keyDraft = ""
+                    keyEditor = null
+                },
+                description = "First choice when its key is Set.",
+                value = if (editing == defaultName) "Default" else null,
+                navigates = true,
             )
         }
     }
 }
 
+// Ticket #90: one ChatGPT-Usage-style labeled progress bar per stage —
+// Last + Avg ms with the Last sample as the filled share of the shared
+// telemetry scale. Foundation Box only; no new icons.
 @Composable
-private fun MetricColumn(label: String, ms: Long?) {
+private fun TelemetryBar(
+    label: String,
+    lastMs: Long?,
+    avgMs: Long?,
+    scale: Float,
+) {
     Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(2.dp),
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text(
-            label,
-            style = Theme.typography.caption,
-            color = Theme.colors.onBackgroundMuted,
-        )
-        Text(
-            ms?.let { "$it ms" } ?: "—",
-            style = Theme.typography.code,
-            color = Theme.colors.onBackground,
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(label, style = Theme.typography.label)
+            Text(
+                "Last ${lastMs?.let { "$it ms" } ?: "—"} · Avg ${avgMs?.let { "$it ms" } ?: "—"}",
+                style = Theme.typography.caption,
+                color = Theme.colors.onBackgroundMuted,
+            )
+        }
+        Box(
+            modifier =
+                Modifier.fillMaxWidth()
+                    .height(8.dp)
+                    .clip(Theme.shapes.fullyRounded)
+                    .background(Theme.colors.surfaceVariant),
+        ) {
+            val fraction = ((lastMs ?: 0L).toFloat() / scale).coerceIn(0f, 1f)
+            if (fraction > 0f) {
+                Box(
+                    modifier =
+                        Modifier.fillMaxWidth(fraction)
+                            .height(8.dp)
+                            .clip(Theme.shapes.fullyRounded)
+                            .background(Theme.colors.primary),
+                )
+            }
+        }
     }
 }

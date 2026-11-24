@@ -22,7 +22,44 @@ data class PerfTimings(
     val planMs: Long? = null,
     val toolMs: Long? = null,
     val recallMs: Long? = null,
+    // Ticket #90: defaulted rolling averages over `runs` completed runs
+    // plus the share of successful runs. Last-run fields above stay the
+    // freshest sample; the averages below roll forward via recordRun().
+    val planAvgMs: Long? = null,
+    val toolAvgMs: Long? = null,
+    val recallAvgMs: Long? = null,
+    val runs: Int = 0,
+    val successRate: Double = 1.0,
 )
+
+// Ticket #90: pure rolling update for PerfTimings. Supplied stages refresh
+// both their last-run field and their rolling average; unmeasured stages
+// keep their previous values. `runs` counts every recorded run and
+// `successRate` tracks the share of successful ones.
+fun PerfTimings.recordRun(
+    planMs: Long? = null,
+    toolMs: Long? = null,
+    recallMs: Long? = null,
+    success: Boolean = true,
+): PerfTimings {
+    val nextRuns = runs + 1
+    fun roll(oldAvg: Long?, sample: Long?): Long? {
+        if (sample == null) return oldAvg
+        if (oldAvg == null || runs == 0) return sample
+        return (oldAvg * runs + sample) / nextRuns
+    }
+    val nextSuccess = (successRate * runs + if (success) 1.0 else 0.0) / nextRuns
+    return copy(
+        planMs = planMs ?: this.planMs,
+        toolMs = toolMs ?: this.toolMs,
+        recallMs = recallMs ?: this.recallMs,
+        planAvgMs = roll(planAvgMs, planMs),
+        toolAvgMs = roll(toolAvgMs, toolMs),
+        recallAvgMs = roll(recallAvgMs, recallMs),
+        runs = nextRuns,
+        successRate = nextSuccess,
+    )
+}
 
 data class VoiceUiState(
     val orb: OrbState = OrbState.Listening,
