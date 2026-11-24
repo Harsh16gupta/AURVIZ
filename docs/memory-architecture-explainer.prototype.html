@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AURVIZ Memory — How It Works Today (PROTOTYPE explainer, not app code)</title>
+<style>
+:root{--accent:#1d4ed8;--bg:#f8fafc;--card:#ffffff;--muted:#64748b;--line:#e2e8f0;--ok:#15803d;--warn:#b45309;--bad:#b91c1c}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:#0f172a;font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+.wrap{max-width:1060px;margin:0 auto;padding:28px 20px 60px}
+.badge{display:inline-block;background:#fef3c7;border:1px solid #fcd34d;color:#92400e;font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px;margin-bottom:10px}
+h1{font-size:28px;margin:6px 0 4px}h2{font-size:19px;margin:26px 0 8px}h3{font-size:15px;margin:16px 0 6px}
+.sub{color:var(--muted);max-width:72ch}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin:14px 0;box-shadow:0 1px 2px rgba(15,23,42,.05)}
+.flow{display:flex;flex-wrap:wrap;gap:8px;align-items:stretch;margin:10px 0}
+.node{flex:1 1 150px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:10px;font-size:13px}
+.node b{display:block;font-size:13px}.node span{color:#334155;font-size:12px}
+.arrow{align-self:center;color:var(--muted);font-weight:700}
+code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;background:#f1f5f9;border:1px solid var(--line);border-radius:6px;padding:1px 6px}
+pre{background:#0f172a;color:#e2e8f0;border-radius:12px;padding:14px;overflow:auto;font-size:12.5px;line-height:1.5}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:820px){.grid{grid-template-columns:1fr}}
+label{display:block;font-size:12px;color:var(--muted);margin:8px 0 3px}
+input,select,textarea{width:100%;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:14px;background:#fff;color:#0f172a}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+button{border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:9px;padding:8px 13px;font-size:13.5px;font-weight:600;cursor:pointer}
+button.ghost{background:#fff;color:var(--accent)}
+button:disabled{opacity:.5;cursor:default}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
+.tab{border:1px solid var(--line);background:#fff;color:#0f172a;border-radius:999px;padding:6px 14px;font-size:13px;cursor:pointer}
+.tab.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.state{background:#f8fafc;border:1px dashed #cbd5e1;border-radius:10px;padding:10px 12px;font-size:13px;white-space:pre-wrap}
+.pill{display:inline-block;border-radius:999px;padding:1px 9px;font-size:11.5px;font-weight:700;margin-right:6px}
+.ok{background:#dcfce7;color:var(--ok)}.warn{background:#fef3c7;color:var(--warn)}.bad{background:#fee2e2;color:var(--bad)}.info{background:#e0e7ff;color:#3730a3}
+.small{font-size:12.5px;color:var(--muted)}
+table{width:100%;border-collapse:collapse;font-size:13px}th,td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--line);vertical-align:top}
+.kbd{font-size:11px}
+footer{margin-top:26px;color:var(--muted);font-size:12.5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="badge">PROTOTYPE · throwaway explainer · not shipped app code</div>
+<h1>AURVIZ Memory — how it works today</h1>
+<p class="sub"><b>Question this answers:</b> how does a fact get captured, stored, recalled, injected into the prompt, and forgotten in the current Room-only path — and where are the hard boundaries? Double-click file, press buttons, watch state. Logic below mirrors <span class="mono">Memory.kt / MemoryDb.kt / MemoryTools.kt / AgentLoop.kt / AgentViewModel.kt</span> (Room-only, ADR-0001 amended; embeddings cut in #32).</p>
+
+<div class="card">
+<h2>1 · Data flow (the whole path)</h2>
+<div class="flow">
+<div class="node"><b>① Capture</b><span>“remember …” command, Memory screen Add, or LLM <code>save_memory</code> tool call. Source defaults to “you told me”.</span></div>
+<div class="arrow">→</div>
+<div class="node"><b>② Store</b><span>Room <code>aurviz.db</code> v6 · <code>memories</code> + FTS4 <code>memoriesFts(text)</code>. Plain SQLite (no SQLCipher).</span></div>
+<div class="arrow">→</div>
+<div class="node"><b>③ Recall &amp; rank</b><span>Keyword overlap → importance → recency <code>max(lastUsed,createdAt)</code> → insertion. Offline = FTS prefix AND + same boosts.</span></div>
+<div class="arrow">→</div>
+<div class="node"><b>④ Prompt injection</b><span>Top-5 rendered into delimited <code>[memories]</code> system section. Never into the user message. + <code>markUsed</code> each hit.</span></div>
+<div class="arrow">→</div>
+<div class="node"><b>⑤ Forget</b><span>Preview = ranked recall; delete is per-id. Edit = delete+re-save. Undo = full-row re-save (new id).</span></div>
+</div>
+<p class="small">Boundaries (AGENTS.md): UI renders + collects approvals, never executes tools or holds keys · Agent (AgentLoop/Planner/ViewModel) orchestrates · Tools own schemas/risk/gate · Memory is Room via <code>MemoryStore</code> only (no cloud provider) · Scheduler = exact alarm → expedited unique Worker → headless loop on read-only allowlist.</p>
+</div>
+
+<div class="card">
+<h2>2 · Free-play: drive the real ranking model</h2>
+<p class="small">Pure logic module below (no DOM inside it). The page calls in; state re-renders after every click.</p>
+<div class="grid">
+<div>
+<label>Fact text</label><input id="f_text" value="my boss is Priya">
+<label>Source</label><select id="f_source"><option>you told me</option><option>auto-saved</option></select>
+<div class="grid" style="grid-template-columns:1fr 1fr">
+<div><label>Category</label><input id="f_cat" value="general"></div>
+<div><label>Importance 0–9</label><input id="f_imp" value="0"></div>
+</div>
+<div class="row">
+<button onclick="remember()">Remember (dedup)</button>
+<button class="ghost" onclick="seedDemo()">Seed demo rows</button>
+<button class="ghost" onclick="resetDemo()">Reset</button>
+</div>
+<label>Query</label><input id="q" value="who is my boss Priya?">
+<div class="row">
+<button onclick="doRecall(true)">Recall online (whole-word)</button>
+<button class="ghost" onclick="doRecall(false)">Recall offline (FTS prefix)</button>
+<button class="ghost" onclick="showPrompt()">Render [memories] prompt section</button>
+</div>
+<label style="margin-top:10px">Poison test — save after untrusted read</label>
+<div class="row">
+<button class="ghost" onclick="poisonDemo()">Simulate: read_email → save_memory(source=“you told me”)</button>
+</div>
+</div>
+<div>
+<label>Live Memory state (id · source · cat · imp · useCount · lastUsed)</label>
+<div class="state" id="state">—</div>
+<label>Last result / prompt section</label>
+<pre id="out">Press a button.</pre>
+</div>
+</div>
+</div>
+
+<div class="card">
+<h2>3 · Guided walkthroughs (the awkward cases)</h2>
+<div class="tabs" id="tabs"></div>
+<div class="card" style="margin:0">
+<div id="scdesc" class="small"></div>
+<div class="row" id="scsteps"></div>
+<div class="row"><button class="ghost" onclick="startScenario(cur)">Restart scenario</button></div>
+<div class="state" id="scstate" style="margin-top:10px"></div>
+</div>
+</div>
+
+<div class="card">
+<h2>4 · What the code really does (pins)</h2>
+<table>
+<tr><th style="width:220px">Concern</th><th>Truth</th></tr>
+<tr><td>Interface</td><td><code>MemoryStore.save / list / delete / markUsed / searchFts</code> (<span class="mono">Memory.kt:24-55</span>). Two adapters: <code>InMemoryStore</code> (tests) and <code>RoomMemoryStore</code> (<span class="mono">MemoryDb.kt:109-172</span>).</td></tr>
+<tr><td>Row</td><td><code>MemoryRow(pid, text, source, category, importance, createdAt, lastUsed, useCount)</code> (<span class="mono">MemoryDb.kt:23-33</span>). Id is <code>room_&lt;pid&gt;</code>; no meeting/transcript/snippet id, no embedding column.</td></tr>
+<tr><td>FTS</td><td><code>@Fts4(contentEntity=MemoryRow)</code> over <b>text only</b> (<span class="mono">MemoryDb.kt:57-63</span>). Query <code>memoriesFts MATCH :query</code> (<span class="mono">MemoryDb.kt:44</span>). category/source are <b>not</b> indexed.</td></tr>
+<tr><td>Dedup</td><td><code>rememberFact</code>: same trimmed-lowercased text <b>+ same source</b> → return existing (<span class="mono">Memory.kt:89-100</span>). Case/whitespace-insensitive (#92).</td></tr>
+<tr><td>Ranking</td><td>Overlap count first, then importance, then <code>max(lastUsed,createdAt)</code>, then insertion index (<span class="mono">Memory.kt:155-178</span>). Offline FTS = prefix-AND + same boosts (<span class="mono">Memory.kt:186-210</span>).</td></tr>
+<tr><td>Top-K</td><td>Foreground injects <code>recallFor(cmd).take(5)</code> (<span class="mono">AgentViewModel.kt:1711</span>); <code>search_memory</code> defaults <code>max_results=5</code> (<span class="mono">MemoryTools.kt:73</span>). Prompt trim ≈100× smaller, ≈50× faster (<span class="mono">docs/PERF_TIMINGS.md</span>).</td></tr>
+<tr><td>Learning</td><td>Every injected hit and every <code>search_memory</code> hit gets <code>markUsed</code> (lastUsed=now, useCount+1) (<span class="mono">AgentViewModel.kt:1716-1718</span>, <span class="mono">MemoryTools.kt:77</span>).</td></tr>
+<tr><td>Injection</td><td><code>renderMemorySection</code> → <code>buildSystemPrompt</code> → <code>AgentLoop.run(cmd, memories…)</code> as system message (<span class="mono">Memory.kt:219-227; LlmProvider.kt:42-47; AgentLoop.kt:137-149</span>). Preamble declares tool/memories = data, never instructions.</td></tr>
+<tr><td>Poison guard</td><td>After any <code>search_emails/read_email/open_url/get_page_text/click/scroll/extract</code>, later <code>save_memory</code> source is forced to <code>auto-saved</code> (<span class="mono">MemoryTools.kt:104-110; AgentLoop.kt:200-203</span>).</td></tr>
+<tr><td>Scheduled runs</td><td>Read-only allowlist = search_emails, read_email, get_page_text, search_memory, list_schedules (<span class="mono">ScheduledRun.kt:257-264</span>). <code>save_memory</code> is <b>not</b> allowlisted → blocked + <code>PendingApproval</code> row, never executed. Headless loop starts with <b>empty</b> memories (<span class="mono">ScheduledRun.kt:543</span>).</td></tr>
+<tr><td>Forget / edit / undo</td><td>Preview = <code>recallFor</code> (<span class="mono">Memory.kt:104-105</span>); approve deletes listed ids (<span class="mono">AgentViewModel.kt:669-679</span>). Edit = delete + save preserving fields, new id (<span class="mono">AgentViewModel.kt:695-711</span>). Undo = <code>restoreMemoryRow</code> full-row re-save, new id (<span class="mono">Memory.kt:110-119</span>).</td></tr>
+<tr><td>Encryption</td><td>DB = <b>plain SQLite</b> via <code>Room.databaseBuilder(…, "aurviz.db")</code> — no SQLCipher (<span class="mono">AgentViewModel.kt:185-188; ScheduleWork.kt:59-62</span>). Only tokens/LLM keys are encrypted (<code>TokenVault</code> EncryptedSharedPreferences, <span class="mono">TokenVault.kt:24-33</span>). <code>allowBackup=false</code>.</td></tr>
+</table>
+</div>
+
+<div class="card">
+<h2>5 · Upgrade surface (Mem0 / Supermemory patterns)</h2>
+<table>
+<tr><th>Gap today</th><th>What an upgrade would add</th></tr>
+<tr><td>No embeddings, no cosine, no semantic match; prefix-FTS only.</td><td>Embedding column + vector index (or sidecar store), hybrid score = vector + overlap + importance + recency decay.</td></tr>
+<tr><td>Provenance = flat <code>source</code> string only (“you told me” / “auto-saved”).</td><td>Structured provenance: meeting/transcript/snippet id, timestamp, confidence, extractor version — Mem0-style memory objects.</td></tr>
+<tr><td>No dedup/update/contradiction resolution beyond exact-match.</td><td>Add-or-update pipeline: dedup by embedding + LLM merge, contradiction supersede, tombstones.</td></tr>
+<tr><td>Recency = <code>max(lastUsed,createdAt)</code>, no decay curve; importance is a manual 0–9.</td><td>Time-decay scoring (e.g. exp decay) + learned importance/salience.</td></tr>
+<tr><td>DB unencrypted at rest.</td><td>SQLCipher or EncryptedFile for <code>aurviz.db</code> if threat model needs it (perf + migration cost).</td></tr>
+</table>
+<p class="small">ADR-0001 status: Supermemory dropped from shipped path (no create/update route, async extraction, mail routed to third party). Shipped path is Room-only behind <code>MemoryStore</code>.</p>
+</div>
+
+<footer>Standalone file · no network · no build step. Skill used: <code>prototype</code> (LOGIC branch: single shareable HTML, free-play + tabbed walkthroughs, pure logic module, domain language). Source of truth remains the Kotlin files cited above.</footer>
+</div>
+
+<script>
+/* ---- Pure logic module (liftable; no DOM in here) ---- */
+const Logic = (() => {
+  let nextId = 0;
+  const tokens = s => (s.toLowerCase().match(/[a-z0-9]+/g) || []);
+  const tokSet = s => new Set(tokens(s));
+  function boostSort(arr){ // [memory, score, index]
+    return arr.sort((a,b)=> b[1]-a[1] || b[0].importance-a[0].importance
+      || Math.max(b[0].lastUsed,b[0].createdAt)-Math.max(a[0].lastUsed,a[0].createdAt) || b[2]-a[2]);
+  }
+  function rememberFact(store,text,source,category="general",importance=0,now=Date.now()){
+    const key=text.trim().toLowerCase();
+    const hit=store.find(m=>m.text.trim().toLowerCase()===key && m.source===source);
+    if(hit) return {memory:hit, deduped:true};
+    const m={id:"mem_"+(++nextId),text,source,category,importance,createdAt:now,lastUsed:0,useCount:0};
+    store.push(m); return {memory:m, deduped:false};
+  }
+  function rankMemories(store,query){
+    const words=tokSet(query); if(!words.size) return [];
+    const scored=[];
+    store.forEach((m,i)=>{const s=[...words].filter(w=>tokSet(m.text).has(w)).length; if(s>0) scored.push([m,s,i]);});
+    return boostSort(scored).map(x=>({memory:x[0],overlap:x[1]}));
+  }
+  function toFts(q){ return tokens(q).map(t=>t+"*").join(" "); }
+  function ftsRecall(store,query){
+    const words=tokens(query); if(!words.length) return [];
+    const scored=[];
+    store.forEach((m,i)=>{const hay=tokSet(m.text);
+      const matched=words.filter(t=>[...hay].some(h=>h.startsWith(t))).length;
+      if(matched===words.length) scored.push([m,matched,i]);});
+    return boostSort(scored).map(x=>({memory:x[0],overlap:x[1]}));
+  }
+  function renderSection(mems){
+    const body = mems.length? mems.map(m=>`• ${m.id} [${m.source}]: ${m.text}`).join("\n") : "(none)";
+    return "[memories]\n"+body+"\n[/memories]";
+  }
+  const UNTRUSTED=new Set(["search_emails","read_email","open_url","get_page_text","click","scroll","extract"]);
+  function sanitize(call, untrustedOccurred){
+    if(call.name==="save_memory" && untrustedOccurred) return {...call, arguments:{...call.arguments, source:"auto-saved"}};
+    return call;
+  }
+  return {rememberFact, rankMemories, ftsRecall, toFts, renderSection, sanitize, UNTRUSTED,
+    _resetIds(){nextId=0;}};
+})();
+
+/* ---- Thin page shell ---- */
+let store=[]; let lastHits=[];
+function fmt(m){return `${m.id} · [${m.source}] · ${m.category} · imp ${m.importance} · used ${m.useCount}× · lastUsed ${m.lastUsed||"-"}\n    “${m.text}”`;}
+function paintState(msg){
+  document.getElementById("state").textContent =
+    (store.length? store.map(fmt).join("\n") : "(empty)") + (msg? "\n— "+msg : "");
+}
+function paintOut(t){document.getElementById("out").textContent=t;}
+function remember(){
+  const t=document.getElementById("f_text").value, s=document.getElementById("f_source").value;
+  const c=document.getElementById("f_cat").value||"general", imp=parseInt(document.getElementById("f_imp").value||"0",10)||0;
+  const r=Logic.rememberFact(store,t,s,c,imp);
+  paintState(r.deduped? `dedup: identical text+source already ${r.memory.id}, no twin.` : `saved ${r.memory.id}.`);
+  paintOut(JSON.stringify(r.memory,null,1));
+}
+function seedDemo(){
+  Logic._resetIds(); store=[];
+  const n=Date.now();
+  Logic.rememberFact(store,"my boss is Priya","you told me","work",9,n-3000);
+  Logic.rememberFact(store,"my boss likes tea","auto-saved","work",0,n-1000);
+  Logic.rememberFact(store,"I like pizza","you told me","food",0,n-2000);
+  paintState("seeded 3 rows (importance 9 vs 0; staggered createdAt).");
+  paintOut("Try query “boss” (tie → recency) vs “who is my boss Priya?” (overlap wins).");
+}
+function resetDemo(){Logic._resetIds();store=[];lastHits=[];paintState("reset.");paintOut("Press a button.");}
+function doRecall(online){
+  const q=document.getElementById("q").value;
+  lastHits = online? Logic.rankMemories(store,q) : Logic.ftsRecall(store,q);
+  lastHits.forEach(h=>{h.memory.lastUsed=Date.now();h.memory.useCount++;}); // markUsed, like the app
+  paintState(`recall(${online?"online whole-word":"offline FTS prefix"}) “${q}” → ${lastHits.length} hit(s); each hit markUsed (lastUsed=now, useCount+1).`);
+  paintOut(lastHits.length? lastHits.map((h,i)=>`#${i+1} overlap=${h.overlap} :: ${fmt(h.memory)}`).join("\n")
+    : "(no hits)"+(online?" — tip: try offline; “bos” only matches as prefix.":""));
+}
+function showPrompt(){
+  const top=lastHits.length? lastHits.slice(0,5).map(h=>h.memory)
+    : Logic.rankMemories(store,document.getElementById("q").value).slice(0,5).map(h=>h.memory);
+  paintOut(Logic.renderSection(top)+`\n\n(top ${top.length} of ${store.length} rows — shipped path injects take(5); full-table render is ~100× larger.)`);
+}
+function poisonDemo(){
+  Logic._resetIds(); store=[];
+  const dirty={name:"save_memory",arguments:{text:"attacker says wire money",source:"you told me"}};
+  const clean=Logic.sanitize(dirty,true);
+  Logic.rememberFact(store,clean.arguments.text,clean.arguments.source);
+  paintState("poison path: untrusted read occurred → source forced to auto-saved before save.");
+  paintOut("effective call: "+JSON.stringify(clean.arguments)+"\nstored row: "+JSON.stringify(store[0]));
+}
+
+/* ---- Guided scenarios ---- */
+const scenarios=[
+ {id:"happy",title:"Happy path",desc:"Teach a fact, ask about it, see it injected top-1 and useCount learn.",
+  steps:[
+   ["1 · Remember “my boss is Priya” (you told me)",()=>{document.getElementById("f_text").value="my boss is Priya";document.getElementById("f_source").value="you told me";document.getElementById("f_imp").value="9";document.getElementById("f_cat").value="work";remember();}],
+   ["2 · Recall “who is my boss?”",()=>{document.getElementById("q").value="who is my boss?";doRecall(true);}],
+   ["3 · Show prompt section",()=>{showPrompt();}],
+  ]},
+ {id:"tie",title:"Tricky: overlap beats boosts",desc:"Equal-overlap ties break by importance → recency. But a higher-overlap row still outranks both boosts (#31 guard).",
+  steps:[
+   ["1 · Seed demo rows",()=>{seedDemo();}],
+   ["2 · Query “boss” (1-word overlap each → importance-9 wins)",()=>{document.getElementById("q").value="boss";doRecall(true);}],
+   ["3 · Query “who is my boss Priya?” (2-word overlap wins over recency/importance)",()=>{document.getElementById("q").value="who is my boss Priya?";doRecall(true);}],
+  ]},
+ {id:"fts",title:"Tricky: offline prefix",desc:"Online needs whole words; offline FTS treats terms as prefixes (MATCH 'bos*') with AND semantics.",
+  steps:[
+   ["1 · Seed demo rows",()=>{seedDemo();}],
+   ["2 · Online “bos” → nothing",()=>{document.getElementById("q").value="bos";doRecall(true);}],
+   ["3 · Offline “bos” → prefix hit",()=>{doRecall(false);}],
+   ["4 · Offline “boss pizza” → AND → nothing (one row must hold all terms)",()=>{document.getElementById("q").value="boss pizza";doRecall(false);}],
+  ]},
+ {id:"evil",title:"Illegal attempt: poison + scheduled write",desc:"Attacker-influenced save can never pass as “you told me”; scheduled save_memory never executes (held as PendingApproval).",
+  steps:[
+   ["1 · Poison save after email read → auto-saved",()=>{poisonDemo();}],
+   ["2 · Note scheduled rule (static)",()=>{paintOut("SCHEDULED_RUN_ALLOWLIST = search_emails, read_email, get_page_text, search_memory, list_schedules.\nsave_memory ∉ allowlist → blocked executor + PendingApproval row; headless loop starts with memories=[].\nForeground take(5) vs scheduled stateless: by design (ScheduledRun.kt:257-264,543).");}],
+  ]},
+];
+let cur="happy";
+function renderTabs(){
+  const el=document.getElementById("tabs"); el.innerHTML="";
+  scenarios.forEach(s=>{const b=document.createElement("button");b.className="tab"+(s.id===cur?" active":"");b.textContent=s.title;b.onclick=()=>{cur=s.id;renderTabs();startScenario(cur);};el.appendChild(b);});
+}
+function startScenario(id){
+  Logic._resetIds(); store=[]; lastHits=[];
+  const s=scenarios.find(x=>x.id===id);
+  document.getElementById("scdesc").textContent=s.desc;
+  const box=document.getElementById("scsteps"); box.innerHTML="";
+  s.steps.forEach((st,i)=>{const b=document.createElement("button");b.textContent=st[0];b.className=i===0?"":"ghost";
+    b.onclick=()=>{st[1]();document.getElementById("scstate").textContent=document.getElementById("state").textContent;[...box.children].forEach((x,j)=>x.className=j<=i?"":"ghost");};
+    box.appendChild(b);});
+  paintState("scenario reset: empty store.");paintOut("Follow the steps above in order.");
+  document.getElementById("scstate").textContent=document.getElementById("state").textContent;
+}
+renderTabs();startScenario("happy");paintState("ready.");
+</script>
+</body>
+</html>
