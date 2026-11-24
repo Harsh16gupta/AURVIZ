@@ -240,6 +240,7 @@ class FlagshipUiCraftTest {
 
     @Test
     fun zeroPaddingCardBugsStayFixed() {
+
         val email = mainText("com/aurviz/agent/ui/sheets/EmailConfirmationSheet.kt")
         assertFalse("field stack must not re-wrap in a Section card", email.contains("Section("))
         val forget = mainText("com/aurviz/agent/ui/sheets/ForgetMemorySheet.kt")
@@ -253,5 +254,21 @@ class FlagshipUiCraftTest {
         assertTrue(browser.contains("singleLine = true"))
         assertTrue(browser.contains("maxLines = 1"))
         assertTrue(browser.contains("TextOverflow.Ellipsis"))
+    }
+
+    // Ticket #108 (T3): 1-tap Agent diagnostics card in Settings — stock
+    // foundation, VelaTheme, no new icons; re-run label shows ready count.
+    @Test
+    fun settingsHasSystemDiagnosticsCard() {
+        val text = mainText("com/aurviz/agent/ui/screens/SettingsScreen.kt")
+        assertTrue(text.contains("Section(\"System Diagnostics\")"))
+        assertTrue(text.contains("state.diagnostics.items"))
+        assertTrue(text.contains("\"Run Diagnostics\""))
+        assertTrue(text.contains("Re-run Diagnostics ("))
+        assertTrue(text.contains("onRunDiagnostics"))
+        assertTrue(text.contains("ButtonVariant.Secondary"))
+        assertTrue(text.contains("Modifier.fillMaxWidth().height(48.dp)"))
+        assertTrue(text.contains("CardDivider()"))
+        assertFalse(text.contains("material"))
     }
 }

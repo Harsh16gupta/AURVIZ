@@ -3,6 +3,7 @@ package com.aurviz.agent.ui
 import android.app.AlarmManager
 import android.app.Application
 import android.content.Context
+import android.content.Intent
 import android.os.Build
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -1395,6 +1396,82 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
             false
         }
         _state.update { it.copy(batteryOptimizationNeeded = needsAsk) }
+    }
+
+    // Ticket #108 (T3): 1-tap Agent diagnostics for the Settings
+    // "System Diagnostics" card. Refreshes the key flags, exact-alarm and
+    // battery flags, probes live Gmail token health when connected, then
+    // publishes a 5-item AgentDiagnosticsReport. Never auto-fixes.
+    fun runDiagnostics() {
+        _state.update { it.copy(diagnostics = it.diagnostics.copy(running = true)) }
+        viewModelScope.launch(Dispatchers.IO) {
+            refreshLlmKeyFlags()
+            refreshExactAlarmFlag()
+            refreshBatteryFlag()
+            val reachable: Boolean? = if (tokens.isConnected()) {
+                try {
+                    val email = gmail.fetchProfileEmail()
+                    tokens.gmailAccount = email
+                    tokenVault.saveFrom(tokens)
+                    true
+                } catch (_: Exception) {
+                    false
+                }
+            } else {
+                null
+            }
+            val snapshot = _state.value
+            val provider = effectiveProvider()
+            val report = buildAgentDiagnostics(
+                effectiveProvider = provider,
+                geminiKeySet = snapshot.geminiKeySet,
+                deepseekKeySet = snapshot.deepseekKeySet,
+                metaKeySet = snapshot.metaKeySet,
+                gmailConnected = tokens.isConnected(),
+                gmailAccount = tokens.gmailAccount,
+                gmailReachable = reachable,
+                exactAlarmNeeded = snapshot.exactAlarmNeeded,
+                batteryOptimizationNeeded = snapshot.batteryOptimizationNeeded,
+                memoriesCount = snapshot.memories.size,
+                schedulesCount = snapshot.schedules.size,
+                sessionsCount = snapshot.sessions.size,
+            )
+            _state.update {
+                it.copy(
+                    diagnostics = report,
+                    gmailAccount = tokens.gmailAccount,
+                    gmailConnected = tokens.isConnected(),
+                )
+            }
+        }
+    }
+
+    // Ticket #108 (T3): Share Sheet (ACTION_SEND) + launcher shortcut
+    // routing. Shared text becomes a ready-to-review Composer draft —
+    // never auto-executed. Shortcuts navigate without running anything.
+    fun handleIncomingIntent(action: String?, type: String?, sharedText: String?, sharedSubject: String?) {
+        when {
+            action == Intent.ACTION_SEND && type == "text/plain" -> {
+                val draft = formatSharedCommandDraft(sharedText, sharedSubject)
+                if (draft != null) {
+                    _state.update { it.copy(inputText = draft, pendingNavRoute = Dests.COMMAND) }
+                }
+            }
+            action == SHORTCUT_ACTION_VOICE -> {
+                _state.update { it.copy(pendingNavRoute = Dests.COMMAND, pendingOpenVoiceSheet = true) }
+            }
+            action == SHORTCUT_ACTION_NEW_SESSION -> {
+                startNewSession()
+                _state.update { it.copy(pendingNavRoute = Dests.COMMAND) }
+            }
+            action == SHORTCUT_ACTION_SCHEDULES -> {
+                _state.update { it.copy(pendingNavRoute = Dests.SCHEDULES) }
+            }
+        }
+    }
+
+    fun consumePendingNavigation() {
+        _state.update { it.copy(pendingNavRoute = null, pendingOpenVoiceSheet = false) }
     }
 
     // --- Loop (AgentLoop for reads; ADR-0005 §3A) ---

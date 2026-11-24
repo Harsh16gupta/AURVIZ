@@ -94,6 +94,16 @@ fun AgentNav(
         vm.consumeAuthUrl()
     }
 
+    // Ticket #108 (T3): Share Sheet / launcher shortcut routing. The
+    // ViewModel stages a pending route (+ optional Voice Command sheet);
+    // the NavHost consumes it once so config changes never re-trigger it.
+    LaunchedEffect(state.pendingNavRoute, state.pendingOpenVoiceSheet) {
+        val route = state.pendingNavRoute ?: return@LaunchedEffect
+        if (state.pendingOpenVoiceSheet) showVoice = true
+        vm.consumePendingNavigation()
+        navController.navigate(route)
+    }
+
     ScreenScaffold(modifier) {
         Box(Modifier.fillMaxSize()) {
             val startDest = remember { if (state.onboardingCompleted) Dests.COMMAND else Dests.ONBOARDING }
@@ -197,6 +207,7 @@ fun AgentNav(
                         onAllowAlwaysAdd = vm::allowAlwaysAllow,
                         onAllowAlwaysRevoke = vm::allowAlwaysRevoke,
                         onOpenMemory = { navController.navigate(Dests.MEMORY) },
+                        onRunDiagnostics = vm::runDiagnostics,
                         onBack = { navController.popBackStack() },
                     )
                 }

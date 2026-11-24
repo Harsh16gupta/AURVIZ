@@ -244,6 +244,112 @@ fun rememberAddressFor(record: InteractionRecord): String? {
         ?.substringAfter("to:")?.trim()?.split(Regex("\\s+"))?.firstOrNull()?.trim()?.takeIf { it.contains("@") }
 }
 
+// Ticket #108 (T3): 1-tap Agent diagnostics + Share Sheet draft +
+// launcher shortcuts. Pure JVM-testable models and helpers; the
+// ViewModel only folds them into state, screens only render them.
+
+// Launcher shortcut actions handled by MainActivity →
+// AgentViewModel.handleIncomingIntent → AgentNav.
+const val SHORTCUT_ACTION_VOICE = "com.aurviz.agent.action.VOICE_COMMAND"
+const val SHORTCUT_ACTION_NEW_SESSION = "com.aurviz.agent.action.NEW_SESSION"
+const val SHORTCUT_ACTION_SCHEDULES = "com.aurviz.agent.action.SCHEDULES"
+
+// Formats shared text/URL from the Android Share Sheet
+// (Intent.ACTION_SEND) into a ready-to-review Composer draft.
+// Never auto-sends — the user still taps Send on CommandScreen.
+fun formatSharedCommandDraft(sharedText: String?, sharedSubject: String? = null): String? {
+    val body = sharedText?.trim().orEmpty()
+    if (body.isEmpty()) return null
+    val subjectPrefix = sharedSubject?.trim()?.takeIf { it.isNotEmpty() && !body.startsWith(it) }
+    return if (com.aurviz.agent.isAllowedWebUrl(body) && !body.any { it.isWhitespace() }) {
+        "Open $body and summarize the key points"
+    } else if (subjectPrefix != null) {
+        "Summarize this ($subjectPrefix): $body"
+    } else {
+        "Summarize this: $body"
+    }
+}
+
+// One readiness row for the Settings System Diagnostics card.
+data class DiagnosticItem(
+    val label: String,
+    val status: String,
+    val healthy: Boolean,
+    val detail: String,
+)
+
+data class AgentDiagnosticsReport(
+    val running: Boolean = false,
+    val timestampMs: Long = 0L,
+    val items: List<DiagnosticItem> = emptyList(),
+) {
+    val passedCount: Int get() = items.count { it.healthy }
+}
+
+fun buildAgentDiagnostics(
+    effectiveProvider: String,
+    geminiKeySet: Boolean,
+    deepseekKeySet: Boolean,
+    metaKeySet: Boolean,
+    gmailConnected: Boolean,
+    gmailAccount: String?,
+    gmailReachable: Boolean?,
+    exactAlarmNeeded: Boolean,
+    batteryOptimizationNeeded: Boolean,
+    memoriesCount: Int,
+    schedulesCount: Int,
+    sessionsCount: Int,
+    nowMs: Long = System.currentTimeMillis(),
+): AgentDiagnosticsReport {
+    val anyKey = geminiKeySet || deepseekKeySet || metaKeySet
+    val activeKeySet = when (effectiveProvider.lowercase()) {
+        "deepseek" -> deepseekKeySet
+        "meta" -> metaKeySet
+        else -> geminiKeySet
+    }
+    val providerDisplay = com.aurviz.agent.providerDisplayName(effectiveProvider)
+    val gmailHealthy = gmailConnected && (gmailReachable != false)
+    val gmailStatus = when {
+        !gmailConnected -> "Not connected"
+        gmailReachable == true -> "Connected · Verified"
+        gmailReachable == false -> "Token expired · Reconnect"
+        else -> "Connected"
+    }
+    val items = listOf(
+        DiagnosticItem(
+            label = "AI Provider ($providerDisplay)",
+            status = if (activeKeySet) "Ready" else if (anyKey) "Fallback ready" else "No key set",
+            healthy = anyKey,
+            detail = if (anyKey) "Active model: $providerDisplay" else "Add a Gemini, DeepSeek, or Meta key in Connections.",
+        ),
+        DiagnosticItem(
+            label = "Gmail OAuth",
+            status = gmailStatus,
+            healthy = gmailHealthy,
+            detail = if (gmailConnected) "Signed in as ${gmailAccount ?: "connected"}" else "Optional — connect in Connections to search, read, or send email.",
+        ),
+        DiagnosticItem(
+            label = "On-time Schedules",
+            status = if (!exactAlarmNeeded) "Granted" else "Inexact fallback",
+            healthy = !exactAlarmNeeded,
+            detail = com.aurviz.agent.scheduleTimingNote(!exactAlarmNeeded),
+        ),
+        DiagnosticItem(
+            label = "Background running",
+            status = if (!batteryOptimizationNeeded) "Exempted" else "Restricted",
+            healthy = !batteryOptimizationNeeded,
+            detail = if (!batteryOptimizationNeeded) "Doze will not delay Schedules." else "Allow background running so Doze does not delay Schedules.",
+        ),
+        DiagnosticItem(
+            label = "On-device Storage (Room v6)",
+            status = "Healthy",
+            healthy = true,
+            detail = "$memoriesCount Memories · $schedulesCount Schedules · $sessionsCount Sessions",
+        ),
+    )
+    return AgentDiagnosticsReport(running = false, timestampMs = nowMs, items = items)
+}
+
 data class AgentUiState(
     val inputText: String = "",
     val statusLine: String = "Type a command to begin.",
@@ -325,6 +431,12 @@ data class AgentUiState(
     val scheduleRuns: List<ScheduleRunSummary> = emptyList(),
     val sessions: List<SessionSummary> = emptyList(),
     val onboardingCompleted: Boolean = true,
+    // Ticket #108 (T3): 1-tap diagnostics report + Share Sheet / shortcut
+    // routing. pendingNavRoute holds a Dests route until AgentNav consumes
+    // it; pendingOpenVoiceSheet opens the Voice Command sheet on arrival.
+    val diagnostics: AgentDiagnosticsReport = AgentDiagnosticsReport(),
+    val pendingNavRoute: String? = null,
+    val pendingOpenVoiceSheet: Boolean = false,
 )
 
 // One recorded scheduled run for the Recent Runs list (GLOSSARY Schedule):
