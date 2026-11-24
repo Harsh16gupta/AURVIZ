@@ -244,6 +244,7 @@ fun defaultToolRegistry(
     sendPolicy: SendPolicy = DefaultSendPolicy(),
     webBridge: WebBridge? = null,
     backgroundWebLoader: BackgroundPageLoader? = null,
+    memoryReconciler: MemoryReconciler? = null,
 ): ToolRegistry {
     val registry = ToolRegistry()
 
@@ -261,7 +262,7 @@ fun defaultToolRegistry(
 
     // Ticket 74 (part of #71): Memory adapter owns save/search; each
     // entry registers explicitly into the kernel, in adapter order.
-    for (tool in memoryTools(memoryStore)) {
+    for (tool in memoryTools(memoryStore, memoryReconciler)) {
         registry.register(tool)
     }
 

@@ -12,7 +12,7 @@ import org.json.JSONObject
 // Ticket 75 (part of #71): the schema bodies live here in the owning
 // adapter — no shared hardcoded schema list; the kernel's toolSchemas()
 // view is the single advertised Tool list.
-fun saveMemoryTool(memoryStore: MemoryStore?): ToolDefinition {
+fun saveMemoryTool(memoryStore: MemoryStore?, reconciler: MemoryReconciler? = null): ToolDefinition {
     return ToolDefinition(
         name = "save_memory",
         description = "Save a fact about the user for future commands, e.g. their boss's name.",
@@ -36,7 +36,12 @@ fun saveMemoryTool(memoryStore: MemoryStore?): ToolDefinition {
                 ?: return@ToolDefinition ToolResult.Failure("memory store is not available", retryable = false)
             val text = args["text"] as String
             val source = (args["source"] as String?)?.takeIf { it.isNotBlank() } ?: "you told me"
-            val saved = rememberFact(store, text, source)
+            val saved =
+                if (reconciler != null) {
+                    reconciler.remember(store, text, source).memory
+                } else {
+                    rememberFact(store, text, source)
+                }
             ToolResult.Success(
                 mapOf(
                     "id" to saved.id,
@@ -91,9 +96,12 @@ fun searchMemoryTool(memoryStore: MemoryStore?): ToolDefinition {
 /** The Memory adapter: both Memory Tool declarations in registration
  *  order (save, search). The default registry builder registers every
  *  entry into the kernel. */
-fun memoryTools(memoryStore: MemoryStore?): List<ToolDefinition> =
+fun memoryTools(
+    memoryStore: MemoryStore?,
+    reconciler: MemoryReconciler? = null,
+): List<ToolDefinition> =
     listOf(
-        saveMemoryTool(memoryStore),
+        saveMemoryTool(memoryStore, reconciler),
         searchMemoryTool(memoryStore),
     )
 
