@@ -133,4 +133,125 @@ class FlagshipUiCraftTest {
             assertFalse("$path must not use Material", text.contains("material"))
         }
     }
+
+    // T5 (#103): final flagship contrast, glossary, tap-target & card QA sweep.
+    // Each test below pins one acceptance bullet; all are pure-JVM source
+    // guards (Compose is Android-bound).
+
+    @Test
+    fun commandScreenKeepsSingleImeInset() {
+        val text = mainText("com/aurviz/agent/ui/screens/CommandScreen.kt")
+        val imeInsets = text.split(".imePadding()").size - 1
+        assertTrue("expected exactly one .imePadding(), found $imeInsets", imeInsets == 1)
+        assertFalse(
+            "duplicate IME inset via navigation-bars union",
+            text.contains("WindowInsets.navigationBars.union(WindowInsets.ime)"),
+        )
+    }
+
+    @Test
+    fun statusBarInsetConsumedOnceInScaffold() {
+        val text = mainText("com/aurviz/agent/ui/components/ScreenScaffold.kt")
+        assertTrue(text.contains("consumeWindowInsets(WindowInsets.statusBars)"))
+    }
+
+    @Test
+    fun drawerFooterKeepsGestureAwareBottomInset() {
+        val drawer = mainText("com/aurviz/agent/ui/components/SideDrawer.kt")
+        assertTrue(drawer.contains("safeDrawing"))
+        assertTrue(drawer.contains("systemGestures"))
+        assertTrue(drawer.contains("only(WindowInsetsSides.Bottom)"))
+        val nav = mainText("com/aurviz/agent/ui/AgentNav.kt")
+        assertTrue(nav.contains("heightIn(min = 64.dp)"))
+    }
+
+    @Test
+    fun noDimmingAlphaAndTonalTokensStayDistinct() {
+        val uiDir = File(moduleDir(), "src/main/java/com/aurviz/agent/ui")
+        val uiFiles = uiDir.walkTopDown().filter { it.isFile && it.extension == "kt" }.toList()
+        assertTrue("expected UI sources under ui/", uiFiles.isNotEmpty())
+        for (file in uiFiles) {
+            assertFalse(
+                "${file.name} must not dim with .alpha(0.72f)",
+                file.readText().contains(".alpha(0.72f)"),
+            )
+        }
+        val theme = mainText("com/aurviz/agent/ui/theme/Theme.kt")
+        val dark = theme.substringAfter("val DarkThemeColors").substringBefore("isDark = true")
+        val light = theme.substringAfter("val LightThemeColors").substringBefore("isDark = false")
+        val keys = listOf("background", "surface", "surfaceVariant", "inset")
+        fun token(block: String, key: String): String {
+            val match = Regex("(?m)^\\s*$key = Color\\((0x[0-9A-Fa-f]+)\\)").find(block)
+            return requireNotNull(match) { "missing $key token" }.groupValues[1]
+        }
+        for (key in keys) {
+            assertTrue("DarkThemeColors missing $key", dark.contains(key))
+            assertTrue("LightThemeColors missing $key", light.contains(key))
+        }
+        val darkTokens = keys.map { token(dark, it) }
+        val lightTokens = keys.map { token(light, it) }
+        assertTrue("Midnight tonal tokens must be distinct", darkTokens.toSet().size == 4)
+        assertTrue("Daylight tonal tokens must be distinct", lightTokens.toSet().size == 4)
+        for (i in keys.indices) {
+            assertFalse(
+                "Midnight/Daylight parity: ${keys[i]} must differ per theme",
+                darkTokens[i] == lightTokens[i],
+            )
+        }
+    }
+
+    @Test
+    fun glossaryStaysCleanAcrossScreensSheetsAndComponents() {
+        val bases =
+            listOf(
+                "com/aurviz/agent/ui/screens",
+                "com/aurviz/agent/ui/sheets",
+                "com/aurviz/agent/ui/components",
+            )
+        // Banned GLOSSARY.md display words. Matching is case-insensitive
+        // because user-visible copy must avoid the term in any casing.
+        val banned = listOf("more options", "command options", "history", "chatbot", "assistant", "alarm", "timer", "cron", "send_email")
+        for (base in bases) {
+            val dir = File(moduleDir(), "src/main/java/$base")
+            for (file in dir.walkTopDown().filter { it.isFile && it.extension == "kt" }) {
+                val lines = file.readLines()
+                for ((index, line) in lines.withIndex()) {
+                    // Exemptions (not user-visible): tool-registry keys passed
+                    // through toolLabel() (ToolLabels.kt maps them to display
+                    // names so no raw snake_case ever reaches the screen),
+                    // tool-name comparisons, and the private prefs key.
+                    if (line.contains("toolLabel(\"") || line.contains(".name == \"") || line.contains("const val KEY_")) continue
+                    val literals = Regex("\"([^\"]*)\"").findAll(line).map { it.groupValues[1] }
+                    for (literal in literals) {
+                        val lowered = literal.lowercase()
+                        for (word in banned) {
+                            assertFalse(
+                                "${file.name}:${index + 1} shows banned copy \"$word\" in \"$literal\"",
+                                lowered.contains(word),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        val settings = mainText("com/aurviz/agent/ui/screens/SettingsScreen.kt")
+        assertTrue(settings.contains("Page(title = \"Settings\","))
+    }
+
+    @Test
+    fun zeroPaddingCardBugsStayFixed() {
+        val email = mainText("com/aurviz/agent/ui/sheets/EmailConfirmationSheet.kt")
+        assertFalse("field stack must not re-wrap in a Section card", email.contains("Section("))
+        val forget = mainText("com/aurviz/agent/ui/sheets/ForgetMemorySheet.kt")
+        assertTrue(forget.contains(".padding(16.dp)"))
+        val schedules = mainText("com/aurviz/agent/ui/screens/SchedulesScreen.kt")
+        assertTrue(schedules.contains("Modifier.fillMaxWidth().height(48.dp)"))
+        assertTrue(schedules.contains("\"Preview Schedule\""))
+        val browser = mainText("com/aurviz/agent/ui/screens/BrowserScreen.kt")
+        assertTrue(browser.contains("\"Paste a link, then Go\""))
+        assertTrue(browser.contains("Theme.typography.label"))
+        assertTrue(browser.contains("singleLine = true"))
+        assertTrue(browser.contains("maxLines = 1"))
+        assertTrue(browser.contains("TextOverflow.Ellipsis"))
+    }
 }
