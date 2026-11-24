@@ -1,5 +1,7 @@
 package com.aurviz.agent
 
+import com.aurviz.agent.ui.InteractionRecord
+import com.aurviz.agent.ui.rememberAddressFor
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -118,5 +120,79 @@ class CommandPlanUiTest {
         assertEquals("Send email to a@b.com", confirmationTitleFor(ToolCall("c", "send_email", mapOf("to" to "a@b.com"))))
         assertEquals("Run Search emails", confirmationTitleFor(ToolCall("c", "search_emails", mapOf("query" to "x"))))
         assertEquals("Run Cancel schedule", confirmationTitleFor(ToolCall("c", "cancel_schedule", emptyMap())))
+    }
+
+    // --- rememberAddressFor: settled-receipt grant derivation (#70 Gap B). ---
+
+    private fun sendStep(argsSummary: String?) =
+        TimelineStep(
+            title = "Tool 1 of 1: send_email",
+            state = StepState.DONE,
+            toolName = "send_email",
+            argsSummary = argsSummary,
+        )
+
+    @Test
+    fun legacyTitlePrefixStillGrants() {
+        val record = InteractionRecord(id = "r1", command = "email", confirmationTitle = "Send email to friend@work.com")
+        assertEquals("friend@work.com", rememberAddressFor(record))
+    }
+
+    @Test
+    fun receiptTitleFallsBackToStepArgs() {
+        val record =
+            InteractionRecord(
+                id = "r2",
+                command = "email",
+                confirmationTitle = "Confirmed — ran send_email",
+                steps = listOf(sendStep("to: friend@work.com, subject: Hi, body: hello")),
+            )
+        assertEquals("friend@work.com", rememberAddressFor(record))
+    }
+
+    @Test
+    fun stepsReflectEditedAddress() {
+        val record =
+            InteractionRecord(
+                id = "r3",
+                command = "email",
+                confirmationTitle = "Confirmed with edits — ran send_email",
+                steps = listOf(sendStep("to: edited@work.com, subject: Hi, body: hello")),
+            )
+        assertEquals("edited@work.com", rememberAddressFor(record))
+    }
+
+    @Test
+    fun multipleAddressesGrantFirst() {
+        val record =
+            InteractionRecord(
+                id = "r4",
+                command = "email",
+                steps = listOf(sendStep("to: a@b.c, d@e.f, subject: s, body: b")),
+            )
+        assertEquals("a@b.c", rememberAddressFor(record))
+    }
+
+    @Test
+    fun noSendStepYieldsNull() {
+        val record =
+            InteractionRecord(
+                id = "r5",
+                command = "search",
+                confirmationTitle = "Confirmed — ran search_emails",
+                steps = listOf(TimelineStep(title = "Tool 1 of 1: search_emails", state = StepState.DONE, toolName = "search_emails")),
+            )
+        assertNull(rememberAddressFor(record))
+    }
+
+    @Test
+    fun nonAddressToYieldsNull() {
+        val record =
+            InteractionRecord(
+                id = "r6",
+                command = "email",
+                steps = listOf(sendStep("to: not-an-address, subject: s, body: b")),
+            )
+        assertNull(rememberAddressFor(record))
     }
 }

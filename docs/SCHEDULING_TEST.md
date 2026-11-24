@@ -82,7 +82,7 @@ alarms, `pi_cancelled` in alarm history) and was re-run correctly.
 ### Bracket C (approval cards, channels, disclosure)
 
 - **C1 PASS (user-verified on phone)** — Confirmation card rendered with
-  recipient/subject/body, `Approve & Send` / `Reject`, and the "New recipient"
+  recipient/subject/body, `Confirm & Send` / `Deny`, and the "New recipient"
   warning. Approve sent; inline-edit + approve sent the edited text; reject
   sent nothing; tapping the result notification opened the app (`98eddc4`
   fix confirmed — broken at B-tip). Two model-quality notes → issue #51:

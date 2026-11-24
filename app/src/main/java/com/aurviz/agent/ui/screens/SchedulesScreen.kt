@@ -29,12 +29,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.aurviz.agent.ToolCall
-import com.aurviz.agent.approvalCardFor
 import com.aurviz.agent.formatUnschedulePreview
-import com.aurviz.agent.knownAddressesFromInbox
 import com.aurviz.agent.nextFireTime
-import com.aurviz.agent.toolLabel
+import com.aurviz.agent.receiptForHeld
 import com.aurviz.agent.ui.AgentUiState
 import com.aurviz.agent.ui.components.Button
 import com.aurviz.agent.ui.components.ButtonVariant
@@ -269,7 +266,7 @@ fun SchedulesScreen(
         }
         // Writes from unattended runs held for the user: approve runs the
         // held call exactly once, reject drops it untouched.
-        Section("Approvals") {
+        Section("Pending confirmations") {
             if (state.pendingApprovals.isEmpty()) {
                 Text(
                     "Nothing waiting — blocked Schedule writes appear here.",
@@ -278,25 +275,16 @@ fun SchedulesScreen(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
                 )
             } else {
-                val known = knownAddressesFromInbox(state.emails)
                 state.pendingApprovals.forEach { held ->
-                    val card =
-                        approvalCardFor(ToolCall(held.id, held.toolName, held.arguments), known)
-                    val title: String
-                    val detail: String
-                    if (card != null) {
-                        val to = card.to.joinToString { it.address }
-                        title = "Send email to $to"
-                        detail = "To: $to\nSubject: ${card.subject}\n${card.body}"
-                    } else {
-                        title = "${toolLabel(held.toolName)} (Schedule ${held.scheduleId})"
-                        detail = held.arguments.entries.joinToString("\n") { (k, v) -> "$k: $v" }
-                    }
+                    // Ticket #70 Gap B: the held row renders the settled HELD
+                    // receipt (receiptForHeld) — title/detail come from the
+                    // receipt model, not the old approvalCardFor derivation.
+                    val receipt = receiptForHeld(held)
                     ConfirmationCard(
                         toolLabel = held.toolName,
-                        title = title,
-                        detail = detail,
-                        approveLabel = "Approve",
+                        title = receipt.title,
+                        detail = receipt.detail,
+                        approveLabel = "Confirm",
                         denyLabel = "Deny",
                         onApprove = { onApproveHeldWrite(held.id) },
                         onDeny = { onRejectHeldWrite(held.id) },

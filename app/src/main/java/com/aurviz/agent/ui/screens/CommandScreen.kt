@@ -61,6 +61,7 @@ import com.aurviz.agent.visiblePlanSteps
 import com.aurviz.agent.ui.AgentUiState
 import com.aurviz.agent.ui.InteractionRecord
 import com.aurviz.agent.ui.components.AppBar
+import com.aurviz.agent.ui.rememberAddressFor
 import com.aurviz.agent.ui.components.Button
 import com.aurviz.agent.ui.components.ButtonVariant
 import com.aurviz.agent.ui.components.Composer
@@ -505,16 +506,10 @@ private fun InteractionItem(
         }
 
         if (record.confirmationStatus != null) {
-            // Settled receipt: the remembered recipient (our own "Send
-            // email to <addr>" format) can become a Preference grant.
-            val rememberAddress =
-                record.confirmationTitle
-                    ?.removePrefix("Send email to ")
-                    ?.trim()
-                    ?.split(",")
-                    ?.firstOrNull()
-                    ?.trim()
-                    ?.takeIf { it.contains("@") }
+            // Settled receipt: the executed send's recipient can become a
+            // Preference grant. Derived via rememberAddressFor (legacy
+            // title prefix, else the executed step's effective "to:").
+            val rememberAddress = rememberAddressFor(record)
             ConfirmationCard(
                 toolLabel = "Confirmation",
                 title = record.confirmationTitle ?: "Sensitive Tool",
@@ -673,7 +668,7 @@ private fun ActiveRunSection(
                     } else {
                         null
                     },
-                    approveLabel = "Approve & Send",
+                    approveLabel = "Confirm & Send",
                     denyLabel = "Deny",
                     onApprove = {
                         val origTo = (pendingCall.arguments["to"] as? String).orEmpty()
@@ -704,7 +699,7 @@ private fun ActiveRunSection(
                     } else {
                         null
                     },
-                    approveLabel = "Approve",
+                    approveLabel = "Confirm",
                     denyLabel = "Deny",
                     onApprove = { onApprovePending(proposalId) },
                     onDeny = { onRejectPending(proposalId) },

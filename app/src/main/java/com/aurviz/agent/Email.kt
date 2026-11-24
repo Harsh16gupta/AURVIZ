@@ -378,7 +378,7 @@ fun executeSendEmail(
     }
     if (!approved) {
         return ToolResult.Failure(
-            "tool 'send_email' requires confirmation and was not approved; nothing was sent",
+            "tool 'send_email' requires confirmation and was not confirmed; nothing was sent",
             retryable = false,
         )
     }

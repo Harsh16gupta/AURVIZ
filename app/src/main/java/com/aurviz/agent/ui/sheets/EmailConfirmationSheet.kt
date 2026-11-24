@@ -68,7 +68,7 @@ fun EmailConfirmationSheet(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        "Review and edit before approving — nothing sends until you tap Confirm send.",
+                        "Review and edit before confirming — nothing sends until you tap Confirm send.",
                         color = Theme.colors.onBackgroundMuted,
                         modifier = Modifier.weight(1f),
                     )

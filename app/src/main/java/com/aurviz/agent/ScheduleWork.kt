@@ -234,8 +234,8 @@ fun postPendingApprovalNotification(context: Context, schedule: Schedule, blocke
         context,
         "approval_${schedule.id}",
         ScheduleNotification(
-            "Approval needed",
-            "${schedule.instruction}: $blockedCount request(s) need your approval",
+            "Confirmation needed",
+            "${schedule.instruction}: $blockedCount request(s) need your confirmation",
         ),
     )
 }

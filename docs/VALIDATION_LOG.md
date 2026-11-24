@@ -2,6 +2,51 @@
 
 Every case where the AI was wrong and how it was caught. Add an entry with file:line evidence before moving on.
 
+## 2026-11-24 — Issue #70 T5 close-out: both audit gaps wired (`main`)
+
+- **Caught own mistake: first AgentUiState edit orphaned the class doc.**
+  The helper insert replaced the `InteractionRecord` doc comment with the
+  `rememberAddressFor` body, leaving the class head mangled
+  (`AgentUiState.kt`, helper lines inside the data-class parens). Caught on
+  immediate post-edit re-read; repaired by restoring the class head first
+  and appending the helper after the class close. Lesson holds: multi-line
+  edits need a post-edit read before moving on.
+- **Settled receipts are optimistic at tap time, exact at record time.**
+  `approvePendingSend`/`approvePendingSendEdited` stamp CARD/EDITED receipts
+  (`AgentViewModel.kt:1353,1363`) from the decision + effective args before
+  the gate resolves — same optimism as the old stamp (Approved at tap), now
+  in canonical language. `approveEmail` stamps from the real gated execution
+  (`:705`), which also fixes a mis-stamp: policy-denied sends previously
+  recorded `ConfirmationStatus.Approved`; they now record Denied via the
+  receipt outcome (`:711`). `rejectPendingSend`/`rejectEmail` stamp the
+  synthetic cancelled_by_user DENIED (`:1374-1378`, `:726`).
+- **Draft-deny cards lose the Remember Preference button, by construction.**
+  The grant now derives from executed-step args
+  (`rememberAddressFor`, `AgentUiState.kt:199-207`); a denied draft never
+  executed, and `rejectEmail` records `steps = emptyList()`
+  (`AgentViewModel.kt:728-734`) so a stale timeline can't offer a wrong
+  address. Loop-path and direct-send approved cards keep the grant via the
+  effective-args step (edited address included). No test pinned the old
+  draft-deny grant; accepted tradeoff, flagged here.
+- **Held rows lose per-recipient To/Subject/Body detail, per the audit.**
+  `SchedulesScreen.kt:282-287` now renders `receiptForHeld(held)` title +
+  detail (tool named, nothing-ran-yet), replacing the `approvalCardFor`
+  derivation. The stored `held.reason` line below the card is kept as the
+  schedule-context line. No model changes: `ConfirmationReceipt.kt` mapping
+  + `ConfirmationReceiptTest.kt` matrix untouched.
+- **Copy sweep extras beyond the audit list:** `EmailConfirmationSheet.kt:71`
+  "before approving", `Email.kt:381` gate-refusal error "was not approved",
+  and `docs/SCHEDULING_TEST.md:85` button name — all user-visible, same
+  rule. Left untouched: ADR-0003:7 "approve, edit, or reject" prose (bullet 3
+  verified — do not touch), historical logs, and all code-internal
+  `ApprovalDecision` / `ApprovalGate` / `NeedsApproval` / `pending_approvals`
+  identifiers per ADR 0003:22-25.
+- Tests: 6 new `rememberAddressFor` pins in `CommandPlanUiTest.kt`
+  (legacy prefix, receipt-title fallback, edited address, first-of-many,
+  no-send null, non-address null) written red-first, green after. Full
+  `:app:testDebugUnitTest --rerun-tasks` green (526 tests, 0 failures — up 6
+  from 520). Secret scan clean on the diff.
+
 ## 2026-11-24 — Issue #70 T5 audit: two genuine gaps, ticket left open (`main`)
 
 - **Bullet 3 verifies; the #67 audit claim holds.** `docs/adr/0002-workmanager-alarm-scheduling.md:8-11`

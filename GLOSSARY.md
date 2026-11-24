@@ -37,8 +37,12 @@ A recurring instruction with cron-like timing. At fire time an exact alarm enque
 _Avoid_: Alarm, timer, cron job
 
 **Confirmation**:
-Explicit user approval required before each sensitive tool call runs. The registry gate suspends the loop until the user approves, edits, or rejects.
+Explicit user decision required before each sensitive tool call runs. The registry gate suspends the loop until the user confirms, edits, or rejects.
 _Avoid_: Consent popup, authorization
+
+**PendingApproval**:
+A deferred Confirmation awaiting the in-app decision: an unattended run attempted a sensitive tool with no one present, so the attempt waits in the held list — nothing ran yet. Confirming runs it exactly once; denying drops it untouched.
+_Avoid_: Approval queue, pending request
 
 **Voice Command**:
 Spoken input converted to text and handled like a typed command.

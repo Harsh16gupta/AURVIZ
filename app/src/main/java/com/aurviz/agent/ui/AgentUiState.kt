@@ -190,6 +190,22 @@ data class InteractionRecord(
     val failed: Boolean = false,
 )
 
+// Ticket #70 Gap B: settled cards render receipt titles (ConfirmationReceipt),
+// so the Remember Preference grant can no longer parse the recipient out of
+// the title prefix alone. Legacy records still carry "Send email to <addr>";
+// current records carry the receipt title plus the executed send step, whose
+// argsSummary holds the effective (possibly edited) "to:" value. JVM-tested
+// in CommandPlanUiTest. Null when no send address is recoverable.
+fun rememberAddressFor(record: InteractionRecord): String? {
+    val legacyPrefix = "Send email to "
+    val legacy = record.confirmationTitle?.takeIf { it.startsWith(legacyPrefix) }
+        ?.removePrefix(legacyPrefix)?.split(",")?.firstOrNull()?.trim()?.takeIf { it.contains("@") }
+    if (legacy != null) return legacy
+    val summary = record.steps.firstOrNull { it.toolName == "send_email" }?.argsSummary ?: return null
+    return summary.split(",").map { it.trim() }.firstOrNull { it.startsWith("to:") }
+        ?.substringAfter("to:")?.trim()?.split(Regex("\\s+"))?.firstOrNull()?.trim()?.takeIf { it.contains("@") }
+}
+
 data class AgentUiState(
     val inputText: String = "",
     val statusLine: String = "Type a command to begin.",

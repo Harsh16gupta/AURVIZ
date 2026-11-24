@@ -4,12 +4,12 @@ package com.aurviz.agent
 // sensitive-tool outcome maps to one explainable receipt, so the
 // foreground card and the held list read the same canonical language
 // (GLOSSARY Confirmation + PendingApproval — never "Approval"). Pure
-// derivation, JVM-tested in ConfirmationReceiptTest; the Compose card and
-// the held list render receipt.title/receipt.detail. Wiring those screens
-// to this model is a UI follow-up (AgentViewModel/stampConfirmation and
-// the held list are owned by in-flight concurrent work); the mapping to
-// the existing ConfirmationStatus card states is documented on each
-// outcome below.
+// derivation, JVM-tested in ConfirmationReceiptTest. The Compose card and
+// the held list render receipt.title/receipt.detail: the held list via
+// receiptForHeld, the settled history card via the receipt stamps in
+// AgentViewModel (approve/approve-edited/reject + the direct email path);
+// the mapping to the existing ConfirmationStatus card states is documented
+// on each outcome below.
 
 // The five settled shapes a sensitive call can end in. Maps to the card's
 // ConfirmationStatus as: ALLOWED/CARD_APPROVED/EDITED_APPROVED -> Approved,
