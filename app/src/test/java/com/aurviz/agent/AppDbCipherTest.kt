@@ -1,6 +1,9 @@
 package com.aurviz.agent
 
 import android.content.SharedPreferences
+import androidx.room.DatabaseConfiguration
+import androidx.room.InvalidationTracker
+import androidx.sqlite.db.SupportSQLiteOpenHelper
 import java.io.File
 import java.nio.file.Files
 import org.junit.Assert.assertEquals
@@ -97,6 +100,82 @@ class AppDbCipherTest {
         assertTrue(proguard.contains("-keep class net.zetetic.database.**"))
     }
 
+    @Test
+    fun migrationCopiesThroughDaosNotNativeSql() {
+        // Mechanism pin: the migration is a Room-to-Room DAO copy — the
+        // only native-SQL tricks (attach alias, copy function, rekey call,
+        // KEY literal) all died on-device (pool-hidden alias, logic-error
+        // form, pool-reconfigure rekey failure). DAOs are pool-safe.
+        val cipher = File(moduleDir(), "src/main/java/com/aurviz/agent/AppDbCipher.kt").readText()
+        assertTrue(cipher.contains("readAppDbSnapshot("))
+        assertTrue(cipher.contains("writeAppDbSnapshot("))
+        assertTrue(cipher.contains("allowMainThreadQueries()"))
+        assertFalse(cipher.contains("ATTACH DATABASE"))
+        assertFalse(cipher.contains("sqlcipher_export"))
+        assertFalse(cipher.contains("changePassword("))
+        assertFalse(cipher.contains("KEY ?"))
+    }
+
+    @Test
+    fun snapshotRoundTripPreservesRowsAndPids() {
+        // Alarm ids ("sched_<pid>") and held-write links ("approval_<pid>")
+        // derive from autoincrement pids: the copy must keep them verbatim.
+        val source = FakeAppDb()
+        source.memoryDao.rows +=
+            MemoryRow(pid = 4, text = "A", source = "you told me", category = "general", importance = 1)
+        source.memoryDao.rows +=
+            MemoryRow(pid = 9, text = "B", source = "you told me", category = "general", importance = 0)
+        source.scheduleDao.rows += ScheduleRow(pid = 7, instruction = "check mail", hour = 9, minute = 0)
+        source.runDao.rows +=
+            ScheduleRunRow(pid = 3, scheduleId = "sched_7", fireTime = 11L, status = "RAN", error = null, result = "ok", durationMs = 5L)
+        source.approvalDao.rows +=
+            PendingApprovalRow(pid = 5, scheduleId = "sched_7", toolName = "send_email", argsJson = "{}", reason = "r", createdAt = 9L)
+        source.interactionDao.rows +=
+            InteractionRow(pid = 12, sessionId = "s_1", command = "hi", responseText = "yo", provider = null, timestampMs = 77L, failed = false)
+
+        val snapshot = readAppDbSnapshot(source)
+        val target = FakeAppDb()
+        writeAppDbSnapshot(target, snapshot)
+
+        assertEquals(source.memoryDao.rows, target.memoryDao.rows)
+        assertEquals(source.scheduleDao.rows, target.scheduleDao.rows)
+        assertEquals(source.runDao.rows, target.runDao.rows)
+        assertEquals(source.approvalDao.rows, target.approvalDao.rows)
+        assertEquals(source.interactionDao.rows, target.interactionDao.rows)
+        assertEquals(listOf(4L, 9L), target.memoryDao.rows.map { it.pid })
+        assertEquals(7L, target.scheduleDao.rows.single().pid)
+    }
+
+    @Test
+    fun plaintextBackupFileNeverOverwritesEarlierBackup() {
+        val dir = Files.createTempDirectory("appdbcipher-backup").toFile()
+        try {
+            val dbFile = File(dir, "aurviz.db")
+            dbFile.writeBytes(ByteArray(0))
+            assertEquals(File(dir, "aurviz.db.plaintext-backup"), plaintextBackupFile(dbFile))
+            File(dir, "aurviz.db.plaintext-backup").writeBytes(ByteArray(0))
+            assertEquals(File(dir, "aurviz.db.plaintext-backup-2"), plaintextBackupFile(dbFile))
+            File(dir, "aurviz.db.plaintext-backup-2").writeBytes(ByteArray(0))
+            assertEquals(File(dir, "aurviz.db.plaintext-backup-3"), plaintextBackupFile(dbFile))
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun migrationKeysCopyWithoutEmbeddingKeyMaterial() {
+        // Regression pin for the launch crash-loop: the first migration ran
+        // the copy through an attach alias with a bound KEY placeholder and
+        // every upgrade launch died with "unknown database encrypted".
+        // The migration must copy Room-to-Room through DAOs — never by
+        // smuggling the key through SQL text.
+        val cipher = File(moduleDir(), "src/main/java/com/aurviz/agent/AppDbCipher.kt").readText()
+        assertFalse(cipher.contains("KEY ?"))
+        assertFalse(cipher.contains("AS encrypted KEY"))
+        assertFalse(cipher.contains("sqlcipher_export('main'"))
+        assertTrue(cipher.contains("readAppDbSnapshot("))
+    }
+
     private fun moduleDir(): File {
         var dir = File(System.getProperty("user.dir"))
         while (true) {
@@ -160,4 +239,103 @@ private class CipherFakePrefs : SharedPreferences {
     override fun contains(key: String): Boolean = data.containsKey(key)
     override fun registerOnSharedPreferenceChangeListener(listener: SharedPreferences.OnSharedPreferenceChangeListener?) = Unit
     override fun unregisterOnSharedPreferenceChangeListener(listener: SharedPreferences.OnSharedPreferenceChangeListener?) = Unit
+}
+
+// List-backed DAO fakes so the Room-to-Room snapshot copy is a real
+// behavioral test on the JVM (no database needed): rows in, same rows out.
+private class FakeMemoryDao : MemoryDao {
+    val rows = mutableListOf<MemoryRow>()
+    override fun listAll(): List<MemoryRow> = rows.toList()
+    override fun searchFts(query: String): List<MemoryRow> = rows.toList()
+    override fun insert(row: MemoryRow): Long {
+        rows += row
+        return row.pid
+    }
+    override fun deleteById(pid: Long) {
+        rows.removeAll { it.pid == pid }
+    }
+    override fun markUsed(pid: Long, nowMs: Long) = Unit
+}
+
+private class FakeScheduleDao : ScheduleDao {
+    val rows = mutableListOf<ScheduleRow>()
+    override fun listAll(): List<ScheduleRow> = rows.toList()
+    override fun insert(row: ScheduleRow): Long {
+        rows += row
+        return row.pid
+    }
+    override fun deleteById(pid: Long) {
+        rows.removeAll { it.pid == pid }
+    }
+}
+
+private class FakeScheduleRunDao : ScheduleRunDao {
+    val rows = mutableListOf<ScheduleRunRow>()
+    override fun insertIgnore(row: ScheduleRunRow): Long {
+        rows += row
+        return row.pid
+    }
+    override fun find(scheduleId: String, fireTime: Long): ScheduleRunRow? = null
+    override fun listAll(): List<ScheduleRunRow> = rows.toList()
+    override fun finish(pid: Long, status: String, error: String?, result: String?, durationMs: Long, provider: String?, planMs: Long, toolMs: Long, recallMs: Long) = Unit
+    override fun findPid(scheduleId: String, fireTime: Long): Long? = null
+    override fun reclaimStaleRunning(scheduleId: String, fireTime: Long, nowMs: Long, ttlMs: Long): Int = 0
+}
+
+private class FakePendingApprovalDao : PendingApprovalDao {
+    val rows = mutableListOf<PendingApprovalRow>()
+    override fun insert(row: PendingApprovalRow): Long {
+        rows += row
+        return row.pid
+    }
+    override fun findById(pid: Long): PendingApprovalRow? = rows.find { it.pid == pid }
+    override fun listAll(): List<PendingApprovalRow> = rows.toList()
+    override fun deleteById(pid: Long): Int = if (rows.removeAll { it.pid == pid }) 1 else 0
+}
+
+private class FakeInteractionDao : InteractionDao {
+    val rows = mutableListOf<InteractionRow>()
+    override fun insert(row: InteractionRow): Long {
+        rows += row
+        return row.pid
+    }
+    override fun listRecent(limit: Int): List<InteractionRow> = rows.sortedByDescending { it.timestampMs }.take(limit)
+    override fun prune(keep: Int) = Unit
+    override fun clearAll() {
+        rows.clear()
+    }
+    override suspend fun listBySession(sessionId: String): List<InteractionRow> = rows.filter { it.sessionId == sessionId }
+    override suspend fun deleteSession(sessionId: String) {
+        rows.removeAll { it.sessionId == sessionId }
+    }
+}
+
+private class FakeAppDb : AppDb() {
+    val memoryDao = FakeMemoryDao()
+    val scheduleDao = FakeScheduleDao()
+    val runDao = FakeScheduleRunDao()
+    val approvalDao = FakePendingApprovalDao()
+    val interactionDao = FakeInteractionDao()
+    override fun memories(): MemoryDao = memoryDao
+    override fun schedules(): ScheduleDao = scheduleDao
+    override fun runs(): ScheduleRunDao = runDao
+    override fun approvals(): PendingApprovalDao = approvalDao
+    override fun interactions(): InteractionDao = interactionDao
+    override fun clearAllTables() = Unit
+    override fun createInvalidationTracker(): InvalidationTracker = InvalidationTracker(this)
+    override fun createOpenHelper(config: DatabaseConfiguration): SupportSQLiteOpenHelper {
+        val handler = { _: Any, method: java.lang.reflect.Method, _: Array<out Any>? ->
+            when (method.returnType) {
+                java.lang.Boolean.TYPE -> false
+                java.lang.Integer.TYPE -> 0
+                java.lang.Long.TYPE -> 0L
+                else -> null
+            }
+        }
+        return java.lang.reflect.Proxy.newProxyInstance(
+            javaClass.classLoader,
+            arrayOf(SupportSQLiteOpenHelper::class.java),
+            handler,
+        ) as SupportSQLiteOpenHelper
+    }
 }
