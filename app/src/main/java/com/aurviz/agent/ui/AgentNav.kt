@@ -109,7 +109,6 @@ fun AgentNav(
                             onInputChange = vm::onInputChange,
                             onSend = vm::sendCommand,
                             onRetry = vm::retry,
-                            onMicTap = onMicTap,
                             onVoiceClick = { showVoice = true },
                             onOpenBrowser = { navController.navigate(Dests.BROWSER) },
                             onApprovePending = vm::approvePendingSend,
@@ -117,7 +116,8 @@ fun AgentNav(
                             onRejectPending = vm::rejectPendingSend,
                             onCancelRun = vm::cancelRun,
                             onSelectProvider = vm::setSelectedProvider,
-                            onNewChat = vm::startNewSession,
+                            onNewSession = vm::startNewSession,
+                            onAllowAlways = vm::allowAlwaysAllow,
                         )
                     }
                     composable(Dests.BROWSER) {

@@ -28,6 +28,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aurviz.agent.ui.theme.Check
+import com.aurviz.agent.ui.theme.Copy
 import com.aurviz.agent.ui.theme.Icons
 import com.aurviz.agent.ui.theme.LockSimple
 import com.aurviz.agent.ui.theme.Theme
@@ -48,6 +49,11 @@ fun ConfirmationCard(
     settledSummary: String? = null,
     onApprove: () -> Unit = {},
     onDeny: () -> Unit = {},
+    // Ticket #87: settled receipts. Copy duplicates the receipt detail;
+    // Remember Preference stores a Preference grant (allow-always). Both
+    // are hidden when null so other screens keep their current cards.
+    onCopy: (() -> Unit)? = null,
+    onRememberPreference: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     bodyContent: (@Composable ColumnScope.() -> Unit)? = null,
 ) {
@@ -98,6 +104,68 @@ fun ConfirmationCard(
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                 ) {
                     Text(detail, style = Theme.typography.code, color = Theme.colors.onBackgroundMuted)
+                }
+            }
+            if (onCopy != null || onRememberPreference != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (onCopy != null) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 40.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(Theme.colors.surfaceVariant)
+                                .clickable {
+                                    haptics?.play(HapticKind.Light)
+                                    onCopy()
+                                }
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                Icon(
+                                    Icons.Copy,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(14.dp),
+                                    tint = Theme.colors.onSurfaceVariant,
+                                )
+                                Text(
+                                    text = "Copy",
+                                    style = Theme.typography.label.copy(fontWeight = FontWeight.SemiBold),
+                                    color = Theme.colors.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                    if (onRememberPreference != null) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1.6f)
+                                .heightIn(min = 40.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(Theme.colors.surfaceVariant)
+                                .clickable {
+                                    haptics?.play(HapticKind.Light)
+                                    onRememberPreference()
+                                }
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = "Remember Preference",
+                                style = Theme.typography.label.copy(fontWeight = FontWeight.SemiBold),
+                                color = Theme.colors.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -204,7 +272,7 @@ fun ConfirmationCard(
                     .weight(1f)
                     .heightIn(min = 44.dp)
                     .clip(RoundedCornerShape(50))
-                    .background(Theme.colors.onBackground)
+                    .background(Theme.colors.primary)
                     .clickable {
                         haptics?.play(HapticKind.Success)
                         onApprove()
@@ -215,7 +283,7 @@ fun ConfirmationCard(
                 Text(
                     text = approveLabel,
                     style = Theme.typography.label.copy(fontWeight = FontWeight.SemiBold),
-                    color = Theme.colors.background,
+                    color = Theme.colors.onPrimary,
                 )
             }
         }

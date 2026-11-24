@@ -24,6 +24,9 @@ fun ModelPill(
     model: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    // Ticket #87: Set badge for the Command header pill ("Set"/"Not set").
+    // Null renders the human name alone (used for Auto).
+    badge: String? = null,
 ) {
     Box(
         modifier
@@ -40,6 +43,9 @@ fun ModelPill(
             horizontalArrangement = Arrangement.spacedBy(Space),
         ) {
             Text(model, style = Theme.typography.label, color = Theme.colors.onSurface)
+            if (badge != null) {
+                Text(badge, style = Theme.typography.caption, color = Theme.colors.onBackgroundMuted)
+            }
             Icon(
                 Icons.CaretDown,
                 contentDescription = null,

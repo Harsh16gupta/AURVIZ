@@ -57,6 +57,8 @@ import com.aurviz.agent.cancelRoutineAlarm
 import com.aurviz.agent.cancelRoutineWork
 import com.aurviz.agent.codeChallenge
 import com.aurviz.agent.composeEmail
+import com.aurviz.agent.confirmationDetailFor
+import com.aurviz.agent.confirmationTitleFor
 import com.aurviz.agent.createSchedule
 import com.aurviz.agent.defaultCandidates
 import com.aurviz.agent.defaultToolRegistry
@@ -325,16 +327,8 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun confirmationTextFor(call: ToolCall, args: Map<String, Any?> = call.arguments): Pair<String, String> {
-        return if (call.name == "send_email") {
-            val to = (args["to"] as? String).orEmpty()
-            val subject = (args["subject"] as? String).orEmpty()
-            val body = (args["body"] as? String).orEmpty()
-            "Send email to $to" to "To: $to\nSubject: $subject\n$body"
-        } else {
-            "Run ${call.name}" to args.entries.joinToString("\n") { (k, v) -> "$k: $v" }
-        }
-    }
+    private fun confirmationTextFor(call: ToolCall, args: Map<String, Any?> = call.arguments): Pair<String, String> =
+        confirmationTitleFor(call, args) to confirmationDetailFor(call, args)
 
     fun cancelRun() {
         state.value.pendingApprovalProposalId?.let { proposalId ->

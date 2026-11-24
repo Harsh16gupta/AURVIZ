@@ -792,3 +792,22 @@ Every case where the AI was wrong and how it was caught. Add an entry with file:
   `CommandScreen.kt` also dropped the still-used `size` import; restored
   immediately after re-reading the file. Lesson: verify each import removal
   against remaining usages (confirmed via failing-compile-risk scan).
+
+## 2026-11-24 — Ticket #87 (Command + Composer + Plan cards) self-review catches
+- Dropped binding during ActiveRunSection rewrite: an edit replacing the
+  timeline loop in `CommandScreen.kt` also removed
+  `val pendingCall = state.pendingApproval`, leaving the `if (pendingCall !=
+  null ...)` block unbound. Caught by re-reading the edited region
+  (`CommandScreen.kt:455-459`) before compiling; restored the binding and
+  routed step rendering through `visiblePlanSteps()`. Lesson: re-read the
+  full hunk after every multi-line edit, not just the replaced lines.
+- Scope guard on TimelineStep extension: adding `toolName`/`argsSummary`
+  fields risked breaking the pinned `ChatTimelineTest` raw-title asserts
+  (`"Tool 1 of 2: search_emails"`). Kept `buildTimeline` titles
+  byte-identical and mapped labels only in the pure `stepDisplayTitle()`
+  renderer — `ChatTimelineTest` (6 tests) green unchanged.
+- Copy-risk on settled receipts: `onRememberPreference` is only wired when
+  the settled title matches our own `"Send email to <addr>"` format
+  (`CommandScreen.kt` InteractionItem); non-email settled cards show Copy
+  only rather than a dead button. SchedulesScreen cards pass neither
+  callback — unchanged for #89.

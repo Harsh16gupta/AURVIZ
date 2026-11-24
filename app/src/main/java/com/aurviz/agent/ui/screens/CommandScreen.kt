@@ -1,5 +1,8 @@
 package com.aurviz.agent.ui.screens
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -32,6 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -41,8 +45,14 @@ import com.aurviz.agent.BuildConfig
 import com.aurviz.agent.StepState
 import com.aurviz.agent.TimelineStep
 import com.aurviz.agent.approvalCardFor
+import com.aurviz.agent.confirmationDetailFor
+import com.aurviz.agent.confirmationTitleFor
 import com.aurviz.agent.knownAddressesFromInbox
-import com.aurviz.agent.toolLabel
+import com.aurviz.agent.planFailure
+import com.aurviz.agent.providerDisplayName
+import com.aurviz.agent.sessionTurnsLine
+import com.aurviz.agent.stepDisplayTitle
+import com.aurviz.agent.visiblePlanSteps
 import com.aurviz.agent.ui.AgentUiState
 import com.aurviz.agent.ui.InteractionRecord
 import com.aurviz.agent.ui.components.Button
@@ -59,13 +69,18 @@ import com.aurviz.agent.ui.components.ModelPill
 import com.aurviz.agent.ui.components.OptionRow
 import com.aurviz.agent.ui.components.ScreenScaffold
 import com.aurviz.agent.ui.components.ScrollToLatestButton
-import com.aurviz.agent.ui.components.SuggestionCard
+import com.aurviz.agent.ui.components.StarterRow
+import com.aurviz.agent.ui.components.StatusBanner
 import com.aurviz.agent.ui.components.Text
 import com.aurviz.agent.ui.components.TextField
 import com.aurviz.agent.ui.components.Icon
 import com.aurviz.agent.ui.components.ThinkingIndicator
 import com.aurviz.agent.ui.components.UserMessage
+import com.aurviz.agent.ui.theme.Bell
+import com.aurviz.agent.ui.theme.CaretDown
 import com.aurviz.agent.ui.theme.Check
+import com.aurviz.agent.ui.theme.EnvelopeSimple
+import com.aurviz.agent.ui.theme.Globe
 import com.aurviz.agent.ui.theme.Icons
 import com.aurviz.agent.ui.theme.Space
 import com.aurviz.agent.ui.theme.Sparkle
@@ -86,7 +101,6 @@ fun CommandScreen(
     onInputChange: (String) -> Unit,
     onSend: (String) -> Unit,
     onRetry: () -> Unit,
-    onMicTap: () -> Unit,
     onVoiceClick: () -> Unit,
     onOpenBrowser: () -> Unit,
     onApprovePending: (String) -> Unit = {},
@@ -94,15 +108,28 @@ fun CommandScreen(
     onRejectPending: (String) -> Unit = {},
     onCancelRun: () -> Unit = {},
     onSelectProvider: (String?) -> Unit = {},
-    onNewChat: () -> Unit = {},
+    onNewSession: () -> Unit = {},
+    onAllowAlways: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val haptics = LocalHaptics.current
     val focusManager = LocalFocusManager.current
+    val context = LocalContext.current
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     var showProviderSheet by rememberSaveable { mutableStateOf(false) }
     val effectiveModel = state.selectedProvider ?: state.providerUsed ?: BuildConfig.LLM_DEFAULT_PROVIDER
+    val providerKeySet =
+        when (effectiveModel.lowercase()) {
+            "gemini" -> state.geminiKeySet
+            "deepseek" -> state.deepseekKeySet
+            "meta" -> state.metaKeySet
+            else -> state.geminiKeySet || state.deepseekKeySet || state.metaKeySet
+        }
+    fun copyReceipt(text: String) {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("confirmation", text))
+    }
 
     ScreenScaffold(modifier) {
         Column(Modifier.fillMaxSize()) {
@@ -118,15 +145,19 @@ fun CommandScreen(
                 Spacer(Modifier.weight(1f))
                 if (state.sessionTurns > 0) {
                     Text(
-                        "thread ${state.sessionTurns}",
+                        sessionTurnsLine(state.sessionTurns),
                         style = Theme.typography.caption,
                         color = Theme.colors.onBackgroundMuted,
                     )
                 }
-                Button(onClick = onNewChat, variant = ButtonVariant.Secondary) {
-                    Text("New chat")
+                Button(onClick = onNewSession, variant = ButtonVariant.Secondary) {
+                    Text("New session")
                 }
-                ModelPill(model = effectiveModel, onClick = { showProviderSheet = true })
+                ModelPill(
+                    model = providerDisplayName(effectiveModel),
+                    badge = if (providerKeySet) "Set" else "Not set",
+                    onClick = { showProviderSheet = true },
+                )
             }
 
             Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -150,19 +181,19 @@ fun CommandScreen(
                         }
                         item {
                             Column(verticalArrangement = Arrangement.spacedBy(Space * 2)) {
-                                SuggestionCard(
-                                    title = "Check my important emails",
-                                    description = "Read important mail",
+                                StarterRow(
+                                    icon = Icons.EnvelopeSimple,
+                                    text = "Check my important emails",
                                     onClick = { onSend("Check my important emails") },
                                 )
-                                SuggestionCard(
-                                    title = "Schedule a daily 9 AM email summary",
-                                    description = "Daily 9 AM summary",
+                                StarterRow(
+                                    icon = Icons.Bell,
+                                    text = "Schedule a daily 9 AM email summary",
                                     onClick = { onSend("Schedule a daily 9 AM email summary") },
                                 )
-                                SuggestionCard(
-                                    title = "Open news.ycombinator.com",
-                                    description = "Open in Browser",
+                                StarterRow(
+                                    icon = Icons.Globe,
+                                    text = "Open news.ycombinator.com",
                                     onClick = { onSend("Open news.ycombinator.com") },
                                 )
                             }
@@ -170,7 +201,12 @@ fun CommandScreen(
                     }
 
                     items(state.interactions, key = { it.id }) { record ->
-                        InteractionItem(record = record, onOpenBrowser = onOpenBrowser)
+                        InteractionItem(
+                            record = record,
+                            onOpenBrowser = onOpenBrowser,
+                            onAllowAlways = onAllowAlways,
+                            onCopyReceipt = ::copyReceipt,
+                        )
                     }
 
                     if (state.agentRunning || state.sending || state.pendingApproval != null) {
@@ -182,12 +218,6 @@ fun CommandScreen(
                                 onApproveEdited = onApproveEdited,
                                 onRejectPending = onRejectPending,
                             )
-                        }
-                    } else if (state.timeline.any { it.state == StepState.FAILED }) {
-                        item {
-                            Button(onClick = onRetry, variant = ButtonVariant.Secondary) {
-                                Text("Retry failed Tool")
-                            }
                         }
                     }
                 }
@@ -214,14 +244,11 @@ fun CommandScreen(
                 Composer(
                     value = state.inputText,
                     onValueChange = onInputChange,
-                    model = effectiveModel,
                     responding = state.sending || state.agentRunning,
                     canSend = state.inputText.isNotBlank() && !state.sending && !state.agentRunning,
                     onSend = { onSend(state.inputText) },
                     onStop = onCancelRun,
                     onAddClick = { onOpenBrowser() },
-                    onModelClick = { showProviderSheet = true },
-                    onSpeakClick = onMicTap,
                     onVoiceClick = onVoiceClick,
                     placeholder = "Ask Aurviz",
                 )
@@ -234,9 +261,16 @@ fun CommandScreen(
             title = "AI Provider",
         ) {
             ProviderChoices.forEach { choice ->
+                val keySet =
+                    when (choice) {
+                        "gemini" -> state.geminiKeySet
+                        "deepseek" -> state.deepseekKeySet
+                        "meta" -> state.metaKeySet
+                        else -> state.geminiKeySet || state.deepseekKeySet || state.metaKeySet
+                    }
                 OptionRow(
-                    title = choice ?: "Auto (Default)",
-                    description = if (choice == null) "System default" else null,
+                    title = providerDisplayName(choice),
+                    description = if (choice == null) "System default" else if (keySet) "Set" else "Not set",
                     selected = state.selectedProvider == choice,
                     onClick = {
                         onSelectProvider(choice)
@@ -258,6 +292,8 @@ fun CommandScreen(
 private fun InteractionItem(
     record: InteractionRecord,
     onOpenBrowser: () -> Unit,
+    onAllowAlways: (String) -> Unit = {},
+    onCopyReceipt: (String) -> Unit = {},
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(Space * 2)) {
         UserMessage(record.command)
@@ -282,17 +318,37 @@ private fun InteractionItem(
             }
         }
 
-        record.steps.forEachIndexed { _, step ->
+        visiblePlanSteps(record.steps).forEachIndexed { _, step ->
             StepRow(step = step)
         }
 
         if (record.confirmationStatus != null) {
+            // Settled receipt: the remembered recipient (our own "Send
+            // email to <addr>" format) can become a Preference grant.
+            val rememberAddress =
+                record.confirmationTitle
+                    ?.removePrefix("Send email to ")
+                    ?.trim()
+                    ?.split(",")
+                    ?.firstOrNull()
+                    ?.trim()
+                    ?.takeIf { it.contains("@") }
             ConfirmationCard(
                 toolLabel = "Confirmation",
                 title = record.confirmationTitle ?: "Sensitive Tool",
                 detail = record.confirmationDetail,
                 status = record.confirmationStatus,
+                onCopy = { onCopyReceipt(record.confirmationDetail.orEmpty()) },
+                onRememberPreference = rememberAddress?.let { address ->
+                    { onAllowAlways(address) }
+                },
             )
+        }
+
+        if (record.failed) {
+            planFailure(record.steps)?.let { failure ->
+                StatusBanner(message = failure.error ?: failure.title)
+            }
         }
 
         if (record.responseText.isNotBlank()) {
@@ -395,7 +451,7 @@ private fun ActiveRunSection(
             )
         }
 
-        state.timeline.forEachIndexed { _, step ->
+        visiblePlanSteps(state.timeline).forEachIndexed { _, step ->
             StepRow(step = step)
         }
 
@@ -410,8 +466,8 @@ private fun ActiveRunSection(
                 title = "Send email to $to"
                 detail = "To: $to\nSubject: ${card.subject}\n${card.body}"
             } else {
-                title = "Run ${toolLabel(pendingCall.name)}"
-                detail = pendingCall.arguments.entries.joinToString("\n") { (k, v) -> "$k: $v" }
+                title = confirmationTitleFor(pendingCall)
+                detail = confirmationDetailFor(pendingCall)
             }
             val unseen = state.pendingApprovalUnseen
             if (pendingCall.name == "send_email") {
@@ -474,9 +530,13 @@ private fun ActiveRunSection(
             }
         }
 
-        if (state.timeline.any { it.state == StepState.FAILED } && !state.agentRunning) {
-            Button(onClick = onRetry, variant = ButtonVariant.Secondary) {
-                Text("Retry failed Tool")
+        // Active-run only, exactly once: one error row plus a single retry.
+        if (!state.agentRunning) {
+            planFailure(state.timeline)?.let { failure ->
+                StatusBanner(message = failure.error ?: failure.title)
+                Button(onClick = onRetry, variant = ButtonVariant.Secondary) {
+                    Text("Retry failed Tool")
+                }
             }
         }
     }
@@ -484,37 +544,81 @@ private fun ActiveRunSection(
 
 @Composable
 private fun StepRow(step: TimelineStep) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        when (step.state) {
-            StepState.DONE ->
-                Icon(
-                    Icons.Check,
-                    contentDescription = null,
-                    modifier = Modifier.size(14.dp),
-                    tint = Theme.colors.success,
-                )
-            StepState.FAILED ->
-                Icon(
-                    Icons.X,
-                    contentDescription = null,
-                    modifier = Modifier.size(14.dp),
-                    tint = Theme.colors.destructive,
-                )
-            StepState.READY, StepState.RUNNING ->
-                Text("•", color = Theme.colors.onBackgroundMuted)
+    // Expandable Plan step: collapsed shows the clean status row (human
+    // Tool label, no inline error duplication); expanding reveals the args
+    // summary and the failure detail when present.
+    var expanded by rememberSaveable(step.title) { mutableStateOf(false) }
+    val expandable = step.argsSummary != null || step.error != null
+    val headerModifier =
+        if (expandable) {
+            Modifier.clickable(
+                onClick = { expanded = !expanded },
+                interactionSource = remember { MutableInteractionSource() },
+                indication = androidx.compose.foundation.LocalIndication.current,
+            )
+        } else {
+            Modifier
         }
-        val suffix = if (step.error != null) " (${step.error})" else ""
-        Text(
-            "${step.title}$suffix",
-            style = Theme.typography.code,
-            color = if (step.state == StepState.FAILED) {
-                Theme.colors.destructive
-            } else {
-                Theme.colors.onBackgroundMuted
-            },
-        )
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(
+            modifier = headerModifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            when (step.state) {
+                StepState.DONE ->
+                    Icon(
+                        Icons.Check,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = Theme.colors.success,
+                    )
+                StepState.FAILED ->
+                    Icon(
+                        Icons.X,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = Theme.colors.destructive,
+                    )
+                StepState.READY, StepState.RUNNING ->
+                    Text("•", color = Theme.colors.onBackgroundMuted)
+            }
+            Text(
+                stepDisplayTitle(step),
+                style = Theme.typography.code,
+                color = if (step.state == StepState.FAILED) {
+                    Theme.colors.destructive
+                } else {
+                    Theme.colors.onBackgroundMuted
+                },
+                modifier = Modifier.weight(1f),
+            )
+            if (expandable) {
+                Icon(
+                    Icons.CaretDown,
+                    contentDescription = if (expanded) "Collapse step" else "Expand step",
+                    modifier = Modifier.size(14.dp),
+                    tint = Theme.colors.onBackgroundMuted,
+                )
+            }
+        }
+        if (expanded) {
+            if (step.argsSummary != null) {
+                Text(
+                    step.argsSummary,
+                    style = Theme.typography.caption,
+                    color = Theme.colors.onBackgroundMuted,
+                    modifier = Modifier.padding(start = 22.dp),
+                )
+            }
+            if (step.error != null) {
+                Text(
+                    step.error,
+                    style = Theme.typography.caption,
+                    color = Theme.colors.destructive,
+                    modifier = Modifier.padding(start = 22.dp),
+                )
+            }
+        }
     }
 }

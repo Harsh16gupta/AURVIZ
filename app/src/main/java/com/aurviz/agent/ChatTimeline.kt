@@ -23,6 +23,14 @@ data class TimelineStep(
     val title: String,
     val state: StepState,
     val error: String? = null,
+    // Ticket #87: the registry Tool behind a "Tool i of n" row (null for
+    // Heard/Planned/Done/Working rows). The UI maps it through toolLabel so
+    // no raw snake_case id reaches the screen; buildTimeline titles stay
+    // byte-identical for the pinned unit tests.
+    val toolName: String? = null,
+    // Ticket #87: one-line "k: v, k: v" argument summary for the expandable
+    // Plan step. Null when the call took no arguments.
+    val argsSummary: String? = null,
 )
 
 // Build the rows for one Plan run.
@@ -42,7 +50,7 @@ fun buildTimeline(plan: Plan, doneCount: Int, error: String?): List<TimelineStep
                 else -> StepState.READY
             }
         val stepError = if (error != null && index == doneCount) error else null
-        rows += TimelineStep(title, state, stepError)
+        rows += TimelineStep(title, state, stepError, toolName = step.name, argsSummary = argsSummary(step.arguments))
     }
     when {
         error != null -> rows += TimelineStep("Error: $error", StepState.FAILED)
