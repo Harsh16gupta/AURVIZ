@@ -85,7 +85,7 @@ class LlmProviderTest {
 
     @Test
     fun fakeReturnsCannedToolCall() {
-        val result = FakeLlmProvider().plan("Check important emails")
+        val result = FakeLlmProvider().chat(listOf(ChatMessage(role = "user", content = "Check important emails")))
         assertEquals(1, result.toolCalls.size)
         assertEquals("search_emails", result.toolCalls[0].name)
         assertEquals("is:important is:unread", result.toolCalls[0].arguments["query"])
@@ -149,7 +149,6 @@ class LlmProviderTest {
         val seen = mutableListOf<JSONArray>()
         val capturing =
             object : StructuredLlmProvider {
-                override fun plan(userText: String): LlmResult = LlmResult(emptyList(), "ok")
                 override fun chatMessages(messages: List<ChatMessage>, tools: JSONArray): LlmResult {
                     seen += tools
                     return LlmResult(emptyList(), "ok")

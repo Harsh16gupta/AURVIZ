@@ -5,6 +5,7 @@ import com.aurviz.agent.ui.LoopUiProgress
 import com.aurviz.agent.ui.approvalWaitMs
 import com.aurviz.agent.ui.retryLine
 import com.aurviz.agent.ui.withEvent
+import org.json.JSONArray
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -37,11 +38,11 @@ class ViewModelLoopWiringTest {
         }
     }
 
-    private class ScriptedPlanProvider(private val script: List<LlmResult>) : LlmProvider {
-        val seenPrompts = mutableListOf<String>()
-        override fun plan(userText: String): LlmResult {
-            seenPrompts += userText
-            return script[minOf(seenPrompts.size - 1, script.lastIndex)]
+    private class ScriptedMessagesProvider(private val script: List<LlmResult>) : StructuredLlmProvider {
+        val seenMessages = mutableListOf<List<ChatMessage>>()
+        override fun chatMessages(messages: List<ChatMessage>, tools: JSONArray): LlmResult {
+            seenMessages += messages.toList()
+            return script[minOf(seenMessages.size - 1, script.lastIndex)]
         }
     }
 
@@ -122,8 +123,8 @@ class ViewModelLoopWiringTest {
             NamedProvider(
                 "gemini",
                 "gemini-key",
-                object : LlmProvider {
-                    override fun plan(userText: String): LlmResult =
+                object : StructuredLlmProvider {
+                    override fun chatMessages(messages: List<ChatMessage>, tools: JSONArray): LlmResult =
                         throw LlmException(HttpFailure("rate_limited", 0, true), "HTTP 429")
                 },
             )
@@ -131,7 +132,7 @@ class ViewModelLoopWiringTest {
             NamedProvider(
                 "groq",
                 "groq-key",
-                ScriptedPlanProvider(listOf(searchCall(), answer("done"))),
+                ScriptedMessagesProvider(listOf(searchCall(), answer("done"))),
             )
         val chat = PinnedFallbackChatLlm(listOf(flaky, backup))
         val result = AgentLoop(chat, defaultToolRegistry(gmailApi = FakeGmail())).run("check mail")
@@ -150,7 +151,7 @@ class ViewModelLoopWiringTest {
 
     @Test
     fun noDisclosureWhenSingleProviderAnswersLoop() {
-        val chat = PinnedFallbackChatLlm(listOf(NamedProvider("gemini", "k", ScriptedPlanProvider(listOf(answer("hi"))))))
+        val chat = PinnedFallbackChatLlm(listOf(NamedProvider("gemini", "k", ScriptedMessagesProvider(listOf(answer("hi"))))))
         val result = AgentLoop(chat, defaultToolRegistry(gmailApi = FakeGmail())).run("hi")
         assertTrue(result is AgentLoopResult.Answered)
         assertEquals(listOf("gemini"), chat.tried)
@@ -167,7 +168,7 @@ class ViewModelLoopWiringTest {
     fun checkMailWorksEndToEndThroughLoop() {
         val chat =
             PinnedFallbackChatLlm(
-                listOf(NamedProvider("gemini", "k", ScriptedPlanProvider(listOf(searchCall(), answer("Boss wrote about Q3"))))),
+                listOf(NamedProvider("gemini", "k", ScriptedMessagesProvider(listOf(searchCall(), answer("Boss wrote about Q3"))))),
             )
         val registry = defaultToolRegistry(gmailApi = FakeGmail())
         var progress = LoopUiProgress()

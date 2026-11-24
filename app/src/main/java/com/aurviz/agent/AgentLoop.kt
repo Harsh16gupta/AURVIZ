@@ -28,8 +28,8 @@ data class ChatMessage(
     val toolCallId: String? = null,
 )
 
-// Conversational LLM seam for the loop. Single-shot LlmProvider.plan is
-// the planner seam; the loop needs the full messages list every turn.
+// Conversational LLM seam for the loop: every turn sends the full
+// messages list, so role boundaries survive on the wire (ADR-0005).
 interface ChatLlmProvider {
     fun chat(messages: List<ChatMessage>): LlmResult
 }

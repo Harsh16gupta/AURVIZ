@@ -1,6 +1,7 @@
 package com.aurviz.agent
 
 import com.aurviz.agent.ui.AgentUiState
+import org.json.JSONArray
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -9,6 +10,8 @@ import org.junit.Test
 // T4 slice 1 (red): picker = name in, address + key + model out.
 // No internet, no Android — just a lookup from settings.
 class ProviderPickerTest {
+
+    private fun userTurn(text: String) = listOf(ChatMessage(role = "user", content = text))
 
     private fun settings() =
         ProviderSettings(
@@ -101,7 +104,7 @@ class ProviderPickerTest {
     fun rateLimitRetriesNextAndSurfacesWhichRan() {
         val first = failOn("gemini", HttpFailure("rate_limited", 0, true))
         val second = successOn("groq")
-        val outcome = planWithFallback("check mail", listOf(first, second), sleeper = {})
+        val outcome = planWithFallbackMessages(userTurn("check mail"), listOf(first, second), sleeper = {})
         assertEquals("groq", outcome.providerName)
         assertEquals(listOf("gemini", "groq"), outcome.tried)
         assertEquals("search_emails", outcome.result.toolCalls[0].name)
@@ -113,12 +116,12 @@ class ProviderPickerTest {
             NamedProvider(
                 "stale",
                 "",
-                object : LlmProvider {
-                    override fun plan(userText: String): LlmResult =
+                object : StructuredLlmProvider {
+                    override fun chatMessages(messages: List<ChatMessage>, tools: JSONArray): LlmResult =
                         throw AssertionError("no-key provider must not be called")
                 },
             )
-        val outcome = planWithFallback("check mail", listOf(noKey, successOn("groq")))
+        val outcome = planWithFallbackMessages(userTurn("check mail"), listOf(noKey, successOn("groq")))
         assertEquals("groq", outcome.providerName)
         assertEquals(listOf("groq"), outcome.tried)
     }
@@ -130,9 +133,9 @@ class ProviderPickerTest {
         val slept = mutableListOf<Long>()
         var stopped = false
         try {
-            planWithFallback("check mail", listOf(badKey, next), sleeper = { slept += it })
-        } catch (e: LlmException) {
-            stopped = e.failure.kind == "auth"
+            planWithFallbackMessages(userTurn("check mail"), listOf(badKey, next), sleeper = { slept += it })
+        } catch (e: FallbackExhausted) {
+            stopped = (e.cause as? LlmException)?.failure?.kind == "auth"
         }
         assertEquals(true, stopped)
         assertEquals(1, (badKey.provider as FailingProvider).calls)
@@ -146,25 +149,25 @@ class ProviderPickerTest {
             NamedProvider(
                 "gemini",
                 "  ",
-                object : LlmProvider {
-                    override fun plan(userText: String): LlmResult =
+                object : StructuredLlmProvider {
+                    override fun chatMessages(messages: List<ChatMessage>, tools: JSONArray): LlmResult =
                         throw AssertionError("must not be called")
                 },
             )
-        planWithFallback("check mail", listOf(none))
+        planWithFallbackMessages(userTurn("check mail"), listOf(none))
     }
 
     @Test
     fun retryDisclosureNamesRetriedProvider() {
         val first = failOn("gemini", HttpFailure("rate_limited", 0, true))
         val second = successOn("groq")
-        val outcome = planWithFallback("check mail", listOf(first, second), sleeper = {})
+        val outcome = planWithFallbackMessages(userTurn("check mail"), listOf(first, second), sleeper = {})
         assertEquals("Retried on groq (tried gemini, groq)", retryDisclosure(outcome))
     }
 
     @Test
     fun noDisclosureWhenFirstProviderSucceeds() {
-        val outcome = planWithFallback("check mail", listOf(successOn("gemini")))
+        val outcome = planWithFallbackMessages(userTurn("check mail"), listOf(successOn("gemini")))
         assertNull(retryDisclosure(outcome))
     }
 
@@ -173,14 +176,14 @@ class ProviderPickerTest {
         // ADR-0004: the same private-context prompt is replayed to the second
         // provider, so the retry must never be silent — every provider that
         // saw the prompt has to be disclosed in UI state.
-        val seenPrompts = mutableMapOf<String, String>()
+        val seenMessages = mutableMapOf<String, List<ChatMessage>>()
         val flaky =
             NamedProvider(
                 "gemini",
                 "gemini-key",
-                object : LlmProvider {
-                    override fun plan(userText: String): LlmResult {
-                        seenPrompts["gemini"] = userText
+                object : StructuredLlmProvider {
+                    override fun chatMessages(messages: List<ChatMessage>, tools: JSONArray): LlmResult {
+                        seenMessages["gemini"] = messages.toList()
                         throw LlmException(HttpFailure("rate_limited", 0, true), "HTTP 429")
                     }
                 },
@@ -189,17 +192,19 @@ class ProviderPickerTest {
             NamedProvider(
                 "groq",
                 "groq-key",
-                object : LlmProvider {
-                    override fun plan(userText: String): LlmResult {
-                        seenPrompts["groq"] = userText
+                object : StructuredLlmProvider {
+                    override fun chatMessages(messages: List<ChatMessage>, tools: JSONArray): LlmResult {
+                        seenMessages["groq"] = messages.toList()
                         return LlmResult(emptyList(), "done")
                     }
                 },
             )
         val prompt = "Known: take nightly meds. Summarize inbox"
-        val outcome = planWithFallback(prompt, listOf(flaky, backup), sleeper = {})
-        assertEquals(prompt, seenPrompts["gemini"])
-        assertEquals(prompt, seenPrompts["groq"])
+        val outcome = planWithFallbackMessages(userTurn(prompt), listOf(flaky, backup), sleeper = {})
+        val geminiUser = seenMessages["gemini"]!!.single { it.role == "user" }.content
+        val groqUser = seenMessages["groq"]!!.single { it.role == "user" }.content
+        assertEquals(prompt, geminiUser)
+        assertEquals(prompt, groqUser)
         assertEquals(listOf("gemini", "groq"), outcome.tried)
         val state = AgentUiState(providerUsed = outcome.providerName, providersTried = outcome.tried)
         val disclosure = retryDisclosure(outcome)
@@ -234,7 +239,7 @@ class ProviderPickerTest {
         val first = failOn("gemini", HttpFailure("rate_limited", 5, true))
         val second = successOn("groq")
         val slept = mutableListOf<Long>()
-        val outcome = planWithFallback("check mail", listOf(first, second), sleeper = { slept += it })
+        val outcome = planWithFallbackMessages(userTurn("check mail"), listOf(first, second), sleeper = { slept += it })
         assertEquals("groq", outcome.providerName)
         assertEquals(listOf(5_000L), slept)
     }
@@ -245,7 +250,7 @@ class ProviderPickerTest {
         val second = failOn("groq", HttpFailure("rate_limited", null, true))
         val third = successOn("gemini")
         val slept = mutableListOf<Long>()
-        val outcome = planWithFallback("check mail", listOf(first, second, third), sleeper = { slept += it })
+        val outcome = planWithFallbackMessages(userTurn("check mail"), listOf(first, second, third), sleeper = { slept += it })
         assertEquals("gemini", outcome.providerName)
         assertEquals(listOf(1_000L, 2_000L), slept)
     }
@@ -255,26 +260,27 @@ class ProviderPickerTest {
         val only = failOn("gemini", HttpFailure("rate_limited", 5, true))
         val slept = mutableListOf<Long>()
         try {
-            planWithFallback("check mail", listOf(only), sleeper = { slept += it })
+            planWithFallbackMessages(userTurn("check mail"), listOf(only), sleeper = { slept += it })
             throw AssertionError("expected the rate limit to propagate")
-        } catch (e: LlmException) {
-            assertEquals("rate_limited", e.failure.kind)
+        } catch (e: FallbackExhausted) {
+            assertEquals(listOf("gemini"), e.tried)
+            assertEquals("rate_limited", (e.cause as LlmException).failure.kind)
         }
         assertTrue(slept.isEmpty())
     }
 }
 
-private class StubProvider(private val result: LlmResult) : LlmProvider {
+private class StubProvider(private val result: LlmResult) : StructuredLlmProvider {
     var calls = 0
-    override fun plan(userText: String): LlmResult {
+    override fun chatMessages(messages: List<ChatMessage>, tools: JSONArray): LlmResult {
         calls++
         return result
     }
 }
 
-private class FailingProvider(private val failure: HttpFailure) : LlmProvider {
+private class FailingProvider(private val failure: HttpFailure) : StructuredLlmProvider {
     var calls = 0
-    override fun plan(userText: String): LlmResult {
+    override fun chatMessages(messages: List<ChatMessage>, tools: JSONArray): LlmResult {
         calls++
         throw LlmException(failure, "HTTP ${failure.kind}")
     }

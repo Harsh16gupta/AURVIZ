@@ -30,7 +30,7 @@ data class ProviderConfig(
 data class NamedProvider(
     val name: String,
     val apiKey: String,
-    val provider: LlmProvider,
+    val provider: StructuredLlmProvider,
 )
 
 // What the fallback reports: the answer + which provider ran + who was tried.
@@ -53,43 +53,10 @@ fun backoffDelayMs(retryAfterSec: Int?, attempt: Int): Long {
     return maxOf(exponential, retryAfterMs).coerceAtMost(PROVIDER_BACKOFF_MAX_MS)
 }
 
-// Try each provider in order. Skips blank keys, moves on when the
-// failure says fallback=true (429/error), stops when it says false (bad key).
-// Between tries the loop sleeps the backoff above (injectable for tests);
-// no sleep happens on a 401 stop or when nothing is left to try, and the
-// replay is never silent — see retryDisclosure.
-fun planWithFallback(
-    command: String,
-    candidates: List<NamedProvider>,
-    sleeper: (Long) -> Unit = { Thread.sleep(it) },
-): FallbackResult {
-    val tried = mutableListOf<String>()
-    var lastError: Exception? = null
-    var retries = 0
-    for ((index, candidate) in candidates.withIndex()) {
-        if (candidate.apiKey.isBlank()) continue
-        try {
-            val result = candidate.provider.plan(command)
-            tried += candidate.name
-            return FallbackResult(result, candidate.name, tried.toList())
-        } catch (e: LlmException) {
-            if (!e.failure.fallback) throw e
-            tried += candidate.name
-            lastError = e
-            val hasNext = candidates.drop(index + 1).any { it.apiKey.isNotBlank() }
-            if (hasNext) sleeper(backoffDelayMs(e.failure.retryAfter, retries++))
-        }
-    }
-    if (tried.isEmpty()) throw IllegalStateException("No provider with API key")
-    throw lastError ?: IllegalStateException("No provider with API key")
-}
-
-// Structured fallback (ADR-0005): same try-order, disclosure, and backoff
-// as planWithFallback, but the loop's messages ride intact. Providers
-// implementing StructuredLlmProvider get the real roles; legacy plan-only
-// doubles get the flattened string so scripted tests keep working.
-// Ticket 75 (part of #71): no default Tool list — every caller injects
-// the registry view (foreground) or the scheduled read-only view.
+// Structured fallback (ADR-0005): ordered try-order, disclosure, and
+// backoff over the loop's messages, which ride intact with the real
+// roles. Ticket 75 (part of #71): no default Tool list — every caller
+// injects the registry view (foreground) or the scheduled read-only view.
 class FallbackExhausted(val tried: List<String>, cause: Exception) : Exception(cause.message, cause)
 
 fun planWithFallbackMessages(
@@ -104,10 +71,7 @@ fun planWithFallbackMessages(
     for ((index, candidate) in candidates.withIndex()) {
         if (candidate.apiKey.isBlank()) continue
         try {
-            val structured = candidate.provider as? StructuredLlmProvider
-            val result =
-                structured?.chatMessages(messages, tools)
-                    ?: candidate.provider.plan(flattenChatMessages(messages))
+            val result = candidate.provider.chatMessages(messages, tools)
             tried += candidate.name
             return FallbackResult(result, candidate.name, tried.toList())
         } catch (e: LlmException) {
@@ -136,7 +100,7 @@ fun retryDisclosure(result: FallbackResult): String? =
 // Ticket 36: user-entered keys from TokenVault override the BuildConfig keys
 // per provider; a blank vault entry falls back to BuildConfig. On a release
 // build (empty BuildConfig keys) with nothing entered, the result stays
-// blank and planWithFallback refuses to call — never a baked-in key.
+// blank and the messages fallback skips the provider — never a baked-in key.
 fun effectiveSettings(base: ProviderSettings, user: LlmKeys): ProviderSettings =
     base.copy(
         geminiKey = user.geminiKey.ifBlank { base.geminiKey },
@@ -159,11 +123,11 @@ fun settingsFromBuildConfig(): ProviderSettings =
         metaModel = BuildConfig.META_MODEL,
     )
 
-fun providerFromConfig(config: ProviderConfig): LlmProvider =
+fun providerFromConfig(config: ProviderConfig): StructuredLlmProvider =
     OpenAiChatProvider(config.baseUrl, config.apiKey, config.model)
 
 // Real providers in try-order: picked one first, then the rest.
-// No-key entries stay in the list — planWithFallback skips them.
+// No-key entries stay in the list — the messages fallback skips them.
 // User keys from Settings (TokenVault) win over BuildConfig per provider.
 fun defaultCandidates(preferred: String, userKeys: LlmKeys = LlmKeys()): List<NamedProvider> {
     val settings = effectiveSettings(settingsFromBuildConfig(), userKeys)

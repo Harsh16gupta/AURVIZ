@@ -100,32 +100,6 @@ class ChatRolesWireTest {
     }
 
     @Test
-    fun legacyPlanOnlyProviderStillWorksThroughMessagesFallback() {
-        val seen = mutableListOf<String>()
-        val legacy =
-            NamedProvider(
-                "groq",
-                "k",
-                object : LlmProvider {
-                    override fun plan(userText: String): LlmResult {
-                        seen += userText
-                        return LlmResult(emptyList(), "ok")
-                    }
-                },
-            )
-        val fb = planWithFallbackMessages(
-            listOf(
-                ChatMessage(role = "system", content = "sys"),
-                ChatMessage(role = "user", content = "hi"),
-            ),
-            listOf(legacy),
-            sleeper = {},
-        )
-        assertEquals("ok", fb.result.content)
-        assertTrue(seen.single().contains("hi"))
-    }
-
-    @Test
     fun advertisedToolsComeFromTheRegistryView() {
         val captured = mutableListOf<String>()
         val http = OpenAiChatProvider("https://example.com", "k", "m", capturingClient(captured))

@@ -19,10 +19,6 @@ data class HttpFailure(val kind: String, val retryAfter: Int?, val fallback: Boo
 
 class LlmException(val failure: HttpFailure, message: String) : Exception(message)
 
-interface LlmProvider {
-    fun plan(userText: String): LlmResult
-}
-
 // Ticket 75 (part of #71): no hardcoded Tool schema list. The kernel's
 // toolSchemas() view is the single advertised Tool list — both model-request
 // sites (foreground Task Execution with the full registry view, scheduled
@@ -130,10 +126,9 @@ fun buildChatRequestBody(model: String, messages: List<ChatMessage>, tools: JSON
         .put("tool_choice", "auto")
 }
 
-// Legacy single-string fallback for providers that only implement plan().
-// Production HTTP (OpenAiChatProvider) never uses this; it exists so
-// scripted LlmProvider doubles in tests keep working through the messages
-// fallback seam.
+// Single-shot renderer for the loop's messages list. Production and tests
+// run the structured messages path; this exists only so renderLoopPrompt
+// (the one shared renderer, ADR-0005) can show the same turns as text.
 fun flattenChatMessages(messages: List<ChatMessage>): String =
     messages.joinToString("\n") { message ->
         when (message.role) {
@@ -146,9 +141,10 @@ fun flattenChatMessages(messages: List<ChatMessage>): String =
         }
     }
 
-// Structured provider seam: chatMessages sends the real roles. plan()
-// stays for single-shot callers and legacy test doubles.
-interface StructuredLlmProvider : LlmProvider {
+// Structured provider seam: chatMessages sends the real roles. The loop,
+// the pinned fallback, and every test double use this — there is no
+// single-shot plan() path.
+interface StructuredLlmProvider {
     fun chatMessages(messages: List<ChatMessage>, tools: JSONArray): LlmResult
 }
 
@@ -224,20 +220,6 @@ class OpenAiChatProvider(
             return parseToolCalls(JSONObject(text))
         }
     }
-
-    override fun plan(userText: String): LlmResult {
-        // Legacy single-shot path (ticket 75, part of #71): no hardcoded
-        // Tool list — production runs the loop's chatMessages() path with
-        // the registry view injected. plan() keeps the same shape (system
-        // framing + bare user text) with no advertised Tools.
-        return chatMessages(
-            listOf(
-                ChatMessage(role = "system", content = buildSystemPrompt()),
-                ChatMessage(role = "user", content = userText),
-            ),
-            JSONArray(),
-        )
-    }
 }
 
 /** Provider endpoints. Keys/models come from BuildConfig (local.properties). */
@@ -249,7 +231,7 @@ object Providers {
     val META_BASE_URL: String
         get() = BuildConfig.META_BASE_URL.ifBlank { "https://api.meta.ai/v1" }
 
-    fun default(): LlmProvider =
+    fun default(): StructuredLlmProvider =
         when (BuildConfig.LLM_DEFAULT_PROVIDER) {
             "groq" -> OpenAiChatProvider(GROQ_BASE_URL, BuildConfig.GROQ_API_KEY, BuildConfig.GROQ_MODEL)
             "deepseek" -> OpenAiChatProvider(DEEPSEEK_BASE_URL, BuildConfig.DEEPSEEK_API_KEY, BuildConfig.DEEPSEEK_MODEL)
@@ -269,12 +251,9 @@ class FakeLlmProvider(
             content = null,
         ),
     ),
-) : LlmProvider, ChatLlmProvider {
+) : ChatLlmProvider {
     private var next = 0
     val seenMessages = mutableListOf<List<ChatMessage>>()
-
-    override fun plan(userText: String): LlmResult =
-        chat(listOf(ChatMessage(role = "user", content = userText)))
 
     override fun chat(messages: List<ChatMessage>): LlmResult {
         seenMessages += messages.toList()

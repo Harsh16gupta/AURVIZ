@@ -93,8 +93,9 @@ class LlmKeysTest {
     @Test
     fun releaseWithNoKeysStaysKeyless() {
         // Release BuildConfig fields are empty strings; with no user keys entered
-        // the effective settings must stay blank so planWithFallback throws
-        // "No provider with API key" instead of calling with a baked-in key.
+        // the effective settings must stay blank so the messages fallback skips
+        // every provider ("No provider with API key") instead of calling one
+        // with a baked-in key.
         val effective = effectiveSettings(ProviderSettings(), LlmKeys())
         assertEquals("", effective.geminiKey)
         assertEquals("", effective.groqKey)

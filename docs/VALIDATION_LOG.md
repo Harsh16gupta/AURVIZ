@@ -2,6 +2,45 @@
 
 Every case where the AI was wrong and how it was caught. Add an entry with file:line evidence before moving on.
 
+## 2026-11-24 — Issue #84 LLM seam 3/3 single-shot plan path (`main`)
+
+- **Exhausted-vs-raw exception type on terminal failure.** After deleting
+  `planWithFallback`, the `noSleepWhenNothingLeftToTry` and
+  `authErrorStopsWithoutRetrying` tests still caught `LlmException`, but the
+  messages fallback wraps terminal failures in `FallbackExhausted`
+  (`ProviderPicker.kt`), so the raw `LlmException` never escapes. Caught by
+  reasoning about the new throw sites before running: both tests now catch
+  `FallbackExhausted` and assert on `tried` + `(cause as LlmException).kind`
+  (`ProviderPickerTest.kt`). Suite green after.
+- **NamedProvider type change breaks the ChatLlmProvider fake.**
+  `NamedProvider.provider` is now `StructuredLlmProvider`
+  (`ProviderPicker.kt`), so `ScheduledRunTest:363` passing a
+  `FakeLlmProvider` (loop-seam `ChatLlmProvider.chat`, no `chatMessages`)
+  failed `:app:compileDebugUnitTestKotlin` with argument-type mismatch.
+  Fixed by giving that test its own inline `StructuredLlmProvider` double
+  that records messages and returns the scripted answer
+  (`ScheduledRunTest.kt:360-372`); the loop fake keeps its name and seam.
+- **Scope check on leftover single-shot shapes.** `buildToolsRequestBody`
+  (single user-text request builder) stays: only `PromptShapingTest` uses
+  it to pin system-prompt framing, and production never called it (HTTP
+  path always used `chatMessages`). `flattenChatMessages` stays as the
+  renderer behind `renderLoopPrompt` (`AgentViewModel.kt:142`); its comment
+  no longer claims a plan-only-provider purpose (`LlmProvider.kt:132`).
+  Deleted: `LlmProvider` interface + `OpenAiChatProvider.plan()` +
+  `FakeLlmProvider.plan()` + `planWithFallback` + flatten branch +
+  `Scripted(structured)` flag. Zero bare `LlmProvider` / `.plan(` / exact
+  `planWithFallback(` refs in `app/src` ( Dodge-substring grep verified).
+- Tests: full `:app:testDebugUnitTest --rerun-tasks` green (454 tests,
+  0 failures — down one from 455: the deleted
+  `legacyPlanOnlyProviderStillWorksThroughMessagesFallback` pinned the
+  removed flatten branch). AgentLoop multi-turn coverage untouched and
+  green (`toolErrorIsStructuredSoModelRecovers`,
+  `maxStepsAbortEmitsFailedWithPartialTimeline`,
+  `rejectedConfirmationIsNotExecuted` in `AgentLoopTest`). Secret scan
+  clean on the diff. Glossary check: Task Execution / Schedule /
+  Confirmation / PendingApproval per `GLOSSARY.md`; no ADR conflict
+  (messages-only seam is #81's decided contract).
+
 ## 2026-11-24 — Issue #83 LLM seam 2/3 contract shim names (`main`)
 
 - **Substring grep over-counts the old names.** Plain

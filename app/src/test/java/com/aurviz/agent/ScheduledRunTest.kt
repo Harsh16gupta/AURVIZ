@@ -1,5 +1,6 @@
 package com.aurviz.agent
 
+import org.json.JSONArray
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -359,12 +360,19 @@ class ScheduledRunTest {
 
     @Test
     fun headlessChatReplaysMessagesThroughProviders() {
-        val fake = FakeLlmProvider(listOf(answer("second")))
-        val chat = PinnedFallbackChatLlm(listOf(NamedProvider("fake", "k", fake)))
+        val seen = mutableListOf<List<ChatMessage>>()
+        val scripted =
+            object : StructuredLlmProvider {
+                override fun chatMessages(messages: List<ChatMessage>, tools: JSONArray): LlmResult {
+                    seen += messages.toList()
+                    return answer("second")
+                }
+            }
+        val chat = PinnedFallbackChatLlm(listOf(NamedProvider("fake", "k", scripted)))
         val out = chat.chat(listOf(ChatMessage(role = "user", content = "hi")))
         assertEquals("second", out.content)
-        assertEquals(1, fake.seenMessages.size)
-        assertTrue(fake.seenMessages[0].any { it.content.orEmpty().contains("hi") })
+        assertEquals(1, seen.size)
+        assertTrue(seen[0].any { it.content.orEmpty().contains("hi") })
     }
 
     // --- Seam 10: stale RUNNING claims are reclaimed; fresh ones skip. ---
