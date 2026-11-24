@@ -16,7 +16,6 @@ import com.aurviz.agent.ApprovalGate
 import com.aurviz.agent.InMemoryAllowAlwaysStore
 import com.aurviz.agent.allowAlwaysEligible
 import com.aurviz.agent.BuildConfig
-import com.aurviz.agent.ChatLlmProvider
 import com.aurviz.agent.ChatMessage
 import com.aurviz.agent.FallbackResult
 import com.aurviz.agent.GMAIL_SCOPES
@@ -24,7 +23,6 @@ import com.aurviz.agent.GmailException
 import com.aurviz.agent.GmailHttpApi
 import com.aurviz.agent.LoopbackReceiver
 import com.aurviz.agent.LlmKeys
-import com.aurviz.agent.LlmResult
 import com.aurviz.agent.MIGRATION_1_2
 import com.aurviz.agent.MIGRATION_2_3
 import com.aurviz.agent.MIGRATION_3_4
@@ -72,8 +70,8 @@ import com.aurviz.agent.ScheduleSideEffect
 import com.aurviz.agent.newCodeVerifier
 import com.aurviz.agent.openPage
 import com.aurviz.agent.parseSchedule
-import com.aurviz.agent.FallbackExhausted
-import com.aurviz.agent.planWithFallbackMessages
+import com.aurviz.agent.PinnedFallbackChatLlm
+import com.aurviz.agent.flattenChatMessages
 import com.aurviz.agent.refreshBatteryNeeded
 import com.aurviz.agent.scheduleTimingNote
 import com.aurviz.agent.recallFor
@@ -140,59 +138,18 @@ fun approvalWaitMs(
     maxWaitMs: Long = ApprovalGate.APPROVAL_TIMEOUT_MS,
 ): Long = minOf(maxWaitMs, totalBudgetMs - elapsedMs).coerceAtLeast(0L)
 
-// Deterministic messages→prompt rendering for the single-shot fallback
-// seam below: the system prompt (framing + delimited memories) stays
-// first, assistant turns keep their Tool names, tool turns keep their
-// JSON results tagged with the matching tool_call_id (ADR-0005).
-fun renderLoopPrompt(messages: List<ChatMessage>): String =
-    messages.joinToString("\n") { message ->
-        when (message.role) {
-            "system" -> "[system] ${message.content.orEmpty()}"
-            "assistant" ->
-                ("[assistant] " + message.content.orEmpty() +
-                    message.toolCalls.joinToString(" ", prefix = " ") { it.name }).trim()
-            "tool" -> "[tool ${message.toolCallId}] ${message.content.orEmpty()}"
-            else -> message.content.orEmpty()
-        }
-    }
+// Single-shot fallback rendering delegates to the shared helper in the
+// agent package (ADR-0005): one renderer, not two.
+fun renderLoopPrompt(messages: List<ChatMessage>): String = flattenChatMessages(messages)
 
-// ChatLlmProvider over the structured fallback seam: the loop's messages
-// ride intact and every provider that saw the prompt is unioned, so the
-// ViewModel copies providersTried verbatim and the retry is never silent
-// (ADR-0004). The candidate list is built once per run: rebuilding it per
-// turn would also rebuild each provider's HTTP client.
-// Provider pinning: the first provider that answers a run handles every
-// later turn, so the accumulated private transcript (memories, mail, tool
-// results) is never replayed to a second host mid-run. Tried is merged
-// even when the turn fails, so a terminal failure still discloses who saw it.
-// The advertised set is the run's registry view (ticket 39, collapsed in
-// ticket 75 part of #71): the model sees exactly the Tools it can call,
-// gated or not. No default Tool list — runLoopCommand injects
-// registry.toolSchemas() explicitly.
+// Foreground shim over the unified pinned-fallback seam: the loop's
+// messages ride intact with the run's registry view injected.
+// Kept as a one-line subclass so existing imports keep working; the
+// shared logic lives in PinnedFallbackChatLlm. Deleted in follow-up.
 class FallbackChatLlm(
-    private val candidates: List<NamedProvider>,
-    private val tools: JSONArray = JSONArray(),
-) : ChatLlmProvider {
-    val tried: MutableList<String> = mutableListOf()
-    var lastProvider: String? = null
-        private set
-    private var pinned: String? = null
-
-    override fun chat(messages: List<ChatMessage>): LlmResult {
-        val effective =
-            pinned?.let { name -> candidates.filter { it.name == name } } ?: candidates
-        try {
-            val fb = planWithFallbackMessages(messages, effective.ifEmpty { candidates }, tools)
-            for (name in fb.tried) if (name !in tried) tried += name
-            if (pinned == null) pinned = fb.providerName
-            lastProvider = fb.providerName
-            return fb.result
-        } catch (e: FallbackExhausted) {
-            for (name in e.tried) if (name !in tried) tried += name
-            throw e.cause as? Exception ?: RuntimeException(e)
-        }
-    }
-}
+    candidates: List<NamedProvider>,
+    tools: JSONArray = JSONArray(),
+) : PinnedFallbackChatLlm(candidates, tools)
 
 class AgentViewModel(application: Application) : AndroidViewModel(application) {
 

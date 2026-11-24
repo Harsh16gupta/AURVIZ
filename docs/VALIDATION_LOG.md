@@ -2,6 +2,34 @@
 
 Every case where the AI was wrong and how it was caught. Add an entry with file:line evidence before moving on.
 
+## 2026-11-24 — Issue #82 LLM seam 1/3 expand (`main`)
+
+- **Open property with private setter does not compile.** First
+  `ChatFallback.kt:23` declared `override var lastProvider … private
+  set` on the `open class PinnedFallbackChatLlm`; `:app:compileDebugKotlin`
+  failed with "Private setters for open properties are prohibited".
+  Fixed by making the interface contract read-only (`TriedChatLlm.tried:
+  List` + `lastProvider: String?` at `ChatFallback.kt:11-14`) with private
+  mutable backing (`seen`, `lastName`) and getter-only overrides —
+  the Q5 tweak the user asked for, now enforced by construction.
+- **Interface cast lagged the class move.** Collapsing
+  `ProviderPinningTest` to `PinnedFallbackChatLlm` turned
+  `scheduledFailureStillDisclosesTried` red (empty `providersTried`):
+  `runScheduledRoutine` still cast to the concrete `HeadlessChatLlm`
+  (`ScheduledRun.kt:565-566`), which the unified instance is not.
+  Fixed by casting to `TriedChatLlm`; suite green after.
+- **No behavior drift by construction.** Prod delta is move-only: the
+  pin-first + union-tried + `FallbackExhausted` unwrap moved verbatim
+  into `PinnedFallbackChatLlm.chat()` (`ChatFallback.kt:27-39`);
+  `FallbackChatLlm` (`AgentViewModel.kt`) and `HeadlessChatLlm`
+  (`ScheduledRun.kt:431`) are one-line subclasses; `renderLoopPrompt`
+  delegates to `flattenChatMessages` (`LlmProvider.kt:137`). Shims and the
+  single-shot path delete in #83/#84.
+- Tests: full `:app:testDebugUnitTest --rerun-tasks` green (455 tests,
+  0 failures). Secret scan clean on `app/src/main` + `app/src/test`.
+  Foreign uncommitted work (`GLOSSARY.md`, `HANDOFF.md`, untracked docs)
+  parked, not committed — the commit holds only the ticket files + log.
+
 ## 2026-11-24 — Issue #80 T3 thin Worker behind one fire seam (`main`)
 
 - **Dirty-tree build failed on the T3 seam before any test ran.**

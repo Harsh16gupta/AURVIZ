@@ -424,41 +424,14 @@ private fun blockedScheduledTool(name: String): ToolResult =
         retryable = false,
     )
 
-// Headless chat over the structured fallback seam (ADR-0004): the loop's
-// messages ride intact. Same pinning as the foreground chat: the first
-// provider that answers handles every later turn, so private results are
-// never replayed to a second host mid-run. Tried unions every provider
-// that saw the prompt, even on failure, so the outcome can disclose it.
-// This class lives in the agent package so the Worker never imports UI.
-// The advertised set is the scheduled run's read-only registry view: the
-// model sees allowed reads plus gated writes by name, and attempts on the
-// latter become PendingApproval rows instead of silent refusals.
-// Ticket 75 (part of #71): no default Tool list — the Worker injects the
-// scheduled run's read-only registry view explicitly.
+// Scheduled shim over the unified pinned-fallback seam. Same class as the
+// foreground chat; only the injected registry view differs (read-only).
+// Kept as a one-line subclass so Worker/tests imports keep working;
+// deleted in follow-up.
 class HeadlessChatLlm(
-    private val candidates: List<NamedProvider>,
-    private val tools: JSONArray = JSONArray(),
-) : ChatLlmProvider {
-    val tried: MutableList<String> = mutableListOf()
-    var lastProvider: String? = null
-        private set
-    private var pinned: String? = null
-
-    override fun chat(messages: List<ChatMessage>): LlmResult {
-        val effective =
-            pinned?.let { name -> candidates.filter { it.name == name } } ?: candidates
-        try {
-            val fb = planWithFallbackMessages(messages, effective.ifEmpty { candidates }, tools)
-            for (name in fb.tried) if (name !in tried) tried += name
-            if (pinned == null) pinned = fb.providerName
-            lastProvider = fb.providerName
-            return fb.result
-        } catch (e: FallbackExhausted) {
-            for (name in e.tried) if (name !in tried) tried += name
-            throw e.cause as? Exception ?: RuntimeException(e)
-        }
-    }
-}
+    candidates: List<NamedProvider>,
+    tools: JSONArray = JSONArray(),
+) : PinnedFallbackChatLlm(candidates, tools)
 
 // What the summary note says: the loop's answer (or its error), plus
 // how many attempted writes are waiting for a Confirmation decision, plus the retry
@@ -589,8 +562,8 @@ fun runScheduledRoutine(
     val run =
         runs.find(schedule.id, fireTime)
             ?: ScheduleRun(schedule.id, fireTime, status, error, resultText, durationMs)
-    val tried = (llm as? HeadlessChatLlm)?.tried?.toList().orEmpty()
-    val used = (llm as? HeadlessChatLlm)?.lastProvider
+    val tried = (llm as? TriedChatLlm)?.tried?.toList().orEmpty()
+    val used = (llm as? TriedChatLlm)?.lastProvider
     return ScheduledRunOutcome.Ran(
         run,
         scheduledRunNotification(schedule, answer, error, blockedCalls.size, authFailed, tried, used),

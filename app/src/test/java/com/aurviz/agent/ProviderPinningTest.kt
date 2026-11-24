@@ -1,6 +1,5 @@
 package com.aurviz.agent
 
-import com.aurviz.agent.ui.FallbackChatLlm
 import org.json.JSONArray
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -32,7 +31,7 @@ class ProviderPinningTest {
     fun foregroundPinsAfterFirstAnswerAndNeverReplaysPrivateTranscript() {
         val first = Scripted(true, listOf(ok("turn1"), ok("turn2")))
         val second = Scripted(true, listOf(ok("should-never-run")))
-        val chat = FallbackChatLlm(listOf(NamedProvider("gemini", "k", first), NamedProvider("groq", "k", second)))
+        val chat = PinnedFallbackChatLlm(listOf(NamedProvider("gemini", "k", first), NamedProvider("groq", "k", second)))
         val m1 = listOf(ChatMessage("system", "sys [memories] private [/memories]"), ChatMessage("user", "hi"))
         val m2 = m1 + ChatMessage("tool", "private mail body", toolCallId = "c1")
         chat.chat(m1)
@@ -48,7 +47,7 @@ class ProviderPinningTest {
     @Test
     fun foregroundFailureStillDisclosesWhoSawIt() {
         val bad = Scripted(true, listOf(LlmException(HttpFailure("error", null, true), "HTTP 500")))
-        val chat = FallbackChatLlm(listOf(NamedProvider("gemini", "k", bad)))
+        val chat = PinnedFallbackChatLlm(listOf(NamedProvider("gemini", "k", bad)))
         try {
             chat.chat(listOf(ChatMessage("user", "hi")))
             throw AssertionError("expected failure")
@@ -60,7 +59,7 @@ class ProviderPinningTest {
     @Test
     fun nonFallbackFailureRecordsTriedBeforeStop() {
         val badKey = Scripted(true, listOf(LlmException(HttpFailure("auth", null, false), "HTTP 401")))
-        val chat = FallbackChatLlm(listOf(NamedProvider("groq", "k", badKey)))
+        val chat = PinnedFallbackChatLlm(listOf(NamedProvider("groq", "k", badKey)))
         try {
             chat.chat(listOf(ChatMessage("user", "hi")))
             throw AssertionError("expected 401")
@@ -73,7 +72,7 @@ class ProviderPinningTest {
     @Test
     fun scheduledOutcomeCarriesProvidersAndDisclosesRetry() {
         val flaky = failingThenOk(HttpFailure("rate_limited", 0, true), "done")
-        val chat = HeadlessChatLlm(
+        val chat = PinnedFallbackChatLlm(
             listOf(
                 NamedProvider("gemini", "k", flaky),
                 NamedProvider("groq", "k", Scripted(true, listOf(ok("done")))),
@@ -91,7 +90,7 @@ class ProviderPinningTest {
     @Test
     fun scheduledFailureStillDisclosesTried() {
         val bad = Scripted(true, listOf(LlmException(HttpFailure("error", null, true), "HTTP 500")))
-        val chat = HeadlessChatLlm(listOf(NamedProvider("gemini", "k", bad)))
+        val chat = PinnedFallbackChatLlm(listOf(NamedProvider("gemini", "k", bad)))
         val schedule = Schedule("sched_1", "check mail", 9, 0, null)
         val outcome = runScheduledRoutine(
             schedule, 1L, chat, ToolRegistry(), InMemoryScheduleRunStore(), InMemoryPendingApprovalStore(),
