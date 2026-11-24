@@ -150,6 +150,8 @@ fun AgentNav(
                         onPreviewSchedule = { vm.sendCommand("schedule $it") },
                         onApproveSchedule = vm::approveSchedule,
                         onRejectSchedule = vm::rejectSchedule,
+                        onApproveUnschedule = vm::approveUnschedule,
+                        onRejectUnschedule = vm::rejectUnschedule,
                         onUnschedule = vm::unschedule,
                         onApproveHeldWrite = vm::approveHeldWrite,
                         onRejectHeldWrite = vm::rejectHeldWrite,

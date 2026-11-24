@@ -208,6 +208,11 @@ data class AgentUiState(
     val pendingForget: List<Memory> = emptyList(),
     val pendingSchedule: ParsedSchedule? = null,
     val schedulePreview: String = "",
+    // Ticket #69 (part of #65 T4): the typed/voice `unschedule` fast path
+    // publishes the resolved Schedule here for an explicit Stop/Discard
+    // Confirmation card — no silent disarm. The screen's inline row keeps
+    // its own Delete/Keep confirm and never touches this slot.
+    val pendingUnschedule: Schedule? = null,
     // Ticket 12/25: the loop's live Confirmation card (GLOSSARY
     // Confirmation). NeedsApproval raises pendingApproval with the
     // unseen flags computed at raise time; StepDone clears it.

@@ -61,11 +61,14 @@ import com.aurviz.agent.defaultCandidates
 import com.aurviz.agent.defaultToolRegistry
 import com.aurviz.agent.deleteSchedule
 import com.aurviz.agent.effectiveSettings
+import com.aurviz.agent.findScheduleByRawId
 import com.aurviz.agent.formatSchedulePreview
+import com.aurviz.agent.formatUnschedulePreview
 import com.aurviz.agent.firstConfiguredProvider
 import com.aurviz.agent.forgetPreview
 import com.aurviz.agent.knownAddressesFromInbox
 import com.aurviz.agent.listSchedules
+import com.aurviz.agent.normalizeScheduleId
 import com.aurviz.agent.onApprovedWrite
 import com.aurviz.agent.ScheduleSideEffect
 import com.aurviz.agent.newCodeVerifier
@@ -1181,25 +1184,70 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // Ticket #69 (part of #65 T4): the typed/voice `unschedule` fast path
+    // is preview-gated like create — resolving the id publishes a Stop?
+    // card, and only approve disarms. Unknown ids fail with guidance to
+    // list, same as before. The screen's inline row confirms Delete/Keep
+    // itself and deletes through unschedule() below, never this slot.
     private fun handleUnschedule(raw: String) {
-        val id = raw.trim().let { if (it.startsWith("sched_")) it else "sched_$it" }
         viewModelScope.launch(Dispatchers.IO) {
-            val known = listSchedules(scheduleStore).any { it.id == id }
-            if (!known) {
-                _state.update { it.copy(statusLine = "No Schedule $id.") }
-                recordCompleted(responseText = "No Schedule $id.", failed = true)
+            val target = findScheduleByRawId(listSchedules(scheduleStore), raw)
+            if (target == null) {
+                _state.update {
+                    it.copy(
+                        statusLine = "No Schedule ${normalizeScheduleId(raw)}. Say 'schedules' to list them.",
+                        pendingUnschedule = null,
+                    )
+                }
+                recordCompleted(responseText = "No Schedule ${normalizeScheduleId(raw)}.", failed = true)
                 return@launch
             }
-            deleteSchedule(scheduleStore, id)
-            cancelRoutineWork(getApplication(), id)
-            cancelRoutineAlarm(getApplication(), id)
-            refreshSchedules()
-            _state.update { it.copy(statusLine = "Schedule $id stopped.") }
-            recordCompleted(responseText = "Schedule $id stopped.")
+            val preview = formatUnschedulePreview(target)
+            _state.update {
+                it.copy(
+                    pendingUnschedule = target,
+                    statusLine = "$preview — review in Schedules.",
+                )
+            }
+            recordCompleted(responseText = preview)
         }
     }
 
-    fun unschedule(id: String) = handleUnschedule(id.removePrefix("sched_"))
+    fun approveUnschedule() {
+        val target = _state.value.pendingUnschedule ?: return
+        _state.update { it.copy(pendingUnschedule = null, statusLine = "Stopping Schedule…") }
+        viewModelScope.launch(Dispatchers.IO) {
+            disarmSchedule(target.id)
+            _state.update { it.copy(statusLine = "Schedule ${target.id} stopped.") }
+            recordCompleted(responseText = "Schedule ${target.id} stopped.")
+        }
+    }
+
+    fun rejectUnschedule() {
+        _state.update { it.copy(pendingUnschedule = null, statusLine = "Schedule kept.") }
+        recordCompleted(responseText = "Schedule kept.")
+    }
+
+    // Shared disarm: delete the row plus cancel alarm/work, then refresh.
+    // Both the approved command-path card and the screen's inline-confirmed
+    // row funnel through here — the Confirmation happens before the call.
+    private fun disarmSchedule(id: String) {
+        deleteSchedule(scheduleStore, id)
+        cancelRoutineWork(getApplication(), id)
+        cancelRoutineAlarm(getApplication(), id)
+        refreshSchedules()
+    }
+
+    // Screen inline-delete path: the row already confirmed Delete/Keep, so
+    // this disarms immediately. The typed/voice command path above always
+    // previews first. Unknown here means a lost race with another delete —
+    // nothing to disarm, and the list is already fresh, so stay silent.
+    fun unschedule(id: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val target = findScheduleByRawId(listSchedules(scheduleStore), id) ?: return@launch
+            disarmSchedule(target.id)
+        }
+    }
 
     private fun refreshSchedules(showLine: Boolean = false) {
         viewModelScope.launch(Dispatchers.IO) {

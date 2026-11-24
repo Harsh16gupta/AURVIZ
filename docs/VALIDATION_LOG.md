@@ -2,6 +2,47 @@
 
 Every case where the AI was wrong and how it was caught. Add an entry with file:line evidence before moving on.
 
+## 2026-11-24 — Issue #69 T4 unschedule fast-path Confirmation (`main`)
+
+- **The audit was right; the fix mirrors the create preview.** The #69
+  audit (98aae02) left one genuine gap: `handleUnschedule` disarmed on a
+  typed/voice command with no Confirmation. Fixed by preview-gating it
+  exactly like `handleScheduleCreate`: resolve via pure helpers, publish
+  a Stop? card, disarm only on approve.
+- **Missing imports cascade into a misleading type error.** Wiring
+  `handleUnschedule` to `findSchedule`/`normalizeScheduleId`/
+  `formatUnschedulePreview` failed `:app:compileDebugKotlin` with
+  `Unresolved reference` plus a bogus `Any vs Schedule?` mismatch at
+  `AgentViewModel.kt:1205` — the mismatch was error-recovery fallout,
+  not a real type problem. Fixed with three explicit imports
+  (`AgentViewModel.kt`, same explicit-import idiom as the other
+  schedule helpers).
+- **Screen inline-delete keeps its own confirm; no double-gate.**
+  `SchedulesScreen.kt:223-239` already confirms Delete/Keep per row, so
+  `unschedule(id)` (`AgentViewModel.kt`, screen path) still disarms
+  immediately while the command path (`handleUnschedule`) previews.
+  The two paths are documented at both sites so a later reader does not
+  "unify" them into a double-confirm.
+- Tests: 4 new pure-helper tests in `ScheduleTest.kt` (prefix
+  normalize, bare/prefixed find, unknown → null, preview names
+  id/instruction/time) written red-first, green after. Full
+  `:app:testDebugUnitTest --rerun-tasks` green (520 tests, 0 failures —
+  up 4 from 516). Secret scan clean on the diff.
+- Review drove two cleanups: `findSchedule` → `findScheduleByRawId`
+  (states the normalize + bare/prefixed contract), shared time shape
+  `formatScheduleTime` for both previews, and one `disarmSchedule`
+  helper for the approve + screen paths. Disputed and kept with
+  precedent: no timeout on the manual card (same as `approveSchedule`),
+  no edit step (cancel target fully determined; reject + retype is the
+  edit path), screen inline row keeps its own Delete/Keep (explicit
+  per-item Confirmation, not a second mechanism for the same entry
+  point), `unschedule(id)` silent on unknown (post-confirm lost race,
+  list already fresh).
+- Glossary check: Schedule / Confirmation used per `GLOSSARY.md`;
+  `cancel_schedule` toolLabel on the card names the Tool being
+  confirmed. No ADR conflict (per-call Confirmation for schedule
+  writes is #65/ADR-0003 direction).
+
 ## 2026-11-24 — Issue #69 audit: one genuine gap, ticket left OPEN (`main`)
 
 - Audited #69 (T4 schedule writes + voice parity through judge) against the

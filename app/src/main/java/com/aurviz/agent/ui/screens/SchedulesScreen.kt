@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aurviz.agent.ToolCall
 import com.aurviz.agent.approvalCardFor
+import com.aurviz.agent.formatUnschedulePreview
 import com.aurviz.agent.knownAddressesFromInbox
 import com.aurviz.agent.nextFireTime
 import com.aurviz.agent.toolLabel
@@ -71,6 +72,8 @@ fun SchedulesScreen(
     onPreviewSchedule: (String) -> Unit,
     onApproveSchedule: () -> Unit,
     onRejectSchedule: () -> Unit,
+    onApproveUnschedule: () -> Unit,
+    onRejectUnschedule: () -> Unit,
     onUnschedule: (String) -> Unit,
     onApproveHeldWrite: (String) -> Unit,
     onRejectHeldWrite: (String) -> Unit,
@@ -126,6 +129,17 @@ fun SchedulesScreen(
                     Text("Preview Schedule")
                 }
             }
+        }
+        if (state.pendingUnschedule != null) {
+            ConfirmationCard(
+                toolLabel = "cancel_schedule",
+                title = "Stop Schedule",
+                detail = formatUnschedulePreview(state.pendingUnschedule),
+                approveLabel = "Stop schedule",
+                denyLabel = "Keep",
+                onApprove = onApproveUnschedule,
+                onDeny = onRejectUnschedule,
+            )
         }
         if (state.pendingSchedule != null) {
             ConfirmationCard(
