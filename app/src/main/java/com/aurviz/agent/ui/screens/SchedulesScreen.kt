@@ -30,7 +30,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.aurviz.agent.formatUnschedulePreview
 import com.aurviz.agent.nextFireTime
 import com.aurviz.agent.receiptForHeld
@@ -206,7 +205,7 @@ fun SchedulesScreen(
                         ) {
                             Text(
                                 schedule.instruction,
-                                style = Theme.typography.body.copy(fontSize = 16.sp, fontWeight = FontWeight.SemiBold),
+                                style = Theme.typography.label.copy(fontWeight = FontWeight.SemiBold),
                                 color = Theme.colors.onBackground,
                                 modifier = Modifier.weight(1f),
                             )

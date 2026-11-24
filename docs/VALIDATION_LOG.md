@@ -2,6 +2,44 @@
 
 Every case where the AI was wrong and how it was caught. Add an entry with file:line evidence before moving on.
 
+## 2026-11-25 — Home cleanup + demo starters (UI polish)
+
+- **Caught own mistake: SchedulesScreen import edit removed needed imports.**
+  The `sp` cleanup also deleted `FontWeight` and `TextOverflow` which are
+  still used (`SchedulesScreen.kt:205,232`). Caught on post-edit re-read;
+  restored the two imports, kept only `sp` removed. Lesson: narrow edit
+  boundaries for import lines.
+
+## 2026-11-25 — ChatGPT-style pills, remove Hey AIRA card
+
+- **Removed the Hey AIRA VoiceWakeCard block** from the empty-state feed
+  (`CommandScreen.kt:250-252`) so home matches the reference clean look:
+  hero + pills + composer only. Voice stays via the composer mic.
+- **Replaced full-width chevron cards with wrap-content 50dp pills**
+  (`StarterCommands`): surfaceVariant + edge border, 18dp icon + single
+  label, start-aligned Column. Dropped `example.com` demo; new pills send
+  real multi-Tool commands (unread triage + Memory, Wikipedia + gated
+  send, weekday Schedule, Priya Memory prove-it).
+
+## 2026-11-25 — Stale Browser card leak + starters visibility first-aid
+
+- **Root cause: every InteractionRecord inherited the global page.**
+  `recordCompleted` defaulted `webPage = state.value.webPage` and
+  `emails = state.value.emails` (`AgentViewModel.kt:440-441`), so once the
+  Wikipedia page loaded, every later schedule/memory/email record re-rendered
+  the same `record.webPage` card (`CommandScreen.kt:751`). Same for emails.
+- **Fix: default to no attachment; attach explicitly per run.**
+  `recordCompleted` now defaults `emails = emptyList()`, `webPage = null`;
+  `runLoopCommand` resets both at start and passes the current run's values
+  on Answered/Failed; `openWebUrl` success passes `webPage = page`.
+- **Starters showed with history:** gate was `interactions.size < 2`, so pills
+  rendered above the first answer. Changed to `interactions.isEmpty()`
+  (`CommandScreen.kt:242`).
+- **4th starter replaced:** Priya save-then-recall overlapped the unread
+  triage Memory write; now `What do you remember about me?` (pure
+  `search_memory` showcase). Email + Wikipedia + Schedule pills kept.
+
+
 ## 2026-11-24 — Issue #70 T5 close-out: both audit gaps wired (`main`)
 
 - **Caught own mistake: first AgentUiState edit orphaned the class doc.**

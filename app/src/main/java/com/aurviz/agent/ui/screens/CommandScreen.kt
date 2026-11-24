@@ -39,7 +39,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
@@ -80,6 +79,7 @@ import com.aurviz.agent.ui.components.UserMessage
 import com.aurviz.agent.ui.theme.Bell
 import com.aurviz.agent.ui.theme.Brain
 import com.aurviz.agent.ui.theme.DotsThree
+import com.aurviz.agent.ui.theme.EnvelopeSimple
 import com.aurviz.agent.ui.theme.NotePencil
 import com.aurviz.agent.ui.theme.SlidersHorizontal
 import com.aurviz.agent.ui.theme.CaretDown
@@ -89,10 +89,8 @@ import com.aurviz.agent.ui.theme.Export
 import com.aurviz.agent.ui.theme.Globe
 import com.aurviz.agent.ui.theme.Icons
 import com.aurviz.agent.ui.theme.Menu
-import com.aurviz.agent.ui.theme.Microphone
 import com.aurviz.agent.ui.theme.Space
 import com.aurviz.agent.ui.theme.Theme
-import com.aurviz.agent.ui.theme.Waveform
 import com.aurviz.agent.ui.theme.X
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -191,20 +189,6 @@ fun CommandScreen(
                                 }
                             }
                         }
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            AiraLogoMark(
-                                size = 20.dp,
-                                archColor = Theme.colors.onBackground,
-                            )
-                            Text(
-                                "aira",
-                                style = Theme.typography.title,
-                                color = Theme.colors.onBackground,
-                            )
-                        }
                     }
                 },
                 title = {
@@ -255,12 +239,9 @@ fun CommandScreen(
                         ) { focusManager.clearFocus() },
                     verticalArrangement = Arrangement.spacedBy(Space * 2),
                 ) {
-                    if (state.interactions.size < 2 && !state.agentRunning && !state.sending) {
+                    if (state.interactions.isEmpty() && !state.agentRunning && !state.sending) {
                         item {
                             HeroBlock()
-                        }
-                        item {
-                            VoiceWakeCard(onClick = onVoiceClick)
                         }
                         item {
                             StarterCommands(onSend = onSend)
@@ -482,11 +463,11 @@ private fun ComposerActionRow(
 @Composable
 private fun HeroBlock() {
     Column(
-        Modifier.fillMaxWidth().padding(vertical = 24.dp),
+        Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        AiraLogoMark(size = 44.dp)
+        AiraLogoMark(size = 32.dp)
         Text(
             "Meet AIRA.",
             style = Theme.typography.display.copy(textAlign = TextAlign.Center),
@@ -494,17 +475,11 @@ private fun HeroBlock() {
             modifier = Modifier.fillMaxWidth(),
         )
         Text(
-            "Your personal assistant that knows you.",
-            style = Theme.typography.title.copy(
+            "Plan, remember, and confirm before acting.",
+            style = Theme.typography.body.copy(
                 textAlign = TextAlign.Center,
                 fontWeight = FontWeight.Normal,
             ),
-            color = Theme.colors.onBackground,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Text(
-            "Just speak. Get things done.",
-            style = Theme.typography.caption.copy(textAlign = TextAlign.Center),
             color = Theme.colors.onBackgroundMuted,
             modifier = Modifier.fillMaxWidth(),
         )
@@ -512,86 +487,70 @@ private fun HeroBlock() {
 }
 
 @Composable
-private fun VoiceWakeCard(onClick: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(Theme.colors.surface)
-            .border(1.dp, Theme.colors.edge, RoundedCornerShape(12.dp))
-            .clickable(
-                onClick = onClick,
-                interactionSource = remember { MutableInteractionSource() },
-                indication = androidx.compose.foundation.LocalIndication.current,
-            )
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Box(
-            Modifier.size(40.dp)
-                .clip(RoundedCornerShape(50))
-                .background(Color(0xFF1E78FF)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                Icons.Waveform,
-                contentDescription = null,
-                modifier = Modifier.size(20.dp),
-                tint = Color(0xFFFFFFFF),
-            )
-        }
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(
-                "Hey AIRA",
-                style = Theme.typography.label.copy(fontWeight = FontWeight.SemiBold),
-                color = Theme.colors.onBackground,
-            )
-            Text(
-                "Say it. Your glasses start listening.",
-                style = Theme.typography.caption,
-                color = Theme.colors.onBackgroundMuted,
-            )
-        }
-        Icon(
-            Icons.Microphone,
-            contentDescription = null,
-            modifier = Modifier.size(18.dp),
-            tint = Color(0xFF1E78FF),
-        )
-    }
-}
-
-@Composable
 private fun StarterCommands(onSend: (String) -> Unit) {
-    // Honest starters: every card maps to a Tool AIRA has today.
-    // Memory save, web open + summarize, and recurring Schedule create.
-    // No calendar moves, no LinkedIn posts, no address-less email replies —
-    // none of those Tools exist, so they never appear here.
-    val commands = listOf(
-        "Remember my boss is Priya.",
-        "Open https://example.com and summarize it.",
-        "Remind me every weekday at 8:30 AM to check emails.",
+    // One-tap demo starters in the ChatGPT empty-state style: compact
+    // wrap-content pills, no subtitles, no chevrons. Each label sends a
+    // full multi-Tool command so one tap demonstrates the whole Agent:
+    // Memory recall, Gmail triage, Web research + gated send, Schedule
+    // automation with Confirmation. No placeholder pages.
+    data class Starter(
+        val icon: androidx.compose.ui.graphics.vector.ImageVector,
+        val label: String,
+        val command: String,
     )
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        commands.forEach { command ->
-            Box(
-                Modifier.fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Theme.colors.surface)
-                    .border(1.dp, Theme.colors.edge, RoundedCornerShape(12.dp))
+    val starters = listOf(
+        Starter(
+            Icons.EnvelopeSimple,
+            "Summarize my unread emails",
+            "Search my unread emails, summarize the top 3 by sender and subject, and remember who emails me most.",
+        ),
+        Starter(
+            Icons.Globe,
+            "Brief me on AI, email me the summary",
+            "Open https://en.wikipedia.org/wiki/Artificial_intelligence, summarize it in 5 bullets, then send that summary to myself with subject AI briefing.",
+        ),
+        Starter(
+            Icons.Bell,
+            "Set my weekday 8:30 AM briefing",
+            "Remind me every weekday at 8:30 AM to summarize unread emails.",
+        ),
+        Starter(
+            Icons.Brain,
+            "What do you remember about me?",
+            "List everything you remember about me, including my boss and preferences.",
+        ),
+    )
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalAlignment = Alignment.Start,
+    ) {
+        starters.forEach { starter ->
+            Row(
+                Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(Theme.colors.surfaceVariant)
+                    .border(1.dp, Theme.colors.edge, RoundedCornerShape(50))
                     .clickable(
-                        onClick = { onSend(command) },
+                        onClick = { onSend(starter.command) },
                         interactionSource = remember { MutableInteractionSource() },
                         indication = androidx.compose.foundation.LocalIndication.current,
                     )
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                contentAlignment = Alignment.CenterStart,
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
+                Icon(
+                    starter.icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = Theme.colors.primary,
+                )
                 Text(
-                    command,
+                    starter.label,
                     style = Theme.typography.label,
                     color = Theme.colors.onBackground,
-                    maxLines = 2,
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
