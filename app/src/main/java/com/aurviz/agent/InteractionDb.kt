@@ -37,6 +37,12 @@ interface InteractionDao {
 
     @Query("DELETE FROM interactions WHERE pid NOT IN (SELECT pid FROM interactions ORDER BY timestampMs DESC LIMIT :keep)")
     fun prune(keep: Int)
+
+    @Query("SELECT * FROM interactions WHERE sessionId = :sessionId ORDER BY timestampMs ASC")
+    suspend fun listBySession(sessionId: String): List<InteractionRow>
+
+    @Query("DELETE FROM interactions WHERE sessionId = :sessionId")
+    suspend fun deleteSession(sessionId: String)
 }
 
 // Version 5 -> 6 adds the ticket #92 interactions table plus timing and

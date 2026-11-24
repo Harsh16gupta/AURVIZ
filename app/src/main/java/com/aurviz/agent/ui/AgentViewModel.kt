@@ -184,6 +184,11 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         tokenVault.loadInto(tokens)
         val appCtx = application.applicationContext
         UiPrefs.allowAlways(appCtx).forEach(allowAlwaysStore::allow)
+        val storedOnboarding = UiPrefs.onboardingCompleted(appCtx)
+        val llmKeys = try { tokenVault.loadLlmKeys() } catch (_: Exception) { null }
+        val hasKeys = llmKeys != null &&
+            (llmKeys.geminiKey.isNotBlank() || llmKeys.deepseekKey.isNotBlank() || llmKeys.metaKey.isNotBlank())
+        val autoOnboarded = storedOnboarding || tokens.isConnected() || hasKeys
         _state.update {
             it.copy(
                 themeMode = UiPrefs.themeMode(appCtx),
@@ -192,6 +197,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                 confirmSendEmail = UiPrefs.confirmSendEmail(appCtx),
                 disabledScheduleIds = UiPrefs.disabledScheduleIds(appCtx),
                 allowAlways = allowAlwaysStore.list(),
+                onboardingCompleted = autoOnboarded,
             )
         }
         refreshScheduleRuns()
@@ -203,6 +209,11 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         refreshInteractions()
         refreshExactAlarmFlag()
         refreshBatteryFlag()
+    }
+
+    fun completeOnboarding() {
+        UiPrefs.setOnboardingCompleted(getApplication<Application>().applicationContext, true)
+        _state.update { it.copy(onboardingCompleted = true) }
     }
 
     fun setThemeMode(mode: ThemeMode) {
@@ -260,7 +271,71 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         if (state.value.agentRunning) return
         sessionTranscript.clear()
         activeSessionId = "s_${System.currentTimeMillis()}"
-        _state.update { it.copy(sessionId = activeSessionId, sessionTurns = 0) }
+        _state.update {
+            it.copy(
+                sessionId = activeSessionId,
+                sessionTurns = 0,
+                interactions = emptyList(),
+                timeline = emptyList(),
+                activeCommand = null,
+                activeRecalledMemories = emptyList(),
+            )
+        }
+    }
+
+    fun switchSession(sessionId: String) {
+        if (state.value.agentRunning || sessionId == activeSessionId) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val rows =
+                try {
+                    db.interactions().listBySession(sessionId)
+                } catch (_: Exception) {
+                    return@launch
+                }
+            val mapped = rows.map { it.toRecord() }
+            synchronized(sessionTranscript) {
+                sessionTranscript.clear()
+                for (row in rows) {
+                    sessionTranscript += ChatMessage(role = "user", content = row.command)
+                    sessionTranscript += ChatMessage(role = "assistant", content = row.responseText)
+                }
+            }
+            activeSessionId = sessionId
+            _state.update {
+                it.copy(
+                    sessionId = sessionId,
+                    sessionTurns = rows.size,
+                    interactions = mapped,
+                    activeCommand = null,
+                    activeRecalledMemories = emptyList(),
+                    timeline = emptyList(),
+                )
+            }
+        }
+    }
+
+    fun deleteSession(sessionId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                db.interactions().deleteSession(sessionId)
+            } catch (_: Exception) {
+                return@launch
+            }
+            refreshSessions()
+            if (sessionId == activeSessionId) {
+                startNewSession()
+            }
+        }
+    }
+
+    private suspend fun refreshSessions() {
+        val rows =
+            try {
+                db.interactions().listRecent(200)
+            } catch (_: Exception) {
+                return
+            }
+        _state.update { it.copy(sessions = buildSessionSummaries(rows)) }
     }
 
     // Confirmation receipt fields stamped while a Task Execution is still
@@ -328,9 +403,19 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                 } catch (_: Exception) {
                     return@launch
                 }
-            if (rows.isEmpty()) return@launch
+            val summaries =
+                try {
+                    buildSessionSummaries(db.interactions().listRecent(200))
+                } catch (_: Exception) {
+                    buildSessionSummaries(rows)
+                }
+            if (rows.isEmpty()) {
+                _state.update { s -> s.copy(sessions = summaries) }
+                return@launch
+            }
             _state.update { s ->
-                if (s.interactions.isNotEmpty()) s else s.copy(interactions = rows.reversed().map { it.toRecord() })
+                if (s.interactions.isNotEmpty()) s.copy(sessions = summaries)
+                else s.copy(interactions = rows.reversed().map { it.toRecord() }, sessions = summaries)
             }
         }
     }
@@ -341,6 +426,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 db.interactions().insert(entry.toRow(sessionId))
                 db.interactions().prune(50)
+                refreshSessions()
             } catch (_: Exception) {
             }
         }

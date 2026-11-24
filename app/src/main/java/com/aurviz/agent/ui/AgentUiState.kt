@@ -120,6 +120,30 @@ fun InteractionRow.toRecord(): InteractionRecord =
         failed = failed,
     )
 
+// V2 flagship shell (Part A): one row per Session thread for the drawer.
+data class SessionSummary(
+    val sessionId: String,
+    val title: String,
+    val lastTimestampMs: Long,
+    val interactionCount: Int,
+)
+
+fun buildSessionSummaries(rows: List<InteractionRow>): List<SessionSummary> =
+    rows.groupBy { it.sessionId }
+        .filterKeys { it.isNotBlank() }
+        .map { (sessionId, group) ->
+            val earliest = group.minByOrNull { it.timestampMs }
+            val latest = group.maxOf { it.timestampMs }
+            val title = earliest?.command?.trim()?.take(48)?.takeIf { it.isNotEmpty() } ?: "New Session"
+            SessionSummary(
+                sessionId = sessionId,
+                title = title,
+                lastTimestampMs = latest,
+                interactionCount = group.size,
+            )
+        }
+        .sortedByDescending { it.lastTimestampMs }
+
 // Ticket #92: drawer groups, newest first. Today = same calendar day as
 // now; Previous 7 Days = the 7 days before today; older rows stay in
 // Room but out of the drawer.
@@ -240,6 +264,8 @@ data class AgentUiState(
     // skip the Confirmation card; SendPolicy still applies.
     val allowAlways: Set<String> = emptySet(),
     val scheduleRuns: List<ScheduleRunSummary> = emptyList(),
+    val sessions: List<SessionSummary> = emptyList(),
+    val onboardingCompleted: Boolean = true,
 )
 
 // One recorded scheduled run for the Recent Runs list (GLOSSARY Schedule):
