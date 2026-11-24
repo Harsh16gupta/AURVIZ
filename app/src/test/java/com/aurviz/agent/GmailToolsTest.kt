@@ -131,4 +131,63 @@ class GmailToolsTest {
             }
         assertEquals(setOf("search_emails", "read_email", "send_email"), names)
     }
+
+    // Ticket #106 (T1): multi-recipient comma split + payload budget guard.
+
+    @Test
+    fun parseRecipientListSplitsCommasAndDropsBlanks() {
+        assertEquals(listOf("a@x.com", "b@x.com"), parseRecipientList("a@x.com, b@x.com"))
+        assertEquals(listOf("a@x.com", "b@x.com"), parseRecipientList("  a@x.com ,, b@x.com, "))
+        assertEquals(emptyList<String>(), parseRecipientList("  , "))
+    }
+
+    @Test
+    fun sendSplitsCommaSeparatedRecipients() {
+        val fake = FakeGmail()
+        val kernel = kernelWithGmail(fake)
+        val args = mapOf("to" to "a@x.com, b@x.com", "subject" to "Hi", "body" to "hello")
+        val approved =
+            kernel.executeGated(ToolCall("c-multi", "send_email", args)) { ApprovalDecision.Approved }
+        assertTrue(approved.result is ToolResult.Success)
+        assertEquals(1, fake.sent.size)
+    }
+
+    @Test
+    fun bulkCommaSeparatedSendIsDeniedByDefaultPolicy() {
+        val fake = FakeGmail()
+        val kernel =
+            ToolRegistry().apply {
+                for (tool in gmailTools(fake, DefaultSendPolicy())) register(tool)
+            }
+        val to6 = (1..6).joinToString(", ") { "u$it@x.com" }
+        val gated =
+            kernel.executeGated(
+                ToolCall("c-bulk", "send_email", mapOf("to" to to6, "subject" to "Hi", "body" to "hello")),
+            ) { ApprovalDecision.Approved }
+        val bulkResult = gated.result
+        assertTrue(bulkResult is ToolResult.Failure)
+        bulkResult as ToolResult.Failure
+        assertTrue(bulkResult.error.contains("bulk send"))
+        assertTrue(fake.sent.isEmpty())
+    }
+
+    @Test
+    fun readEmailTruncatesBodyToContextBudget() {
+        val bigBody = "b".repeat(MAX_TOOL_TEXT_CHARS + 500)
+        val fake =
+            object : GmailApi {
+                override fun send(rawBase64Url: String) = Unit
+                override fun listInbox(): List<EmailSummary> = emptyList()
+                override fun searchInbox(query: String, max: Int): List<EmailSummary> = emptyList()
+                override fun readMessage(id: String): EmailDetail =
+                    EmailDetail(id, "boss@work.com", "Big", "snip", bigBody, emailSource(id))
+            }
+        val result = kernelWithGmail(fake).execute("read_email", mapOf("id" to "m9"))
+        assertTrue(result is ToolResult.Success)
+        @Suppress("UNCHECKED_CAST")
+        val row = (result as ToolResult.Success).data as Map<String, Any?>
+        val body = row["body"] as String
+        assertEquals(MAX_TOOL_TEXT_CHARS + TRUNCATED_SUFFIX.length, body.length)
+        assertTrue(body.endsWith(TRUNCATED_SUFFIX))
+    }
 }

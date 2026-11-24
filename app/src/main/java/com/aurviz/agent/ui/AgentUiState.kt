@@ -2,6 +2,7 @@ package com.aurviz.agent.ui
 
 import com.aurviz.agent.EmailDraft
 import com.aurviz.agent.EmailSummary
+import com.aurviz.agent.ChatMessage
 import com.aurviz.agent.FallbackResult
 import com.aurviz.agent.InteractionRow
 import com.aurviz.agent.LlmResult
@@ -143,6 +144,43 @@ fun buildSessionSummaries(rows: List<InteractionRow>): List<SessionSummary> =
             )
         }
         .sortedByDescending { it.lastTimestampMs }
+
+// Ticket #106 (T1): cold-start active Session hydration. After process
+// death activeSessionId resets to a fresh id while Room still holds the
+// last Session's rows; restoring the most recent Session keeps the
+// Session transcript continuous for follow-up commands.
+data class HydratedSessionState(
+    val sessionId: String,
+    val sessionTurns: Int,
+    val interactions: List<InteractionRecord>,
+    val transcript: List<ChatMessage>,
+    val sessions: List<SessionSummary>,
+)
+
+fun hydrateLatestSession(
+    recentRowsDesc: List<InteractionRow>,
+    fallbackSessionId: String,
+): HydratedSessionState {
+    val summaries = buildSessionSummaries(recentRowsDesc)
+    val latestSessionId = summaries.firstOrNull()?.sessionId ?: fallbackSessionId
+    val sessionRowsChronological =
+        recentRowsDesc
+            .filter { it.sessionId == latestSessionId }
+            .sortedBy { it.timestampMs }
+    val records = sessionRowsChronological.map { it.toRecord() }
+    val transcript = mutableListOf<ChatMessage>()
+    for (row in sessionRowsChronological) {
+        transcript += ChatMessage(role = "user", content = row.command)
+        transcript += ChatMessage(role = "assistant", content = row.responseText)
+    }
+    return HydratedSessionState(
+        sessionId = latestSessionId,
+        sessionTurns = sessionRowsChronological.size,
+        interactions = records,
+        transcript = transcript,
+        sessions = summaries,
+    )
+}
 
 // Ticket #92: drawer groups, newest first. Today = same calendar day as
 // now; Previous 7 Days = the 7 days before today; older rows stay in

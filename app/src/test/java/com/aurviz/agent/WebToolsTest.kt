@@ -206,4 +206,58 @@ class WebToolsTest {
             assertTrue("$tool: ${result.error}", result.error.contains("browser", ignoreCase = true))
         }
     }
+
+    // Ticket #106 (T1): Tool payload budget guard (12,000 chars / 40 links).
+
+    @Test
+    fun truncateToolTextKeepsShortTextByteIdentical() {
+        val short = "a".repeat(100)
+        assertEquals(short, truncateToolText(short))
+        val exact = "b".repeat(MAX_TOOL_TEXT_CHARS)
+        assertEquals(exact, truncateToolText(exact))
+    }
+
+    @Test
+    fun truncateToolTextCapsLongTextWithSuffix() {
+        val long = "c".repeat(MAX_TOOL_TEXT_CHARS + 1)
+        val out = truncateToolText(long)
+        assertEquals(MAX_TOOL_TEXT_CHARS + TRUNCATED_SUFFIX.length, out.length)
+        assertTrue(out.endsWith(TRUNCATED_SUFFIX))
+    }
+
+    @Test
+    fun capToolLinksKeepsFirst40() {
+        val links = (1..100).map { "https://example.com/$it" }
+        val capped = capToolLinks(links)
+        assertEquals(MAX_TOOL_LINKS, capped.size)
+        assertEquals("https://example.com/1", capped.first())
+        assertEquals("https://example.com/$MAX_TOOL_LINKS", capped.last())
+    }
+
+    private fun bigPageHtml(): String {
+        val links = (1..100).joinToString("") { "<a href=\"https://example.com/$it\">l$it</a>" }
+        return "<html><head><title>Big</title></head><body><p>${"x".repeat(MAX_TOOL_TEXT_CHARS + 500)}</p>$links</body></html>"
+    }
+
+    @Test
+    fun openUrlTruncatesTextAndCapsLinks() {
+        val registry = registryWith(pages = mapOf("https://big.example" to bigPageHtml()))
+        val result = registry.execute("open_url", mapOf("url" to "https://big.example"))
+        assertTrue(result is ToolResult.Success)
+        @Suppress("UNCHECKED_CAST")
+        val data = (result as ToolResult.Success).data as Map<String, Any?>
+        assertEquals(MAX_TOOL_TEXT_CHARS + TRUNCATED_SUFFIX.length, (data["text"] as String).length)
+        @Suppress("UNCHECKED_CAST")
+        assertEquals(MAX_TOOL_LINKS, (data["links"] as List<String>).size)
+    }
+
+    @Test
+    fun getPageTextTruncatesLongText() {
+        val registry = registryWith(pages = mapOf("https://big.example" to bigPageHtml()))
+        val result = registry.execute("get_page_text", mapOf("url" to "https://big.example"))
+        assertTrue(result is ToolResult.Success)
+        @Suppress("UNCHECKED_CAST")
+        val data = (result as ToolResult.Success).data as Map<String, Any?>
+        assertTrue((data["text"] as String).endsWith(TRUNCATED_SUFFIX))
+    }
 }

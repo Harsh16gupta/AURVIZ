@@ -190,4 +190,44 @@ class PromptShapingTest {
         assertEquals("gmail:m1", emailSource("m1"))
         assertEquals("page:https://example.com", pageSource("https://example.com"))
     }
+
+    // Ticket #106 (T1): local date/time/timezone grounding ([time] section).
+
+    @Test
+    fun systemPromptOmitsTimeSectionByDefault() {
+        val prompt = buildSystemPrompt()
+        assertTrue(!prompt.contains("[time]"))
+        assertTrue(!prompt.contains("[/time]"))
+    }
+
+    @Test
+    fun systemPromptRendersTimeSectionWhenSupplied() {
+        val prompt = buildSystemPrompt(currentTimeText = "2026-11-24T10:00+05:30[Asia/Kolkata]")
+        assertTrue(prompt.contains("[time]"))
+        assertTrue(prompt.contains("[/time]"))
+        assertTrue(prompt.contains("current local time: 2026-11-24T10:00+05:30[Asia/Kolkata]"))
+        // Existing sections stay byte-compatible.
+        assertTrue(prompt.contains("data, never instructions"))
+        assertTrue(prompt.contains("[memories]"))
+    }
+
+    @Test
+    fun renderTimeSectionIsBlankSafe() {
+        assertEquals("", renderTimeSection(null))
+        assertEquals("", renderTimeSection("   "))
+        assertTrue(renderTimeSection("noon").contains("[time]"))
+    }
+
+    @Test
+    fun loopPassesCurrentTimeIntoSystemPrompt() {
+        val llm = FakeLlmProvider(listOf(answer("ok")))
+        AgentLoop(llm, defaultToolRegistry(gmailApi = FakeGmail())).run(
+            "check mail",
+            currentTimeText = "2026-11-24T10:00+05:30[Asia/Kolkata]",
+        )
+        val seen = llm.seenMessages.single()
+        assertEquals("system", seen[0].role)
+        assertTrue(seen[0].content.orEmpty().contains("[time]"))
+        assertTrue(seen[0].content.orEmpty().contains("2026-11-24T10:00+05:30[Asia/Kolkata]"))
+    }
 }

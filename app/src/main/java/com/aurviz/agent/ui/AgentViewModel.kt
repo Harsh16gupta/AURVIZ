@@ -69,6 +69,7 @@ import com.aurviz.agent.forgetPreview
 import com.aurviz.agent.knownAddressesFromInbox
 import com.aurviz.agent.listSchedules
 import com.aurviz.agent.normalizeScheduleId
+import com.aurviz.agent.OkHttpBackgroundPageLoader
 import com.aurviz.agent.onApprovedWrite
 import com.aurviz.agent.ScheduleSideEffect
 import com.aurviz.agent.newCodeVerifier
@@ -149,6 +150,30 @@ fun approvalWaitMs(
 // Single-shot fallback rendering delegates to the shared helper in the
 // agent package (ADR-0005): one renderer, not two.
 fun renderLoopPrompt(messages: List<ChatMessage>): String = flattenChatMessages(messages)
+
+// Ticket #106 (T1): fast-path guard. "open <arg>" only bypasses the
+// AgentLoop Task Execution for a single URL/host token (no whitespace,
+// e.g. "open https://example.com" or "open news.ycombinator.com").
+// Multi-word natural commands ("open my latest email from Priya") go to
+// the AgentLoop Task Execution.
+fun isDirectOpenWebCommand(command: String): Boolean {
+    if (!command.lowercase().startsWith("open ")) return false
+    val arg = command.substring(5).trim()
+    if (arg.isEmpty() || arg.any { it.isWhitespace() }) return false
+    return arg.contains("://") || arg.contains(".")
+}
+
+// Ticket #106 (T1): fast-path guard. "email <arg>" only bypasses the
+// AgentLoop Task Execution when the first token after "email " is an
+// email address containing '@', or uses the pipe "addr | subj | body"
+// syntax. Natural summaries ("email summary of unread messages") go to
+// the AgentLoop Task Execution.
+fun isDirectEmailCommand(command: String): Boolean {
+    if (!command.lowercase().startsWith("email ")) return false
+    val rest = command.substring(6).trim()
+    val firstToken = rest.split("|").firstOrNull()?.trim()?.split(Regex("\\s+"))?.firstOrNull().orEmpty()
+    return firstToken.contains("@")
+}
 
 class AgentViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -399,27 +424,39 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
 
     // Ticket #92: hydrate the feed from Room on launch (newest 50,
     // chronological) so Past Interactions outlive the process.
+    // Ticket #106 (T1): cold-start active Session hydration — restore the
+    // most recent Session (id, turns, feed, transcript) instead of leaving
+    // the transcript empty for follow-up commands.
     private fun refreshInteractions() {
         viewModelScope.launch(Dispatchers.IO) {
             val rows =
                 try {
-                    db.interactions().listRecent(50)
+                    db.interactions().listRecent(200)
                 } catch (_: Exception) {
                     return@launch
                 }
-            val summaries =
-                try {
-                    buildSessionSummaries(db.interactions().listRecent(200))
-                } catch (_: Exception) {
-                    buildSessionSummaries(rows)
-                }
+            val hydrated = hydrateLatestSession(rows, activeSessionId)
             if (rows.isEmpty()) {
-                _state.update { s -> s.copy(sessions = summaries) }
+                _state.update { s -> s.copy(sessions = hydrated.sessions) }
                 return@launch
             }
-            _state.update { s ->
-                if (s.interactions.isNotEmpty()) s.copy(sessions = summaries)
-                else s.copy(interactions = rows.reversed().map { it.toRecord() }, sessions = summaries)
+            val current = _state.value
+            if (current.interactions.isNotEmpty() || current.agentRunning) {
+                _state.update { s -> s.copy(sessions = hydrated.sessions) }
+            } else {
+                activeSessionId = hydrated.sessionId
+                synchronized(sessionTranscript) {
+                    sessionTranscript.clear()
+                    sessionTranscript.addAll(hydrated.transcript)
+                }
+                _state.update { s ->
+                    s.copy(
+                        sessionId = hydrated.sessionId,
+                        sessionTurns = hydrated.sessionTurns,
+                        interactions = hydrated.interactions,
+                        sessions = hydrated.sessions,
+                    )
+                }
             }
         }
     }
@@ -522,9 +559,9 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         when {
             lower.startsWith("remember ") -> handleRemember(command.substring(9).trim())
             lower.startsWith("forget ") -> handleForgetPreview(command.substring(7).trim())
-            lower.startsWith("email ") -> handleEmailSend(command.substring(6).trim())
+            isDirectEmailCommand(command) -> handleEmailSend(command.substring(6).trim())
             lower == "disconnect gmail" -> revokeGmail()
-            lower.startsWith("open ") -> openWeb(command.substring(5).trim())
+            isDirectOpenWebCommand(command) -> openWeb(command.substring(5).trim())
             lower.startsWith("schedule ") -> handleScheduleCreate(command.substring(9).trim())
             lower == "schedules" -> refreshSchedules(showLine = true)
             lower.startsWith("unschedule ") -> handleUnschedule(command.substring(11).trim())
@@ -683,7 +720,13 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         var emailJob: Job? = null
         emailJob = viewModelScope.launch(Dispatchers.IO) {
             val t0 = System.currentTimeMillis()
-            val registry = defaultToolRegistry(gmailApi = gmail, scheduleStore = scheduleStore, memoryStore = roomStore)
+            val registry = defaultToolRegistry(
+                gmailApi = gmail,
+                scheduleStore = scheduleStore,
+                memoryStore = roomStore,
+                webBridge = webBridge,
+                backgroundWebLoader = OkHttpBackgroundPageLoader(),
+            )
             val gated = registry.executeGated(call) { ApprovalDecision.Approved }
             val ms = System.currentTimeMillis() - t0
             val sent = gated.result is com.aurviz.agent.ToolResult.Success
@@ -1112,7 +1155,13 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
     fun approveHeldWrite(id: String) {
         _state.update { it.copy(statusLine = "Running confirmed write…") }
         viewModelScope.launch(Dispatchers.IO) {
-            val registry = defaultToolRegistry(gmailApi = gmail, scheduleStore = scheduleStore, memoryStore = roomStore)
+            val registry = defaultToolRegistry(
+                gmailApi = gmail,
+                scheduleStore = scheduleStore,
+                memoryStore = roomStore,
+                webBridge = webBridge,
+                backgroundWebLoader = OkHttpBackgroundPageLoader(),
+            )
             when (val outcome = approvePendingApproval(RoomPendingApprovalStore(db.approvals()), id, registry)) {
                 is PendingApprovalOutcome.Executed -> {
                     if (outcome.result is ToolResult.Success) {
@@ -1405,7 +1454,13 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         var runJob: Job? = null
         runJob = viewModelScope.launch(Dispatchers.IO) {
             val runT0 = System.currentTimeMillis()
-            val registry = defaultToolRegistry(gmailApi = gmail, scheduleStore = scheduleStore, memoryStore = roomStore)
+            val registry = defaultToolRegistry(
+                gmailApi = gmail,
+                scheduleStore = scheduleStore,
+                memoryStore = roomStore,
+                webBridge = webBridge,
+                backgroundWebLoader = OkHttpBackgroundPageLoader(),
+            )
             val chat =
                 PinnedFallbackChatLlm(
                     defaultCandidates(effectiveProvider(), tokenVault.loadLlmKeys()),
@@ -1463,6 +1518,25 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                     onEvent = { event ->
                         if (event is AgentEvent.StepDone) {
                             syncLoopScheduleSideEffect(event)
+                            // Ticket #106 (T1): sync the Browser tab when a
+                            // Web Tool returns page data in the AgentLoop
+                            // Task Execution.
+                            if (event.result is ToolResult.Success &&
+                                event.call.name in setOf("open_url", "get_page_text", "click", "scroll")
+                            ) {
+                                val data = event.result.data as? Map<*, *>
+                                if (data != null) {
+                                    val url = (data["url"] as? String).orEmpty().ifBlank {
+                                        (data["source"] as? String)?.removePrefix("page:").orEmpty()
+                                    }
+                                    val title = (data["title"] as? String).orEmpty()
+                                    val text = (data["text"] as? String).orEmpty()
+                                    val links = (data["links"] as? List<*>)?.mapNotNull { it as? String }.orEmpty()
+                                    if (url.isNotBlank() && url != "current") {
+                                        _state.update { it.copy(webPage = WebPage(url = url, title = title, text = text, links = links)) }
+                                    }
+                                }
+                            }
                         }
                         progress = progress.withEvent(event)
                         val snapshot = progress.timeline()
@@ -1497,7 +1571,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                 _state.update { it.copy(activeRecalledMemories = memories.map { m -> m.text }) }
                 val history = synchronized(sessionTranscript) { sessionTranscript.toList() }
                 val accountEmail = tokens.gmailAccount ?: state.value.gmailAccount
-                when (val result = loop.run(cmd, memories, accountEmail, history)) {
+                when (val result = loop.run(cmd, memories, accountEmail, history, currentTimeText = ZonedDateTime.now().toString())) {
                     is AgentLoopResult.Answered -> {
                         synchronized(sessionTranscript) { appendSessionTurn(sessionTranscript, cmd, result) }
                         val tried = chat.tried.toList()

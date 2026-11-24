@@ -10,6 +10,7 @@ import com.aurviz.agent.ui.NO_PAST_SESSIONS_LINE
 import com.aurviz.agent.ui.OPEN_SESSIONS_DESCRIPTION
 import com.aurviz.agent.ui.PAST_INTERACTIONS_TITLE
 import com.aurviz.agent.ui.groupPastInteractions
+import com.aurviz.agent.ui.hydrateLatestSession
 import com.aurviz.agent.ui.toRecord
 import com.aurviz.agent.ui.toRow
 import java.lang.reflect.Proxy
@@ -210,5 +211,48 @@ class InteractionDbTest {
         // Recalling only the Priya row stamps its lastUsed to now.
         kernelWithMemory(store).execute("search_memory", mapOf("query" to "priya"))
         assertEquals("my boss is Priya", recallFor(store, "boss")[0].text)
+    }
+
+    // Ticket #106 (T1): cold-start active Session hydration from Room rows.
+
+    private fun sessionRow(sessionId: String, command: String, response: String, timestampMs: Long) =
+        InteractionRow(
+            sessionId = sessionId,
+            command = command,
+            responseText = response,
+            provider = "gemini",
+            timestampMs = timestampMs,
+            failed = false,
+        )
+
+    @Test
+    fun hydrateLatestSessionRestoresMostRecentSession() {
+        // listRecent returns newest-first.
+        val rowsDesc =
+            listOf(
+                sessionRow("s_new", "follow up", "done 2", 2000L),
+                sessionRow("s_new", "first q", "done 1", 1000L),
+                sessionRow("s_old", "old q", "old done", 500L),
+            )
+        val hydrated = hydrateLatestSession(rowsDesc, "s_fallback")
+        assertEquals("s_new", hydrated.sessionId)
+        assertEquals(2, hydrated.sessionTurns)
+        assertEquals(listOf("first q", "follow up"), hydrated.interactions.map { it.command })
+        assertEquals(4, hydrated.transcript.size)
+        assertEquals("user", hydrated.transcript[0].role)
+        assertEquals("first q", hydrated.transcript[0].content)
+        assertEquals("assistant", hydrated.transcript[1].role)
+        assertEquals("done 1", hydrated.transcript[1].content)
+        assertEquals("s_new", hydrated.sessions.first().sessionId)
+    }
+
+    @Test
+    fun hydrateLatestSessionFallsBackWhenEmpty() {
+        val hydrated = hydrateLatestSession(emptyList(), "s_fallback")
+        assertEquals("s_fallback", hydrated.sessionId)
+        assertEquals(0, hydrated.sessionTurns)
+        assertTrue(hydrated.interactions.isEmpty())
+        assertTrue(hydrated.transcript.isEmpty())
+        assertTrue(hydrated.sessions.isEmpty())
     }
 }
