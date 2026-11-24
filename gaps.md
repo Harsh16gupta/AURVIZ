@@ -33,7 +33,7 @@ no agent loop) is superseded — every P0 item below shipped.
 - **Scheduler**: exact alarm → expedited unique Worker → headless loop on
   the 5-read-tool allowlist; re-arm on receiver, boot, timezone change;
   inexact fallback + battery/OEM guidance when permission is revoked.
-- **Providers**: DeepSeek default with Gemini/Meta fallbacks over the
+- **Providers**: DeepSeek default with Meta fallback over the
   shared OpenAI-compatible client (ADR-0004 re-amended, #46); in-app
   provider sheet (`selectedProvider`, `null` = Auto); visible
   "retried on Y" disclosure, never silent mid-run replay.

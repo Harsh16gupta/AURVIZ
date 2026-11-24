@@ -4,8 +4,6 @@
 # in TokenVault on-device).
 # sdk.dir=/Users/YOU/Library/Android/sdk
 LLM_DEFAULT_PROVIDER=deepseek
-GEMINI_API_KEY=
-GEMINI_MODEL=gemini-2.5-flash
 DEEPSEEK_API_KEY=
 # Note: DeepSeek requires a paid API key (no free tier for the API).
 DEEPSEEK_BASE_URL=https://api.deepseek.com

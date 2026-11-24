@@ -8,8 +8,6 @@ import org.json.JSONArray
 // All keys/models come from settings (local.properties via BuildConfig).
 // Blank key = that provider is skipped, never called.
 data class ProviderSettings(
-    val geminiKey: String = "",
-    val geminiModel: String = "gemini-2.5-flash",
     val deepseekKey: String = "",
     val deepseekModel: String = "deepseek-flash",
     val metaKey: String = "",
@@ -101,7 +99,6 @@ fun retryDisclosure(result: FallbackResult): String? =
 // blank and the messages fallback skips the provider — never a baked-in key.
 fun effectiveSettings(base: ProviderSettings, user: LlmKeys): ProviderSettings =
     base.copy(
-        geminiKey = user.geminiKey.ifBlank { base.geminiKey },
         deepseekKey = user.deepseekKey.ifBlank { base.deepseekKey },
         metaKey = user.metaKey.ifBlank { base.metaKey },
     )
@@ -110,8 +107,6 @@ fun effectiveSettings(base: ProviderSettings, user: LlmKeys): ProviderSettings =
 
 fun settingsFromBuildConfig(): ProviderSettings =
     ProviderSettings(
-        geminiKey = BuildConfig.GEMINI_API_KEY,
-        geminiModel = BuildConfig.GEMINI_MODEL,
         deepseekKey = BuildConfig.DEEPSEEK_API_KEY,
         deepseekModel = BuildConfig.DEEPSEEK_MODEL,
         metaKey = BuildConfig.META_API_KEY,
@@ -126,25 +121,26 @@ fun providerFromConfig(config: ProviderConfig): StructuredLlmProvider =
 // User keys from Settings (TokenVault) win over BuildConfig per provider.
 fun defaultCandidates(preferred: String, userKeys: LlmKeys = LlmKeys()): List<NamedProvider> {
     val settings = effectiveSettings(settingsFromBuildConfig(), userKeys)
-    val preferredName =
-        preferred.trim().lowercase().takeIf { it in setOf("gemini", "deepseek", "meta") } ?: "gemini"
-    val order = listOf(preferredName, "deepseek", "meta", "gemini").distinct()
+    val preferredName = normalizeProviderName(preferred)
+    val order = listOf(preferredName, "deepseek", "meta").distinct()
     return order.map { name ->
         val config = resolveProvider(name, settings)
         NamedProvider(config.name, config.apiKey, providerFromConfig(config))
     }
 }
 
-// Pick by name. Unknown names fall back to Gemini so the app never crashes.
-fun resolveProvider(name: String, settings: ProviderSettings): ProviderConfig =
+// Legacy "gemini" ids (stored prefs, stored Interactions) map to deepseek so
+// old installs keep a stable default instead of crashing.
+fun normalizeProviderName(name: String): String =
     when (name.trim().lowercase()) {
-        "deepseek" ->
-            ProviderConfig(
-                name = "deepseek",
-                baseUrl = Providers.DEEPSEEK_BASE_URL,
-                apiKey = settings.deepseekKey,
-                model = settings.deepseekModel,
-            )
+        "meta" -> "meta"
+        "deepseek" -> "deepseek"
+        else -> "deepseek"
+    }
+
+// Pick by name. Unknown names fall back to DeepSeek so the app never crashes.
+fun resolveProvider(name: String, settings: ProviderSettings): ProviderConfig =
+    when (normalizeProviderName(name)) {
         "meta" ->
             ProviderConfig(
                 name = "meta",
@@ -152,38 +148,30 @@ fun resolveProvider(name: String, settings: ProviderSettings): ProviderConfig =
                 apiKey = settings.metaKey,
                 model = settings.metaModel,
             )
-        "gemini" ->
-            ProviderConfig(
-                name = "gemini",
-                baseUrl = Providers.GEMINI_BASE_URL,
-                apiKey = settings.geminiKey,
-                model = settings.geminiModel,
-            )
         else ->
             ProviderConfig(
-                name = "gemini",
-                baseUrl = Providers.GEMINI_BASE_URL,
-                apiKey = settings.geminiKey,
-                model = settings.geminiModel,
+                name = "deepseek",
+                baseUrl = Providers.DEEPSEEK_BASE_URL,
+                apiKey = settings.deepseekKey,
+                model = settings.deepseekModel,
             )
     }
 
 // Ticket #90: first-run provider auto-select (pure, JVM-tested). The
 // preferred provider wins when its key is set; when it is blank, the
-// first configured provider in gemini/deepseek/meta order wins so a
+// first configured provider in deepseek/meta order wins so a
 // keyless preferred provider never causes a first-run HTTP 401 while
 // another provider is Set. When nothing is configured, the normalized
 // preferred name is returned so callers keep a stable default.
 fun firstConfiguredProvider(preferred: String, settings: ProviderSettings): String {
-    val want = preferred.trim().lowercase().takeIf { it in setOf("gemini", "deepseek", "meta") } ?: "gemini"
+    val want = normalizeProviderName(preferred)
     fun hasKey(name: String): Boolean =
         when (name) {
-            "deepseek" -> settings.deepseekKey
             "meta" -> settings.metaKey
-            else -> settings.geminiKey
+            else -> settings.deepseekKey
         }.isNotBlank()
     if (hasKey(want)) return want
-    for (name in listOf("gemini", "deepseek", "meta")) {
+    for (name in listOf("deepseek", "meta")) {
         if (hasKey(name)) return name
     }
     return want

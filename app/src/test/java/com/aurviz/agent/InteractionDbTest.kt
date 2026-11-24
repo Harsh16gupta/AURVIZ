@@ -151,14 +151,14 @@ class InteractionDbTest {
                 command = "check mail",
                 timestampMs = 1234L,
                 responseText = "done",
-                providerUsed = "gemini",
+                providerUsed = "deepseek",
                 failed = false,
             )
         val row = rec.toRow("s_1")
         assertEquals("s_1", row.sessionId)
         assertEquals("check mail", row.command)
         assertEquals("done", row.responseText)
-        assertEquals("gemini", row.provider)
+        assertEquals("deepseek", row.provider)
         assertEquals(1234L, row.timestampMs)
         assertFalse(row.failed)
         val back = row.copy(pid = 7).toRecord()
@@ -225,7 +225,7 @@ class InteractionDbTest {
             sessionId = sessionId,
             command = command,
             responseText = response,
-            provider = "gemini",
+            provider = "deepseek",
             timestampMs = timestampMs,
             failed = false,
         )
@@ -316,7 +316,7 @@ class InteractionDbTest {
                 recalledMemories = listOf("boss is Priya"),
                 steps = listOf(TimelineStep("Tool 1 of 1: send_email", StepState.DONE, toolName = "send_email", argsSummary = "to: a@b.c")),
                 responseText = "sent",
-                providerUsed = "gemini",
+                providerUsed = "deepseek",
                 confirmationTitle = "Send email to a@b.c",
                 confirmationStatus = ConfirmationStatus.Approved,
             )
@@ -325,7 +325,7 @@ class InteractionDbTest {
         assertTrue(md.contains("- **Plan:**"))
         assertTrue(md.contains("[DONE]"))
         assertTrue(md.contains("- **Confirmation (Approved):** Send email to a@b.c"))
-        assertTrue(md.contains("- **Agent Provider:** Gemini"))
+        assertTrue(md.contains("- **Agent Provider:** DeepSeek"))
         assertTrue(md.contains("sent"))
     }
 
@@ -347,7 +347,7 @@ class InteractionDbTest {
                 recalledMemories = listOf("boss is Priya"),
                 steps = listOf(TimelineStep("Tool 1 of 1: send_email", StepState.DONE, toolName = "send_email")),
                 responseText = "sent",
-                providerUsed = "gemini",
+                providerUsed = "deepseek",
                 confirmationTitle = "Send email to a@b.c",
                 confirmationStatus = ConfirmationStatus.Approved,
             )

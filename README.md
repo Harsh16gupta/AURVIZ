@@ -15,7 +15,7 @@ sends as in-app approvals. Room-only memory; no cloud memory provider.
   web preview, retry notice, settled Confirmation receipts), live
   ticking `ThinkingIndicator`, working Stop/Cancel, unified
   `ConfirmationCard` with inline editable email fields, AI provider
-  sheet (Auto/Default, deepseek, gemini, meta), suggestion cards,
+  sheet (Auto/Default, deepseek, meta), suggestion cards,
   1-tap Markdown `Session` transcript export/share.
 - **Browser** — Back/Forward/Reload, 2dp load progress, full-height
   WebView, inspector tray (Page · Text · Links) with Save to Memory.
@@ -70,8 +70,6 @@ sends as in-app approvals. Room-only memory; no cloud memory provider.
 
 ```properties
 LLM_DEFAULT_PROVIDER=deepseek
-GEMINI_API_KEY=
-GEMINI_MODEL=gemini-2.5-flash
 DEEPSEEK_API_KEY=
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-flash
@@ -83,7 +81,7 @@ GOOGLE_OAUTH_CLIENT_SECRET=
 ```
 
 Debug builds compile these keys into `BuildConfig`. **Release builds always
-compile with empty API-key fields** — release users paste Gemini/DeepSeek/Meta keys in
+compile with empty API-key fields** — release users paste DeepSeek/Meta keys in
 Settings, stored encrypted in `TokenVault` on-device (ticket 36).
 
 ## Build
@@ -91,8 +89,7 @@ Settings, stored encrypted in `TokenVault` on-device (ticket 36).
 - Debug: `./gradlew :app:assembleDebug`
 - Release (empty keys, verified ticket 37): `./gradlew :app:assembleRelease`
   → `app/build/outputs/apk/release/app-release-unsigned.apk` (~6.7 MB).
-  Release `BuildConfig` fields `GEMINI_API_KEY`,
-  `DEEPSEEK_API_KEY`, `META_API_KEY` are all `""`; OAuth IDs are `""` unless provided.
+  Release `BuildConfig` fields `DEEPSEEK_API_KEY`, `META_API_KEY` are all `""`; OAuth IDs are `""` unless provided.
 
 ## Test
 
@@ -115,8 +112,8 @@ Settings, stored encrypted in `TokenVault` on-device (ticket 36).
   boosts with an offline FTS fallback (`Memory.kt`). No embedding column,
   no cosine ranking, no embedding cache.
 - **DeepSeek + Meta wired** (ADR-0004 re-amended 2026-11-23, issue #46):
-  DeepSeek (`deepseek-flash`) is the default with Gemini/Meta
-  (`muse-spark-1.3`) fallbacks over the shared OpenAI-compatible client.
+  DeepSeek (`deepseek-flash`) is the default with Meta
+  (`muse-spark-1.3`) fallback over the shared OpenAI-compatible client.
   Keys live in `TokenVault` + Settings; the Command screen provider sheet
   switches the override at runtime (`null` = Auto/Default).
 - **No TTS replies** (P2, cut per gaps §5).

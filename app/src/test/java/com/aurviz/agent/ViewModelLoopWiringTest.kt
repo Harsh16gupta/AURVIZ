@@ -123,8 +123,8 @@ class ViewModelLoopWiringTest {
     fun providerFallbackStillReportedAfterLoop() {
         val flaky =
             NamedProvider(
-                "gemini",
-                "gemini-key",
+                "deepseek",
+                "deepseek-key",
                 object : StructuredLlmProvider {
                     override fun chatMessages(messages: List<ChatMessage>, tools: JSONArray): LlmResult =
                         throw LlmException(HttpFailure("rate_limited", 0, true), "HTTP 429")
@@ -132,8 +132,8 @@ class ViewModelLoopWiringTest {
             )
         val backup =
             NamedProvider(
-                "deepseek",
-                "deepseek-key",
+                "meta",
+                "meta-key",
                 ScriptedMessagesProvider(listOf(searchCall(), answer("done"))),
             )
         val chat = PinnedFallbackChatLlm(listOf(flaky, backup))
@@ -142,35 +142,35 @@ class ViewModelLoopWiringTest {
         assertTrue(result is AgentLoopResult.Answered)
         // The private-context prompt was replayed to both providers, so
         // both are reported — never a silent retry (ADR-0004).
-        assertEquals(listOf("gemini", "deepseek"), chat.tried)
-        assertEquals("deepseek", chat.lastProvider)
+        assertEquals(listOf("deepseek", "meta"), chat.tried)
+        assertEquals("meta", chat.lastProvider)
 
         val state = AgentUiState(providerUsed = chat.lastProvider, providersTried = chat.tried.toList())
-        assertEquals("deepseek", state.providerUsed)
-        assertEquals(listOf("gemini", "deepseek"), state.providersTried)
-        assertEquals("Retried on deepseek (tried gemini, deepseek)", state.retryLine())
+        assertEquals("meta", state.providerUsed)
+        assertEquals(listOf("deepseek", "meta"), state.providersTried)
+        assertEquals("Retried on meta (tried deepseek, meta)", state.retryLine())
     }
 
     @Test
     fun noDisclosureWhenSingleProviderAnswersLoop() {
-        val chat = PinnedFallbackChatLlm(listOf(NamedProvider("gemini", "k", ScriptedMessagesProvider(listOf(answer("hi"))))))
+        val chat = PinnedFallbackChatLlm(listOf(NamedProvider("deepseek", "k", ScriptedMessagesProvider(listOf(answer("hi"))))))
         val result = AgentLoop(chat, defaultToolRegistry(gmailApi = FakeGmail())).run("hi")
         assertTrue(result is AgentLoopResult.Answered)
-        assertEquals(listOf("gemini"), chat.tried)
+        assertEquals(listOf("deepseek"), chat.tried)
         assertNull(AgentUiState(providerUsed = chat.lastProvider, providersTried = chat.tried.toList()).retryLine())
     }
 
     @Test
     fun totalFailureStillDisclosesTriedProviders() {
-        val state = AgentUiState(providerUsed = null, providersTried = listOf("gemini", "deepseek"))
-        assertEquals("No provider answered (tried gemini, deepseek)", state.retryLine())
+        val state = AgentUiState(providerUsed = null, providersTried = listOf("deepseek", "meta"))
+        assertEquals("No provider answered (tried deepseek, meta)", state.retryLine())
     }
 
     @Test
     fun checkMailWorksEndToEndThroughLoop() {
         val chat =
             PinnedFallbackChatLlm(
-                listOf(NamedProvider("gemini", "k", ScriptedMessagesProvider(listOf(searchCall(), answer("Boss wrote about Q3"))))),
+                listOf(NamedProvider("deepseek", "k", ScriptedMessagesProvider(listOf(searchCall(), answer("Boss wrote about Q3"))))),
             )
         val registry = defaultToolRegistry(gmailApi = FakeGmail())
         var progress = LoopUiProgress()
@@ -192,8 +192,8 @@ class ViewModelLoopWiringTest {
         assertTrue(rows.any { it.title == "Tool 1 of 1: search_emails" && it.state == StepState.DONE })
         assertEquals(StepState.DONE, rows.last().state)
         assertEquals(progress.timeline(), rows)
-        assertEquals("gemini", chat.lastProvider)
-        assertEquals(listOf("gemini"), chat.tried)
+        assertEquals("deepseek", chat.lastProvider)
+        assertEquals(listOf("deepseek"), chat.tried)
     }
 
     // Ticket #106 (T1): "open "/"email " fast-path guards — single tokens

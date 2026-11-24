@@ -25,11 +25,11 @@ class LlmProviderTest {
             )
         val body =
             buildToolsRequestBody(
-                "gemini-2.5-flash",
+                "deepseek-flash",
                 "Check important emails",
                 tools,
             )
-        assertEquals("gemini-2.5-flash", body.getString("model"))
+        assertEquals("deepseek-flash", body.getString("model"))
         assertEquals("auto", body.getString("tool_choice"))
         assertEquals(
             "search_emails",
@@ -156,7 +156,7 @@ class LlmProviderTest {
             }
         planWithFallbackMessages(
             listOf(ChatMessage(role = "user", content = "hi")),
-            listOf(NamedProvider("gemini", "k", capturing)),
+            listOf(NamedProvider("deepseek", "k", capturing)),
             sleeper = {},
         )
         assertEquals(1, seen.size)

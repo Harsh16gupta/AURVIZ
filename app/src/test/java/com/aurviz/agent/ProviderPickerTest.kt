@@ -15,17 +15,24 @@ class ProviderPickerTest {
 
     private fun settings() =
         ProviderSettings(
-            geminiKey = "gemini-key",
-            geminiModel = "gemini-2.5-flash",
             deepseekKey = "deepseek-key",
             deepseekModel = "deepseek-flash",
+            metaKey = "meta-key",
+            metaModel = "muse-spark-1.3",
         )
 
     @Test
-    fun unknownNameFallsBackToGemini() {
+    fun unknownNameFallsBackToDeepSeek() {
         val config = resolveProvider("not-a-provider", settings())
-        assertEquals("gemini", config.name)
-        assertEquals("https://generativelanguage.googleapis.com/v1beta/openai", config.baseUrl)
+        assertEquals("deepseek", config.name)
+        assertEquals("https://api.deepseek.com", config.baseUrl)
+    }
+
+    @Test
+    fun legacyGeminiNameMapsToDeepSeek() {
+        val config = resolveProvider("gemini", settings())
+        assertEquals("deepseek", config.name)
+        assertEquals("https://api.deepseek.com", config.baseUrl)
     }
 
     @Test
@@ -55,52 +62,59 @@ class ProviderPickerTest {
     }
 
     @Test
-    fun defaultCandidatesOrdersShippedPairGeminiFirst() {
-        // ADR-0004 amended: DeepSeek + Meta are now wired alongside Gemini.
-        val candidates = defaultCandidates("gemini", LlmKeys(geminiKey = "g", deepseekKey = "d", metaKey = "m"))
-        assertEquals(listOf("gemini", "deepseek", "meta"), candidates.map { it.name })
+    fun defaultCandidatesOrdersShippedPairDeepSeekFirst() {
+        // ADR-0004 amended: DeepSeek default with Meta fallback.
+        val candidates = defaultCandidates("deepseek", LlmKeys(deepseekKey = "d", metaKey = "m"))
+        assertEquals(listOf("deepseek", "meta"), candidates.map { it.name })
     }
 
     @Test
     fun defaultCandidatesPutsPreferredShippedProviderFirst() {
-        val candidates = defaultCandidates("meta", LlmKeys(geminiKey = "g", deepseekKey = "d", metaKey = "m"))
-        assertEquals(listOf("meta", "deepseek", "gemini"), candidates.map { it.name })
+        val candidates = defaultCandidates("meta", LlmKeys(deepseekKey = "d", metaKey = "m"))
+        assertEquals(listOf("meta", "deepseek"), candidates.map { it.name })
+    }
+
+    @Test
+    fun legacyGeminiPreferredMapsToDeepSeekFirst() {
+        val names = defaultCandidates("gemini", LlmKeys(deepseekKey = "d", metaKey = "m")).map { it.name }
+        assertEquals(listOf("deepseek", "meta"), names)
     }
 
     @Test
     fun defaultCandidatesIncludesDeepSeekAndMeta() {
-        // ADR-0004 amended: DeepSeek and direct Meta are now wired providers.
-        for (preferred in listOf("gemini", "deepseek", "meta")) {
-            val names = defaultCandidates(preferred, LlmKeys(geminiKey = "g", deepseekKey = "d", metaKey = "m")).map { it.name }
+        // ADR-0004 amended: DeepSeek and direct Meta are the wired providers.
+        for (preferred in listOf("deepseek", "meta")) {
+            val names = defaultCandidates(preferred, LlmKeys(deepseekKey = "d", metaKey = "m")).map { it.name }
             assertTrue("preferred=$preferred -> $names", "deepseek" in names)
             assertTrue("preferred=$preferred -> $names", "meta" in names)
             assertEquals(preferred, names.first())
         }
-        val blankNames = defaultCandidates("  ", LlmKeys(geminiKey = "g", deepseekKey = "d", metaKey = "m")).map { it.name }
-        assertEquals("gemini", blankNames.first())
+        val blankNames = defaultCandidates("  ", LlmKeys(deepseekKey = "d", metaKey = "m")).map { it.name }
+        assertEquals("deepseek", blankNames.first())
     }
 
     @Test
     fun firstConfiguredPrefersSelectedWhenItsKeyIsSet() {
         val withMeta = settings().copy(metaKey = "meta-key")
         assertEquals("meta", firstConfiguredProvider("meta", withMeta))
-        assertEquals("gemini", firstConfiguredProvider("gemini", withMeta))
+        assertEquals("deepseek", firstConfiguredProvider("deepseek", withMeta))
     }
 
     @Test
     fun firstConfiguredFallsBackWhenPreferredKeyIsBlank() {
         // Keyless preferred provider must never win when another is Set.
-        val deepseekOnly = settings().copy(geminiKey = "  ", metaKey = "")
-        assertEquals("deepseek", firstConfiguredProvider("gemini", deepseekOnly))
+        val deepseekOnly = settings().copy(deepseekKey = "deepseek-key", metaKey = "")
+        assertEquals("deepseek", firstConfiguredProvider("deepseek", deepseekOnly))
         assertEquals("deepseek", firstConfiguredProvider("meta", deepseekOnly))
     }
 
     @Test
     fun firstConfiguredReturnsPreferredWhenNothingIsSet() {
         val none = ProviderSettings()
-        assertEquals("gemini", firstConfiguredProvider("gemini", none))
         assertEquals("deepseek", firstConfiguredProvider("deepseek", none))
-        assertEquals("gemini", firstConfiguredProvider("unknown", none))
+        assertEquals("meta", firstConfiguredProvider("meta", none))
+        assertEquals("deepseek", firstConfiguredProvider("unknown", none))
+        assertEquals("deepseek", firstConfiguredProvider("gemini", none))
     }
 
     private fun successOn(name: String): NamedProvider {
@@ -117,11 +131,11 @@ class ProviderPickerTest {
 
     @Test
     fun rateLimitRetriesNextAndSurfacesWhichRan() {
-        val first = failOn("gemini", HttpFailure("rate_limited", 0, true))
-        val second = successOn("deepseek")
+        val first = failOn("deepseek", HttpFailure("rate_limited", 0, true))
+        val second = successOn("meta")
         val outcome = planWithFallbackMessages(userTurn("check mail"), listOf(first, second), sleeper = {})
-        assertEquals("deepseek", outcome.providerName)
-        assertEquals(listOf("gemini", "deepseek"), outcome.tried)
+        assertEquals("meta", outcome.providerName)
+        assertEquals(listOf("deepseek", "meta"), outcome.tried)
         assertEquals("search_emails", outcome.result.toolCalls[0].name)
     }
 
@@ -144,7 +158,7 @@ class ProviderPickerTest {
     @Test
     fun authErrorStopsWithoutRetrying() {
         val badKey = failOn("deepseek", HttpFailure("auth", null, false))
-        val next = successOn("gemini")
+        val next = successOn("meta")
         val slept = mutableListOf<Long>()
         var stopped = false
         try {
@@ -162,7 +176,7 @@ class ProviderPickerTest {
     fun allSkippedThrowsClearError() {
         val none =
             NamedProvider(
-                "gemini",
+                "deepseek",
                 "  ",
                 object : StructuredLlmProvider {
                     override fun chatMessages(messages: List<ChatMessage>, tools: JSONArray): LlmResult =
@@ -174,15 +188,15 @@ class ProviderPickerTest {
 
     @Test
     fun retryDisclosureNamesRetriedProvider() {
-        val first = failOn("gemini", HttpFailure("rate_limited", 0, true))
-        val second = successOn("deepseek")
+        val first = failOn("deepseek", HttpFailure("rate_limited", 0, true))
+        val second = successOn("meta")
         val outcome = planWithFallbackMessages(userTurn("check mail"), listOf(first, second), sleeper = {})
-        assertEquals("Retried on deepseek (tried gemini, deepseek)", retryDisclosure(outcome))
+        assertEquals("Retried on meta (tried deepseek, meta)", retryDisclosure(outcome))
     }
 
     @Test
     fun noDisclosureWhenFirstProviderSucceeds() {
-        val outcome = planWithFallbackMessages(userTurn("check mail"), listOf(successOn("gemini")))
+        val outcome = planWithFallbackMessages(userTurn("check mail"), listOf(successOn("deepseek")))
         assertNull(retryDisclosure(outcome))
     }
 
@@ -194,38 +208,38 @@ class ProviderPickerTest {
         val seenMessages = mutableMapOf<String, List<ChatMessage>>()
         val flaky =
             NamedProvider(
-                "gemini",
-                "gemini-key",
+                "deepseek",
+                "deepseek-key",
                 object : StructuredLlmProvider {
                     override fun chatMessages(messages: List<ChatMessage>, tools: JSONArray): LlmResult {
-                        seenMessages["gemini"] = messages.toList()
+                        seenMessages["deepseek"] = messages.toList()
                         throw LlmException(HttpFailure("rate_limited", 0, true), "HTTP 429")
                     }
                 },
             )
         val backup =
             NamedProvider(
-                "deepseek",
-                "deepseek-key",
+                "meta",
+                "meta-key",
                 object : StructuredLlmProvider {
                     override fun chatMessages(messages: List<ChatMessage>, tools: JSONArray): LlmResult {
-                        seenMessages["deepseek"] = messages.toList()
+                        seenMessages["meta"] = messages.toList()
                         return LlmResult(emptyList(), "done")
                     }
                 },
             )
         val prompt = "Known: take nightly meds. Summarize inbox"
         val outcome = planWithFallbackMessages(userTurn(prompt), listOf(flaky, backup), sleeper = {})
-        val geminiUser = seenMessages["gemini"]!!.single { it.role == "user" }.content
         val deepseekUser = seenMessages["deepseek"]!!.single { it.role == "user" }.content
-        assertEquals(prompt, geminiUser)
+        val metaUser = seenMessages["meta"]!!.single { it.role == "user" }.content
         assertEquals(prompt, deepseekUser)
-        assertEquals(listOf("gemini", "deepseek"), outcome.tried)
+        assertEquals(prompt, metaUser)
+        assertEquals(listOf("deepseek", "meta"), outcome.tried)
         val state = AgentUiState(providerUsed = outcome.providerName, providersTried = outcome.tried)
         val disclosure = retryDisclosure(outcome)
-        assertEquals("Retried on deepseek (tried gemini, deepseek)", disclosure)
+        assertEquals("Retried on meta (tried deepseek, meta)", disclosure)
         assertEquals(outcome.tried, state.providersTried)
-        assertEquals("deepseek", state.providerUsed)
+        assertEquals("meta", state.providerUsed)
     }
 
     @Test
@@ -251,34 +265,34 @@ class ProviderPickerTest {
 
     @Test
     fun fallbackSleepsHonouringRetryAfterBeforeNextProvider() {
-        val first = failOn("gemini", HttpFailure("rate_limited", 5, true))
-        val second = successOn("deepseek")
+        val first = failOn("deepseek", HttpFailure("rate_limited", 5, true))
+        val second = successOn("meta")
         val slept = mutableListOf<Long>()
         val outcome = planWithFallbackMessages(userTurn("check mail"), listOf(first, second), sleeper = { slept += it })
-        assertEquals("deepseek", outcome.providerName)
+        assertEquals("meta", outcome.providerName)
         assertEquals(listOf(5_000L), slept)
     }
 
     @Test
     fun consecutiveRateLimitsBackOffExponentially() {
-        val first = failOn("gemini", HttpFailure("rate_limited", 0, true))
-        val second = failOn("deepseek", HttpFailure("rate_limited", null, true))
-        val third = successOn("gemini")
+        val first = failOn("deepseek", HttpFailure("rate_limited", 0, true))
+        val second = failOn("meta", HttpFailure("rate_limited", null, true))
+        val third = successOn("deepseek")
         val slept = mutableListOf<Long>()
         val outcome = planWithFallbackMessages(userTurn("check mail"), listOf(first, second, third), sleeper = { slept += it })
-        assertEquals("gemini", outcome.providerName)
+        assertEquals("deepseek", outcome.providerName)
         assertEquals(listOf(1_000L, 2_000L), slept)
     }
 
     @Test
     fun noSleepWhenNothingLeftToTry() {
-        val only = failOn("gemini", HttpFailure("rate_limited", 5, true))
+        val only = failOn("deepseek", HttpFailure("rate_limited", 5, true))
         val slept = mutableListOf<Long>()
         try {
             planWithFallbackMessages(userTurn("check mail"), listOf(only), sleeper = { slept += it })
             throw AssertionError("expected the rate limit to propagate")
         } catch (e: FallbackExhausted) {
-            assertEquals(listOf("gemini"), e.tried)
+            assertEquals(listOf("deepseek"), e.tried)
             assertEquals("rate_limited", (e.cause as LlmException).failure.kind)
         }
         assertTrue(slept.isEmpty())

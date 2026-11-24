@@ -71,6 +71,7 @@ import com.aurviz.agent.findScheduleByRawId
 import com.aurviz.agent.formatSchedulePreview
 import com.aurviz.agent.formatUnschedulePreview
 import com.aurviz.agent.firstConfiguredProvider
+import com.aurviz.agent.normalizeProviderName
 import com.aurviz.agent.forgetPreview
 import com.aurviz.agent.knownAddressesFromInbox
 import com.aurviz.agent.listSchedules
@@ -230,7 +231,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         val storedOnboarding = UiPrefs.onboardingCompleted(appCtx)
         val llmKeys = try { tokenVault.loadLlmKeys() } catch (_: Exception) { null }
         val hasKeys = llmKeys != null &&
-            (llmKeys.geminiKey.isNotBlank() || llmKeys.deepseekKey.isNotBlank() || llmKeys.metaKey.isNotBlank())
+            (llmKeys.deepseekKey.isNotBlank() || llmKeys.metaKey.isNotBlank())
         val autoOnboarded = storedOnboarding || tokens.isConnected() || hasKeys
         // Default the active provider to the first configured key so a fresh
         // launch never pins to an unconfigured BuildConfig default (HTTP 401).
@@ -311,7 +312,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
             val keys = tokenVault.loadLlmKeys()
             firstConfiguredProvider(preferred, effectiveSettings(settingsFromBuildConfig(), keys))
         } catch (_: Exception) {
-            preferred.trim().lowercase().takeIf { it in setOf("gemini", "deepseek", "meta") } ?: "gemini"
+            normalizeProviderName(preferred)
         }
     }
 
@@ -437,8 +438,8 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         recalled: List<String> = state.value.activeRecalledMemories,
         responseText: String = state.value.statusLine,
         steps: List<TimelineStep> = state.value.timeline,
-        emails: List<EmailSummary> = state.value.emails,
-        webPage: WebPage? = state.value.webPage,
+        emails: List<EmailSummary> = emptyList(),
+        webPage: WebPage? = null,
         failed: Boolean = false,
         confirmTitle: String? = pendingConfirmTitle,
         confirmDetail: String? = pendingConfirmDetail,
@@ -986,10 +987,9 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
 
     // --- AI keys (ticket 36): user-entered, vault-persisted, never in UI state ---
 
-    fun saveLlmKeys(geminiKey: String, deepseekKey: String, metaKey: String) {
+    fun saveLlmKeys(deepseekKey: String, metaKey: String) {
         tokenVault.saveLlmKeys(
             LlmKeys(
-                geminiKey = geminiKey.trim(),
                 deepseekKey = deepseekKey.trim(),
                 metaKey = metaKey.trim(),
             ),
@@ -1004,15 +1004,14 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
 
     // Ticket #90: per-provider key edits from the single key-editor sheet.
     // Merges into the stored set so saving one provider never blanks the
-    // other two (saveLlmKeys overwrites all three at once).
+    // other (saveLlmKeys overwrites both at once).
     fun saveSingleLlmKey(provider: String, key: String) {
         val current = tokenVault.loadLlmKeys()
         val trimmed = key.trim()
         tokenVault.saveLlmKeys(
-            when (provider.trim().lowercase()) {
-                "deepseek" -> current.copy(deepseekKey = trimmed)
+            when (normalizeProviderName(provider)) {
                 "meta" -> current.copy(metaKey = trimmed)
-                else -> current.copy(geminiKey = trimmed)
+                else -> current.copy(deepseekKey = trimmed)
             },
         )
         refreshLlmKeyFlags()
@@ -1046,7 +1045,6 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         val keys = tokenVault.loadLlmKeys()
         _state.update {
             it.copy(
-                geminiKeySet = keys.geminiKey.isNotBlank(),
                 deepseekKeySet = keys.deepseekKey.isNotBlank(),
                 metaKeySet = keys.metaKey.isNotBlank(),
             )
@@ -1112,7 +1110,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                         perf = it.perf.recordRun(toolMs = ms),
                     )
                 }
-                recordCompleted(responseText = page.title.ifBlank { finalUrl })
+                recordCompleted(responseText = page.title.ifBlank { finalUrl }, webPage = page)
             } catch (e: WebException) {
                 _state.update {
                     it.copy(
@@ -1492,7 +1490,6 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
             val provider = effectiveProvider()
             val report = buildAgentDiagnostics(
                 effectiveProvider = provider,
-                geminiKeySet = snapshot.geminiKeySet,
                 deepseekKeySet = snapshot.deepseekKeySet,
                 metaKeySet = snapshot.metaKeySet,
                 gmailConnected = tokens.isConnected(),
@@ -1619,6 +1616,8 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                 pendingApprovalProposalId = null,
                 pendingApprovalUnseen = emptyList(),
                 agentRunning = true,
+                webPage = null,
+                emails = emptyList(),
             )
         }
         var runJob: Job? = null
@@ -1771,7 +1770,12 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                                 sessionTurns = synchronized(sessionTranscript) { sessionTranscript.size / 2 },
                             )
                         }
-                        recordCompleted(responseText = result.answer)
+                        recordCompleted(
+                            responseText = result.answer,
+                            steps = result.toTimeline(),
+                            emails = state.value.emails,
+                            webPage = state.value.webPage,
+                        )
                     }
                     is AgentLoopResult.Failed -> {
                         synchronized(sessionTranscript) { appendSessionTurn(sessionTranscript, cmd, result) }
@@ -1789,7 +1793,13 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                                 sessionTurns = synchronized(sessionTranscript) { sessionTranscript.size / 2 },
                             )
                         }
-                        recordCompleted(responseText = "Failed: ${result.error}", failed = true)
+                        recordCompleted(
+                            responseText = "Failed: ${result.error}",
+                            failed = true,
+                            steps = result.toTimeline(),
+                            emails = state.value.emails,
+                            webPage = state.value.webPage,
+                        )
                     }
                 }
             } catch (e: CancellationException) {
@@ -1806,7 +1816,13 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                         pendingApprovalUnseen = emptyList(),
                     )
                 }
-                recordCompleted(responseText = "Failed: ${e.message}", failed = true)
+                recordCompleted(
+                    responseText = "Failed: ${e.message}",
+                    failed = true,
+                    steps = progress.timeline(),
+                    emails = state.value.emails,
+                    webPage = state.value.webPage,
+                )
             } finally {
                 approvalGate.finishRun(runId)
                 if (currentRunId == runId) currentRunId = null

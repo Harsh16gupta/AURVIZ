@@ -92,8 +92,7 @@ no cosine, no cache.
 
 ## 4. LLM providers and fallback (ADR-0004, re-amended #46)
 
-DeepSeek (`deepseek-flash`) default with Gemini Flash
-and Meta (`muse-spark-1.3`) fallbacks over one
+DeepSeek (`deepseek-flash`) default with Meta (`muse-spark-1.3`) fallback over one
 OpenAI-shape OkHttp client (connect 15 s, read 60 s, backoff honouring
 `retry-after`). Fallback triggers on 429/5xx (never 401), never silently
 mid-conversation with private context — the UI shows "retried on Y" from

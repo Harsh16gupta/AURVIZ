@@ -30,13 +30,13 @@ class ProviderPinningTest {
     fun foregroundPinsAfterFirstAnswerAndNeverReplaysPrivateTranscript() {
         val first = Scripted(listOf(ok("turn1"), ok("turn2")))
         val second = Scripted(listOf(ok("should-never-run")))
-        val chat = PinnedFallbackChatLlm(listOf(NamedProvider("gemini", "k", first), NamedProvider("deepseek", "k", second)))
+        val chat = PinnedFallbackChatLlm(listOf(NamedProvider("deepseek", "k", first), NamedProvider("meta", "k", second)))
         val m1 = listOf(ChatMessage("system", "sys [memories] private [/memories]"), ChatMessage("user", "hi"))
         val m2 = m1 + ChatMessage("tool", "private mail body", toolCallId = "c1")
         chat.chat(m1)
         chat.chat(m2)
-        assertEquals(listOf("gemini"), chat.tried)
-        assertEquals("gemini", chat.lastProvider)
+        assertEquals(listOf("deepseek"), chat.tried)
+        assertEquals("deepseek", chat.lastProvider)
         assertEquals(2, first.calls)
         assertEquals(0, second.calls)
         // The private second turn went only to the pinned provider.
@@ -46,12 +46,12 @@ class ProviderPinningTest {
     @Test
     fun foregroundFailureStillDisclosesWhoSawIt() {
         val bad = Scripted(listOf(LlmException(HttpFailure("error", null, true), "HTTP 500")))
-        val chat = PinnedFallbackChatLlm(listOf(NamedProvider("gemini", "k", bad)))
+        val chat = PinnedFallbackChatLlm(listOf(NamedProvider("deepseek", "k", bad)))
         try {
             chat.chat(listOf(ChatMessage("user", "hi")))
             throw AssertionError("expected failure")
         } catch (e: LlmException) {
-            assertEquals(listOf("gemini"), chat.tried)
+            assertEquals(listOf("deepseek"), chat.tried)
         }
     }
 
@@ -73,36 +73,36 @@ class ProviderPinningTest {
         val flaky = failingThenOk(HttpFailure("rate_limited", 0, true), "done")
         val chat = PinnedFallbackChatLlm(
             listOf(
-                NamedProvider("gemini", "k", flaky),
-                NamedProvider("deepseek", "k", Scripted(listOf(ok("done")))),
+                NamedProvider("deepseek", "k", flaky),
+                NamedProvider("meta", "k", Scripted(listOf(ok("done")))),
             ),
         )
-        // First turn retries gemini->deepseek and pins deepseek; loop then answers.
+        // First turn retries deepseek->meta and pins meta; loop then answers.
         val first = chat.chat(listOf(ChatMessage("system", "sys"), ChatMessage("user", "hi")))
         assertEquals("done", first.content)
-        assertEquals(listOf("gemini", "deepseek"), chat.tried)
+        assertEquals(listOf("deepseek", "meta"), chat.tried)
         val summary = scheduledSummary("done", null, 0, chat.tried.toList(), chat.lastProvider)
-        assertTrue(summary.contains("retried on deepseek"))
-        assertTrue(summary.contains("gemini, deepseek"))
+        assertTrue(summary.contains("retried on meta"))
+        assertTrue(summary.contains("deepseek, meta"))
     }
 
     @Test
     fun scheduledFailureStillDisclosesTried() {
         val bad = Scripted(listOf(LlmException(HttpFailure("error", null, true), "HTTP 500")))
-        val chat = PinnedFallbackChatLlm(listOf(NamedProvider("gemini", "k", bad)))
+        val chat = PinnedFallbackChatLlm(listOf(NamedProvider("deepseek", "k", bad)))
         val schedule = Schedule("sched_1", "check mail", 9, 0, null)
         val outcome = runScheduledRoutine(
             schedule, 1L, chat, ToolRegistry(), InMemoryScheduleRunStore(), InMemoryPendingApprovalStore(),
         )
         assertTrue(outcome is ScheduledRunOutcome.Ran)
         outcome as ScheduledRunOutcome.Ran
-        assertEquals(listOf("gemini"), outcome.providersTried)
+        assertEquals(listOf("deepseek"), outcome.providersTried)
     }
 
     @Test
     fun scheduledFailureSummaryNamesTriedProviders() {
-        val summary = scheduledSummary("Routine failed: HTTP 500", "HTTP 500", 0, listOf("gemini", "deepseek"), null)
-        assertTrue(summary.contains("gemini, deepseek"))
+        val summary = scheduledSummary("Routine failed: HTTP 500", "HTTP 500", 0, listOf("deepseek", "meta"), null)
+        assertTrue(summary.contains("deepseek, meta"))
         assertTrue(summary.contains("no provider answered"))
     }
 }

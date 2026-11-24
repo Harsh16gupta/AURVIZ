@@ -160,7 +160,7 @@ fun OnboardingScreen(
                 when (step) {
                     0 -> "Get started"
                     1 ->
-                        if (state.geminiKeySet || state.deepseekKeySet ||
+                        if (state.deepseekKeySet ||
                             state.metaKeySet || state.gmailConnected
                         ) {
                             "Continue"
@@ -277,7 +277,7 @@ private fun OnboardingConnect(
     onSaveSingleLlmKey: (String, String) -> Unit,
 ) {
     var pasted by remember { mutableStateOf("") }
-    var provider by remember { mutableStateOf("gemini") }
+    var provider by remember { mutableStateOf("deepseek") }
     var keyDraft by remember { mutableStateOf("") }
 
     Spacer(Modifier.height(16.dp))
@@ -399,9 +399,8 @@ private fun OnboardingConnect(
             )
             val set =
                 when (provider) {
-                    "deepseek" -> state.deepseekKeySet
                     "meta" -> state.metaKeySet
-                    else -> state.geminiKeySet
+                    else -> state.deepseekKeySet
                 }
             Text(
                 if (set) "Set" else "Not set",
@@ -411,7 +410,7 @@ private fun OnboardingConnect(
         }
         Spacer(Modifier.height(10.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            for ((label, id) in listOf("Gemini" to "gemini", "DeepSeek" to "deepseek", "Meta" to "meta")) {
+            for ((label, id) in listOf("DeepSeek" to "deepseek", "Meta" to "meta")) {
                 val active = provider == id
                 Box(
                     Modifier.weight(1f)

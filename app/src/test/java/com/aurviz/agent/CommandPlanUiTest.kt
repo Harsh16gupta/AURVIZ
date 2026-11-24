@@ -24,9 +24,9 @@ class CommandPlanUiTest {
 
     @Test
     fun providersMapToHumanNames() {
-        assertEquals("Gemini", providerDisplayName("gemini"))
         assertEquals("DeepSeek", providerDisplayName("deepseek"))
         assertEquals("Meta", providerDisplayName("meta"))
+        assertEquals("DeepSeek", providerDisplayName("gemini"))
     }
 
     @Test
@@ -201,9 +201,8 @@ class CommandPlanUiTest {
     @Test
     fun diagnosticsReportHasFiveCanonicalRows() {
         val report = com.aurviz.agent.ui.buildAgentDiagnostics(
-            effectiveProvider = "gemini",
-            geminiKeySet = true,
-            deepseekKeySet = false,
+            effectiveProvider = "deepseek",
+            deepseekKeySet = true,
             metaKeySet = false,
             gmailConnected = true,
             gmailAccount = "me@example.com",
@@ -216,7 +215,7 @@ class CommandPlanUiTest {
         )
         assertEquals(5, report.items.size)
         assertEquals(5, report.passedCount)
-        assertEquals("AI Provider (Gemini)", report.items[0].label)
+        assertEquals("AI Provider (DeepSeek)", report.items[0].label)
         assertEquals("Ready", report.items[0].status)
         assertEquals("Gmail OAuth", report.items[1].label)
         assertEquals("Connected · Verified", report.items[1].status)
@@ -232,10 +231,9 @@ class CommandPlanUiTest {
     @Test
     fun diagnosticsFlagsMissingKeysAndExpiredGmail() {
         val report = com.aurviz.agent.ui.buildAgentDiagnostics(
-            effectiveProvider = "gemini",
-            geminiKeySet = false,
-            deepseekKeySet = true,
-            metaKeySet = false,
+            effectiveProvider = "deepseek",
+            deepseekKeySet = false,
+            metaKeySet = true,
             gmailConnected = true,
             gmailAccount = "me@example.com",
             gmailReachable = false,
@@ -260,7 +258,6 @@ class CommandPlanUiTest {
     fun diagnosticsWithNoKeysIsUnhealthyButStorageStaysHealthy() {
         val report = com.aurviz.agent.ui.buildAgentDiagnostics(
             effectiveProvider = "deepseek",
-            geminiKeySet = false,
             deepseekKeySet = false,
             metaKeySet = false,
             gmailConnected = false,

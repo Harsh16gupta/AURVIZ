@@ -24,6 +24,7 @@ import com.aurviz.agent.BuildConfig
 import com.aurviz.agent.OEM_AUTOSTART_GUIDANCE
 import com.aurviz.agent.ProviderSettings
 import com.aurviz.agent.firstConfiguredProvider
+import com.aurviz.agent.normalizeProviderName
 import com.aurviz.agent.providerDisplayName
 import com.aurviz.agent.toolLabel
 import com.aurviz.agent.ui.AgentUiState
@@ -122,31 +123,26 @@ fun SettingsScreen(
     // Ticket #90: the visible Default mirrors the auto-select seam — the
     // preferred provider while its key is Set, else the first Set provider.
     // Flags only (never key values) decide the badge.
-    val preferredName =
-        (state.selectedProvider ?: BuildConfig.LLM_DEFAULT_PROVIDER).trim().lowercase()
-            .takeIf { it in setOf("gemini", "deepseek", "meta") } ?: "gemini"
+    val preferredName = normalizeProviderName(state.selectedProvider ?: BuildConfig.LLM_DEFAULT_PROVIDER)
     val defaultName =
         firstConfiguredProvider(
             preferredName,
             ProviderSettings(
-                geminiKey = if (state.geminiKeySet) "set" else "",
                 deepseekKey = if (state.deepseekKeySet) "set" else "",
                 metaKey = if (state.metaKeySet) "set" else "",
             ),
         )
 
     fun isSet(name: String): Boolean =
-        when (name) {
-            "deepseek" -> state.deepseekKeySet
+        when (normalizeProviderName(name)) {
             "meta" -> state.metaKeySet
-            else -> state.geminiKeySet
+            else -> state.deepseekKeySet
         }
 
     fun providerLabel(name: String): String =
-        when (name) {
-            "deepseek" -> "DeepSeek"
+        when (normalizeProviderName(name)) {
             "meta" -> "Meta"
-            else -> "Gemini"
+            else -> "DeepSeek"
         }
 
     Page(title = "Settings", modifier = modifier, onBack = onBack) {
@@ -195,7 +191,7 @@ fun SettingsScreen(
             // glossary-safe Past Interactions wording (GLOSSARY Interaction).
             OptionRow(
                 title = "Clear Past Interactions",
-                description = "Removes Past Interactions from this phone. Cannot be undone.",
+                description = "Removes Past Interactions from this phone.",
                 onClick = onClearInteractions,
                 destructive = true,
             )
@@ -211,8 +207,7 @@ fun SettingsScreen(
             if (state.gmailConnected) {
                 OptionRow(
                     title = "Gmail",
-                    description = "Signed in as ${state.gmailAccount ?: "connected"} · " +
-                        "Scopes: gmail.readonly · gmail.send.",
+                    description = "Signed in as ${state.gmailAccount ?: "connected"}",
                     icon = Icons.EnvelopeSimple,
                 )
                 CardDivider()
@@ -229,17 +224,17 @@ fun SettingsScreen(
                     icon = Icons.EnvelopeSimple,
                     navigates = true,
                 )
+                CardDivider()
+                OptionRow(
+                    title = if (state.pasteFallbackVisible) "Hide pasted-link fallback" else "Paste callback link instead",
+                    onClick = {
+                        if (state.pasteFallbackVisible) onDismissPasteFallback() else onConnectGmail()
+                    },
+                    description = "Use when the browser never returns to AIRA.",
+                    navigates = true,
+                )
             }
-            CardDivider()
-            OptionRow(
-                title = if (state.pasteFallbackVisible) "Hide pasted-link fallback" else "Paste callback link instead",
-                onClick = {
-                    if (state.pasteFallbackVisible) onDismissPasteFallback() else onConnectGmail()
-                },
-                description = "Use when the browser never returns to AIRA.",
-                navigates = true,
-            )
-            if (state.pasteFallbackVisible) {
+            if (!state.gmailConnected && state.pasteFallbackVisible) {
                 CardDivider()
                 Column(
                     Modifier.fillMaxWidth().padding(16.dp),
@@ -276,7 +271,7 @@ fun SettingsScreen(
                 }
             }
             CardDivider()
-            listOf("gemini", "deepseek", "meta").forEachIndexed { index, name ->
+            listOf("deepseek", "meta").forEachIndexed { index, name ->
                 if (index > 0) CardDivider()
                 val set = isSet(name)
                 OptionRow(
@@ -297,24 +292,34 @@ fun SettingsScreen(
         }
         Section("Performance Telemetry") {
             val perf = state.perf
-            val maxScaleMs = maxOf(
-                perf.planMs ?: 0L,
-                perf.toolMs ?: 0L,
-                perf.recallMs ?: 0L,
-                perf.planAvgMs ?: 0L,
-                perf.toolAvgMs ?: 0L,
-                perf.recallAvgMs ?: 0L,
-                1000L,
-            ).toFloat()
-            TelemetryBar("Plan", perf.planMs, perf.planAvgMs, maxScaleMs)
-            CardDivider()
-            TelemetryBar("Tool", perf.toolMs, perf.toolAvgMs, maxScaleMs)
-            CardDivider()
-            TelemetryBar("Recall", perf.recallMs, perf.recallAvgMs, maxScaleMs)
-            CardDivider()
+            val hasSamples = perf.planMs != null || perf.toolMs != null || perf.recallMs != null || perf.runs > 0
+            if (!hasSamples) {
+                Text(
+                    "No runs yet — timings appear after the first Task Execution.",
+                    color = Theme.colors.onBackgroundMuted,
+                    style = Theme.typography.caption,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+                )
+            } else {
+                val maxScaleMs = maxOf(
+                    perf.planMs ?: 0L,
+                    perf.toolMs ?: 0L,
+                    perf.recallMs ?: 0L,
+                    perf.planAvgMs ?: 0L,
+                    perf.toolAvgMs ?: 0L,
+                    perf.recallAvgMs ?: 0L,
+                    1000L,
+                ).toFloat()
+                TelemetryBar("Plan", perf.planMs, perf.planAvgMs, maxScaleMs)
+                CardDivider()
+                TelemetryBar("Tool", perf.toolMs, perf.toolAvgMs, maxScaleMs)
+                CardDivider()
+                TelemetryBar("Recall", perf.recallMs, perf.recallAvgMs, maxScaleMs)
+                CardDivider()
+            }
             OptionRow(
                 title = "Provider",
-                description = "${state.interactions.size} Interactions recorded · " +
+                description = "${state.interactions.size} Interactions · " +
                     "${(perf.successRate * 100).toInt()}% success over ${perf.runs} runs.",
                 value = providerDisplayName(
                     state.selectedProvider ?: state.providerUsed ?: BuildConfig.LLM_DEFAULT_PROVIDER,
@@ -372,7 +377,7 @@ fun SettingsScreen(
             CardDivider()
             OptionRow(
                 title = "Forget Memory",
-                description = "Deletions preview before anything is removed.",
+                description = "Preview before anything is removed.",
                 value = "Preview & Confirm",
             )
             CardDivider()
@@ -388,7 +393,7 @@ fun SettingsScreen(
             // blocks bulk and forwarded mail for listed addresses.
             OptionRow(
                 title = "Always-allowed recipients",
-                description = "Sends to one listed address skip the card. Policy still applies.",
+                description = "One address can skip the send card.",
                 value = if (state.allowAlways.isEmpty()) "None" else "${state.allowAlways.size} set",
             )
             state.allowAlways.sorted().forEach { address ->
@@ -492,7 +497,7 @@ fun SettingsScreen(
         }
     }
 
-    // Ticket #90: one reusable masked key-editor sheet for all three
+    // Ticket #90: one reusable masked key-editor sheet for both
     // providers. Saved keys are never shown — only Set / Not set.
     val editing = keyEditor
     ModalBottomSheet(
@@ -564,12 +569,11 @@ fun SettingsScreen(
         onDismiss = { showProviderSheet = false },
         title = "AI Provider",
     ) {
-        listOf(null to "Auto", "gemini" to "Gemini", "deepseek" to "DeepSeek", "meta" to "Meta").forEach { (choice, label) ->
+        listOf(null to "Auto", "deepseek" to "DeepSeek", "meta" to "Meta").forEach { (choice, label) ->
             val keySet = when (choice) {
-                "gemini" -> state.geminiKeySet
                 "deepseek" -> state.deepseekKeySet
                 "meta" -> state.metaKeySet
-                else -> state.geminiKeySet || state.deepseekKeySet || state.metaKeySet
+                else -> state.deepseekKeySet || state.metaKeySet
             }
             OptionRow(
                 title = if (choice == null) "Auto (recommended)" else label,

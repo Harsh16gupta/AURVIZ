@@ -5,11 +5,11 @@
 - Debug builds may read LLM keys from `local.properties` (git-ignored, see
   `local.properties.sample`). Never commit real keys.
 - Release builds compile with **empty** API-key `BuildConfig` fields. Release
-  users enter Gemini/DeepSeek/Meta keys in Settings; they are persisted in `TokenVault`
+  users enter DeepSeek/Meta keys in Settings; they are persisted in `TokenVault`
   and override `BuildConfig` per provider at call time.
 - OAuth client ID/secret stay in `BuildConfig` from `local.properties`.
-- Verified ticket 37: release `BuildConfig` shows `GEMINI_API_KEY`,
-  `DEEPSEEK_API_KEY`, `META_API_KEY` all `""`; `assembleRelease` succeeds
+- Verified ticket 37: release `BuildConfig` shows `DEEPSEEK_API_KEY`,
+  `META_API_KEY` all `""`; `assembleRelease` succeeds
   (`app-release-unsigned.apk`, ~6.7 MB). No keystores are tracked.
 
 ## Encrypted storage (TokenVault)
@@ -67,6 +67,6 @@ acceptance gate.
 - `git grep` for live-key patterns (`AIzaSy…`, `sk-ant-…`, `gsk_…`) across
   tracked files: **no hits**.
 - `local.properties` is git-ignored and untracked; no `*.jks`/`*.keystore`/
-  `*.p12` tracked. The only key-like hits are the `GEMINI_API_KEY` variable
-  name in docs and a `"TEST_KEY"` placeholder in `spike/test_t1_llm_provider.py` —
+  `*.p12` tracked. The only key-like hits are the `DEEPSEEK_API_KEY`/`META_API_KEY` variable
+  names in docs and a `"TEST_KEY"` placeholder in `spike/test_t1_llm_provider.py` —
   not real credentials.

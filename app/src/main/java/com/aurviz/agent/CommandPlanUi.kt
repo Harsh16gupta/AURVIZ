@@ -8,10 +8,11 @@ package com.aurviz.agent
 
 // Human provider names for the Command header ModelPill and the provider
 // sheet. Null (system default) and unknown ids never leak raw text.
+// Legacy "gemini" ids stored before Gemini removal map to DeepSeek.
 fun providerDisplayName(providerId: String?): String =
     when (providerId?.lowercase()) {
         null -> "Auto"
-        "gemini" -> "Gemini"
+        "gemini" -> "DeepSeek"
         "deepseek" -> "DeepSeek"
         "meta" -> "Meta"
         else -> toolLabel(providerId)

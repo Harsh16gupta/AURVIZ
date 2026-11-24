@@ -345,7 +345,6 @@ data class AgentDiagnosticsReport(
 
 fun buildAgentDiagnostics(
     effectiveProvider: String,
-    geminiKeySet: Boolean,
     deepseekKeySet: Boolean,
     metaKeySet: Boolean,
     gmailConnected: Boolean,
@@ -358,11 +357,10 @@ fun buildAgentDiagnostics(
     sessionsCount: Int,
     nowMs: Long = System.currentTimeMillis(),
 ): AgentDiagnosticsReport {
-    val anyKey = geminiKeySet || deepseekKeySet || metaKeySet
+    val anyKey = deepseekKeySet || metaKeySet
     val activeKeySet = when (effectiveProvider.lowercase()) {
-        "deepseek" -> deepseekKeySet
         "meta" -> metaKeySet
-        else -> geminiKeySet
+        else -> deepseekKeySet
     }
     val providerDisplay = com.aurviz.agent.providerDisplayName(effectiveProvider)
     val gmailHealthy = gmailConnected && (gmailReachable != false)
@@ -377,7 +375,7 @@ fun buildAgentDiagnostics(
             label = "AI Provider ($providerDisplay)",
             status = if (activeKeySet) "Ready" else if (anyKey) "Fallback ready" else "No key set",
             healthy = anyKey,
-            detail = if (anyKey) "Active model: $providerDisplay" else "Add a Gemini, DeepSeek, or Meta key in Connections.",
+            detail = if (anyKey) "Active model: $providerDisplay" else "Add a DeepSeek or Meta key in Connections.",
         ),
         DiagnosticItem(
             label = "Gmail OAuth",
@@ -458,7 +456,6 @@ data class AgentUiState(
     val batteryOptimizationNeeded: Boolean = false,
     // Ticket 36: whether a user-entered key exists in TokenVault per provider.
     // The key values themselves never enter UI state — only these flags.
-    val geminiKeySet: Boolean = false,
     val deepseekKeySet: Boolean = false,
     val metaKeySet: Boolean = false,
     val sending: Boolean = false,

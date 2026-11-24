@@ -15,8 +15,8 @@ class LlmKeysTest {
     @Test
     fun userKeysRoundTripThroughVault() {
         val vault = vault()
-        vault.saveLlmKeys(LlmKeys(geminiKey = "user-gemini", deepseekKey = "user-deepseek", metaKey = "user-meta"))
-        assertEquals(LlmKeys(geminiKey = "user-gemini", deepseekKey = "user-deepseek", metaKey = "user-meta"), vault.loadLlmKeys())
+        vault.saveLlmKeys(LlmKeys(deepseekKey = "user-deepseek", metaKey = "user-meta"))
+        assertEquals(LlmKeys(deepseekKey = "user-deepseek", metaKey = "user-meta"), vault.loadLlmKeys())
     }
 
     @Test
@@ -27,9 +27,9 @@ class LlmKeysTest {
     @Test
     fun savingAgainReplacesOldKeys() {
         val vault = vault()
-        vault.saveLlmKeys(LlmKeys(geminiKey = "old", deepseekKey = "old"))
-        vault.saveLlmKeys(LlmKeys(geminiKey = "new", deepseekKey = ""))
-        assertEquals(LlmKeys(geminiKey = "new", deepseekKey = ""), vault.loadLlmKeys())
+        vault.saveLlmKeys(LlmKeys(deepseekKey = "old"))
+        vault.saveLlmKeys(LlmKeys(deepseekKey = "new", metaKey = ""))
+        assertEquals(LlmKeys(deepseekKey = "new", metaKey = ""), vault.loadLlmKeys())
     }
 
     @Test
@@ -38,7 +38,7 @@ class LlmKeysTest {
         val tokens = TokenStore()
         tokens.gmailAccessToken = "gmail-token"
         vault.saveFrom(tokens)
-        vault.saveLlmKeys(LlmKeys(geminiKey = "user-gemini", deepseekKey = "user-deepseek"))
+        vault.saveLlmKeys(LlmKeys(deepseekKey = "user-deepseek"))
         vault.clearLlmKeys()
         assertEquals(LlmKeys(), vault.loadLlmKeys())
         val reloaded = TokenStore()
@@ -57,9 +57,9 @@ class LlmKeysTest {
         tokens.gmailRefreshToken = "gmail-refresh"
         tokens.gmailAccount = "user@example.com"
         vault.saveFrom(tokens)
-        vault.saveLlmKeys(LlmKeys(geminiKey = "user-gemini", deepseekKey = "user-deepseek"))
+        vault.saveLlmKeys(LlmKeys(deepseekKey = "user-deepseek"))
         vault.clearGmail()
-        assertEquals(LlmKeys(geminiKey = "user-gemini", deepseekKey = "user-deepseek"), vault.loadLlmKeys())
+        assertEquals(LlmKeys(deepseekKey = "user-deepseek"), vault.loadLlmKeys())
         val reloaded = TokenStore()
         vault.loadInto(reloaded)
         assertEquals(null, reloaded.gmailAccessToken)
@@ -71,23 +71,21 @@ class LlmKeysTest {
     fun userKeysOverrideBuildConfigKeys() {
         val base =
             ProviderSettings(
-                geminiKey = "build-gemini",
-                geminiModel = "gemini-2.5-flash",
                 deepseekKey = "build-deepseek",
                 deepseekModel = "deepseek-flash",
             )
-        val effective = effectiveSettings(base, LlmKeys(geminiKey = "user-gemini", deepseekKey = ""))
-        assertEquals("user-gemini", effective.geminiKey)
-        assertEquals("build-deepseek", effective.deepseekKey)
-        assertEquals("gemini-2.5-flash", effective.geminiModel)
+        val effective = effectiveSettings(base, LlmKeys(deepseekKey = "user-deepseek", metaKey = ""))
+        assertEquals("user-deepseek", effective.deepseekKey)
+        assertEquals("build-deepseek", ProviderSettings(deepseekKey = "build-deepseek").deepseekKey)
+        assertEquals("deepseek-flash", effective.deepseekModel)
     }
 
     @Test
     fun blankUserKeysFallBackToBuildConfig() {
-        val base = ProviderSettings(geminiKey = "build-gemini", deepseekKey = "build-deepseek")
+        val base = ProviderSettings(deepseekKey = "build-deepseek", metaKey = "build-meta")
         val effective = effectiveSettings(base, LlmKeys())
-        assertEquals("build-gemini", effective.geminiKey)
         assertEquals("build-deepseek", effective.deepseekKey)
+        assertEquals("build-meta", effective.metaKey)
     }
 
     @Test
@@ -97,8 +95,8 @@ class LlmKeysTest {
         // every provider ("No provider with API key") instead of calling one
         // with a baked-in key.
         val effective = effectiveSettings(ProviderSettings(), LlmKeys())
-        assertEquals("", effective.geminiKey)
         assertEquals("", effective.deepseekKey)
+        assertEquals("", effective.metaKey)
     }
 }
 

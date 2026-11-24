@@ -98,6 +98,6 @@ alarms, `pi_cancelled` in alarm history) and was re-run correctly.
   (`ScheduleWork.kt:33-35,43-44`).
 - **C3 PASS** — Settings shows "Release builds ship with empty keys — enter
   them here to run the agent." (`SettingsScreen.kt:144`), Gmail connected,
-  Gemini Set / DeepSeek Not set. Tried-providers disclosure code-covered
-  (`ProviderPicker.kt:79,116`, `ScheduledRun.kt:340-341`,
-  `AgentUiState.kt:92`).
+  DeepSeek Set / Meta Not set. Tried-providers disclosure code-covered
+  (`ProviderPicker.kt`, `ScheduledRun.kt`,
+  `AgentUiState.kt`).
