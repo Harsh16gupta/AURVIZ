@@ -80,6 +80,29 @@ class ProviderPickerTest {
         assertEquals("gemini", blankNames.first())
     }
 
+    @Test
+    fun firstConfiguredPrefersSelectedWhenItsKeyIsSet() {
+        val withMeta = settings().copy(metaKey = "meta-key")
+        assertEquals("meta", firstConfiguredProvider("meta", withMeta))
+        assertEquals("gemini", firstConfiguredProvider("gemini", withMeta))
+    }
+
+    @Test
+    fun firstConfiguredFallsBackWhenPreferredKeyIsBlank() {
+        // Keyless preferred provider must never win when another is Set.
+        val deepseekOnly = settings().copy(geminiKey = "  ", metaKey = "")
+        assertEquals("deepseek", firstConfiguredProvider("gemini", deepseekOnly))
+        assertEquals("deepseek", firstConfiguredProvider("meta", deepseekOnly))
+    }
+
+    @Test
+    fun firstConfiguredReturnsPreferredWhenNothingIsSet() {
+        val none = ProviderSettings()
+        assertEquals("gemini", firstConfiguredProvider("gemini", none))
+        assertEquals("deepseek", firstConfiguredProvider("deepseek", none))
+        assertEquals("gemini", firstConfiguredProvider("unknown", none))
+    }
+
     private fun successOn(name: String): NamedProvider {
         val result =
             LlmResult(

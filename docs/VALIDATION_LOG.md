@@ -846,3 +846,63 @@ Every case where the AI was wrong and how it was caught. Add an entry with file:
   importance, useCount) now round-trip via `restoreMemoryRow()`
   (`Memory.kt`), covered by `ScheduleMemoryPolishTest` (11 tests).
   Full gate: 485/485 green + assembleDebug green.
+
+## 2026-11-24 — Issue #90 Settings density + auto-select + telemetry (`feat/ui-batch-b`)
+
+- **Edit merged comment into `fun` line, breaking compilation.** A comment-only
+  edit in `ProviderPicker.kt` dropped the newline before `fun resolveProvider`,
+  producing `...never crashes.fun resolveProvider(...)` and 5 compile errors at
+  `ProviderPicker.kt:140-161`. Caught by `./gradlew testDebugUnitTest` failing
+  in `kaptGenerateStubsDebugKotlin`; fixed by restoring the newline.
+- **Duplicate-context edits need disambiguation.** Two identical
+  `perf.copy(planMs = ...)` blocks (Answered vs Failed) rejected a context edit
+  as ambiguous; fixed by including the distinct `statusLine` line in each
+  `oldString`. Both now route through `recordRun(..., success = true/false)`.
+- **Pre-existing copy note:** `AgentUiState.kt:158` comment says "recent run
+  history" — code comment only, never rendered; no GLOSSARY UI-copy violation.
+  Settings UI copy verified free of History/chatbot/assistant/cron-job/
+  dictation/job-run and of `.alpha()` on settled cards.
+
+## 2026-11-24 — Issue #93 Final contrast / tap-target / glossary QA (`feat/ui-batch-b`)
+
+Per-screen/sheet audit, Midnight + Daylight (code inspection; no PNGs needed):
+
+- **Command**: Sessions Menu icon + 56dp New-session row; starter rows
+  48dp min (`StarterRow.kt:40`); Composer pill 48..56dp with 48dp
+  Send/Stop/Voice actions (`Composer.kt`); Plan steps expandable, single
+  error row + Retry; settled text on `onBackgroundMuted`, never dimmed
+  alpha. Glossary: Session / Interaction / Confirmation / Tool labels via
+  `toolLabel()`, zero raw snake_case.
+- **Browser**: native theme-aware empty card (no white WebView); 52dp chrome
+  row (Back / Forward / URL pill / Reload all 48dp hit); 2dp Electric Blue
+  progress; 56dp error banner + Retry; 52dp inspector link rows; Save to
+  Memory stamps URL. No banned words in chrome copy.
+- **Schedules**: human cadence + live Fires-in countdown (never raw cron);
+  Switch 56x48dp hit (`Switch.kt:53`); footer outline Run + inline Delete
+  row; 64dp Recent-Run rows with formatted durations. No alarm/timer/cron
+  wording in UI copy.
+- **Memory**: lossless restore, title-case chips, bold match highlights via
+  `BasicText`; distinct empty states; bottom-anchored Undo (Trash icon);
+  48dp add action. No History/cache/log wording.
+- **Settings**: Appearance & Feedback → Connections → Telemetry →
+  Confirmation Rules → Permissions order; 52dp provider disclosure rows +
+  masked key-editor sheet; human-case rule labels; On-time Schedules (Bell)
+  + Background running (DeviceMobile) + single battery accordion. 5th tab
+  stays `Settings`; Preference used inside copy.
+- **Voice/Email/Forget sheets**: 520–560dp Ramble hero, 48dp transcript
+  + 56dp Pause/Confirm (disabled on blank); Proton hairline stack, 48dp
+  Confirm/Reject; stacked 48dp Delete/Keep, maxLines=3 previews + N-more.
+  All buttons 48dp+ in both themes.
+- **Contrast**: Midnight `onBackgroundMuted 0xA8F5F5F5` / Daylight
+  `0xD61C1C1C` (`Theme.kt:62,93`); `edge ~12%` both themes; settled cards
+  use muted tokens. Remaining `.alpha()` calls are disabled-state dimming
+  on buttons only (`IconButton.kt`, `Button.kt`, `OptionRow.kt`,
+  `VoiceCommandSheet.kt:206`), never on settled cards.
+- **Fixes this ticket**: `IconButton` Medium 40→48dp visual; Small keeps
+  32dp visual circle inside a transparent 48dp hit box (`IconButton.kt`);
+  Composer Stop 40→48dp + pill v-padding 6→4dp so 48dp actions fit the
+  56dp max (`Composer.kt`); attachment dismiss offset re-based 10→18dp so
+  the badge renders pixel-identical (`AttachmentChip.kt`); `AgentUiState.kt`
+  comment "recent run history" → "recent Task Execution runs".
+- Full gate: testDebugUnitTest **503/503 green** (47 files, 0 failures) +
+  assembleDebug green. Secret scan clean. One commit.

@@ -3,6 +3,7 @@ package com.aurviz.agent.ui
 import com.aurviz.agent.EmailDraft
 import com.aurviz.agent.EmailSummary
 import com.aurviz.agent.FallbackResult
+import com.aurviz.agent.InteractionRow
 import com.aurviz.agent.LlmResult
 import com.aurviz.agent.Memory
 import com.aurviz.agent.ParsedSchedule
@@ -22,14 +23,128 @@ data class PerfTimings(
     val planMs: Long? = null,
     val toolMs: Long? = null,
     val recallMs: Long? = null,
+    // Ticket #90: defaulted rolling averages over `runs` completed runs
+    // plus the share of successful runs. Last-run fields above stay the
+    // freshest sample; the averages below roll forward via recordRun().
+    val planAvgMs: Long? = null,
+    val toolAvgMs: Long? = null,
+    val recallAvgMs: Long? = null,
+    val runs: Int = 0,
+    val successRate: Double = 1.0,
 )
+
+// Ticket #90: pure rolling update for PerfTimings. Supplied stages refresh
+// both their last-run field and their rolling average; unmeasured stages
+// keep their previous values. `runs` counts every recorded run and
+// `successRate` tracks the share of successful ones.
+fun PerfTimings.recordRun(
+    planMs: Long? = null,
+    toolMs: Long? = null,
+    recallMs: Long? = null,
+    success: Boolean = true,
+): PerfTimings {
+    val nextRuns = runs + 1
+    fun roll(oldAvg: Long?, sample: Long?): Long? {
+        if (sample == null) return oldAvg
+        if (oldAvg == null || runs == 0) return sample
+        return (oldAvg * runs + sample) / nextRuns
+    }
+    val nextSuccess = (successRate * runs + if (success) 1.0 else 0.0) / nextRuns
+    return copy(
+        planMs = planMs ?: this.planMs,
+        toolMs = toolMs ?: this.toolMs,
+        recallMs = recallMs ?: this.recallMs,
+        planAvgMs = roll(planAvgMs, planMs),
+        toolAvgMs = roll(toolAvgMs, toolMs),
+        recallAvgMs = roll(recallAvgMs, recallMs),
+        runs = nextRuns,
+        successRate = nextSuccess,
+    )
+}
 
 data class VoiceUiState(
     val orb: OrbState = OrbState.Listening,
     val transcript: String = "",
     val listening: Boolean = false,
     val error: String? = null,
+    // Ticket #91: live mic level in dB for the waveform ring buffer
+    // (MainActivity.onRmsChanged throttled ~100ms → onVoiceLevel) and
+    // whether the visible transcript is interim (muted) or final (crisp).
+    val levelDb: Float = VOICE_LEVEL_MIN_DB,
+    val isPartial: Boolean = true,
 )
+
+// Ticket #91: RMS meter window for the VoiceCommandSheet waveform.
+// Silence floor (-2 dB) renders flat; loud speech (~12 dB) peaks.
+const val VOICE_LEVEL_MIN_DB = -2f
+const val VOICE_LEVEL_MAX_DB = 12f
+
+// Ticket #91: pure clamp for RMS samples — JVM-tested, no Android.
+fun voiceLevelClamped(db: Float): Float = db.coerceIn(VOICE_LEVEL_MIN_DB, VOICE_LEVEL_MAX_DB)
+
+// Ticket #91: Confirm stays disabled on a blank transcript (state-derived).
+val VoiceUiState.canConfirmVoice: Boolean
+    get() = transcript.isNotBlank()
+
+// Ticket #92: Sessions drawer copy (GLOSSARY: Session, Interaction, Past
+// Interactions). Never "History" — banned word — in any of these.
+const val PAST_INTERACTIONS_TITLE = "Past Interactions"
+const val GROUP_TODAY = "Today"
+const val GROUP_PREVIOUS_7_DAYS = "Previous 7 Days"
+const val NEW_SESSION_LABEL = "New session"
+const val OPEN_SESSIONS_DESCRIPTION = "Open Sessions"
+const val CLOSE_SESSIONS_DESCRIPTION = "Close Sessions"
+const val NO_PAST_SESSIONS_LINE = "No past Sessions yet."
+
+// Ticket #92: Room round-trip for the feed. The Session id rides in the
+// row only — InteractionRecord stays the feed shape screens render.
+fun InteractionRecord.toRow(sessionId: String): InteractionRow =
+    InteractionRow(
+        sessionId = sessionId,
+        command = command,
+        responseText = responseText,
+        provider = providerUsed,
+        timestampMs = timestampMs,
+        failed = failed,
+    )
+
+fun InteractionRow.toRecord(): InteractionRecord =
+    InteractionRecord(
+        // Room ids ("42") never collide with in-memory ids ("in_..."),
+        // so hydrated rows keep their row id namespaced.
+        id = "room_interaction_$pid",
+        command = command,
+        timestampMs = timestampMs,
+        responseText = responseText,
+        providerUsed = provider,
+        failed = failed,
+    )
+
+// Ticket #92: drawer groups, newest first. Today = same calendar day as
+// now; Previous 7 Days = the 7 days before today; older rows stay in
+// Room but out of the drawer.
+data class PastInteractionGroups(
+    val today: List<InteractionRecord>,
+    val previous7Days: List<InteractionRecord>,
+)
+
+fun groupPastInteractions(records: List<InteractionRecord>, nowMs: Long = System.currentTimeMillis()): PastInteractionGroups {
+    val startOfToday =
+        java.util.Calendar.getInstance().let { cal ->
+            cal.timeInMillis = nowMs
+            cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
+            cal.set(java.util.Calendar.MINUTE, 0)
+            cal.set(java.util.Calendar.SECOND, 0)
+            cal.set(java.util.Calendar.MILLISECOND, 0)
+            cal.timeInMillis
+        }
+    val weekAgoMs = nowMs - 7L * 24 * 60 * 60 * 1000
+    val sorted = records.sortedByDescending { it.timestampMs }
+    return PastInteractionGroups(
+        today = sorted.filter { it.timestampMs >= startOfToday },
+        previous7Days = sorted.filter { it.timestampMs >= weekAgoMs && it.timestampMs < startOfToday },
+    )
+}
 
 // One past command in the scrollable Interaction feed (GLOSSARY
 // Interaction): the command, recalled Memories, the Plan steps, the
@@ -118,7 +233,7 @@ data class AgentUiState(
     // Interactive AI provider override (null = Auto/Default).
     val selectedProvider: String? = null,
     val confirmSendEmail: Boolean = true,
-    // Disabled Schedule ids (UiPrefs-backed) + recent run history.
+    // Disabled Schedule ids (UiPrefs-backed) + recent Task Execution runs.
     val disabledScheduleIds: Set<String> = emptySet(),
     // Ticket #68: revocable per-recipient allow-always grants
     // (GLOSSARY Preference, UiPrefs-backed). Sends to one listed address

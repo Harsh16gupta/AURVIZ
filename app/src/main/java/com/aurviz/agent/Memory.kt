@@ -84,6 +84,8 @@ class InMemoryStore : MemoryStore {
 
 // Store a fact exactly as given. An identical fact (same words, same
 // source) is already there, so return it instead of saving a twin.
+// Ticket #92: dedup is case- and whitespace-insensitive — "  My Boss Is
+// Priya " matches "my boss is priya" — so repeats never twin.
 fun rememberFact(
     store: MemoryStore,
     text: String,
@@ -92,7 +94,8 @@ fun rememberFact(
     importance: Int = 0,
     createdAt: Long = System.currentTimeMillis(),
 ): Memory {
-    store.list().find { it.text == text && it.source == source }?.let { return it }
+    val key = text.trim().lowercase()
+    store.list().find { it.text.trim().lowercase() == key && it.source == source }?.let { return it }
     return store.save(text, source, category = category, importance = importance, createdAt = createdAt)
 }
 

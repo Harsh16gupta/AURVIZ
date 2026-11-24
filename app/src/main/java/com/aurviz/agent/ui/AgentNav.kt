@@ -117,6 +117,7 @@ fun AgentNav(
                             onCancelRun = vm::cancelRun,
                             onSelectProvider = vm::setSelectedProvider,
                             onNewSession = vm::startNewSession,
+                            onSelectPastInteraction = vm::onInputChange,
                             onAllowAlways = vm::allowAlwaysAllow,
                         )
                     }
@@ -162,8 +163,9 @@ fun AgentNav(
                             onRevokeGmail = vm::revokeGmail,
                             onPasteLink = vm::onPastedLink,
                             onDismissPasteFallback = vm::dismissPasteFallback,
-                            onSaveLlmKeys = vm::saveLlmKeys,
-                            onClearLlmKeys = vm::clearLlmKeys,
+                            onSaveSingleLlmKey = vm::saveSingleLlmKey,
+                            onClearSingleLlmKey = vm::clearSingleLlmKey,
+                            onSetSelectedProvider = vm::setSelectedProvider,
                             onOpenExactAlarmSettings = onOpenExactAlarmSettings,
                             onRefreshExactAlarm = vm::refreshExactAlarmFlag,
                             onOpenBatterySettings = onOpenBatterySettings,
@@ -204,6 +206,7 @@ fun AgentNav(
         )
         EmailConfirmationSheet(
             draft = state.pendingEmail,
+            from = state.gmailAccount,
             unseen = unseenRecipients(
                 state.pendingEmail?.to.orEmpty(),
                 knownAddressesFromInbox(state.emails),

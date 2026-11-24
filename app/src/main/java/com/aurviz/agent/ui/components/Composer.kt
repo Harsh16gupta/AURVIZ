@@ -60,7 +60,7 @@ fun Composer(
             .clip(RoundedCornerShape(50))
             .background(Theme.colors.composer)
             .border(1.dp, Theme.colors.composerRing, RoundedCornerShape(50))
-            .padding(horizontal = 6.dp, vertical = 6.dp),
+            .padding(horizontal = 6.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space),
     ) {
@@ -103,7 +103,8 @@ fun Composer(
                 MainAction.Stop ->
                     Box(
                         modifier = Modifier
-                            .size(40.dp)
+                            // Ticket #93: 48dp tap target, matching Send/Voice.
+                            .size(48.dp)
                             .clip(Theme.shapes.fullyRounded)
                             .background(Theme.colors.primary)
                             .clickable {

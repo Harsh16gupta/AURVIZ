@@ -293,9 +293,29 @@ class ScheduledRunTest {
             return 1
         }
         override fun listAll(): List<ScheduleRunRow> = rows.toList()
-        override fun finish(pid: Long, status: String, error: String?, result: String?, durationMs: Long) {
+        override fun finish(
+            pid: Long,
+            status: String,
+            error: String?,
+            result: String?,
+            durationMs: Long,
+            provider: String?,
+            planMs: Long,
+            toolMs: Long,
+            recallMs: Long,
+        ) {
             val index = rows.indexOfFirst { it.pid == pid }
-            rows[index] = rows[index].copy(status = status, error = error, result = result, durationMs = durationMs)
+            rows[index] =
+                rows[index].copy(
+                    status = status,
+                    error = error,
+                    result = result,
+                    durationMs = durationMs,
+                    provider = provider,
+                    planMs = planMs,
+                    toolMs = toolMs,
+                    recallMs = recallMs,
+                )
         }
     }
 

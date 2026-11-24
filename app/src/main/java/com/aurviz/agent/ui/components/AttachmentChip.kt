@@ -43,7 +43,10 @@ fun AttachmentChip(
             contentDescription = "Remove $contentDescription",
             variant = IconButtonVariant.Tonal,
             size = IconButtonSize.Small,
-            modifier = Modifier.align(Alignment.TopEnd).offset(x = 10.dp, y = (-10).dp).size(24.dp),
+            // Ticket #93: Small IconButton now carries a transparent 48dp hit box
+            // around its 32dp visual circle; shift the offset by half the
+            // difference (8dp) so the badge renders exactly where it did.
+            modifier = Modifier.align(Alignment.TopEnd).offset(x = 18.dp, y = (-18).dp).size(24.dp),
         ) {
             Icon(Icons.X, contentDescription = null, modifier = Modifier.size(12.dp))
         }

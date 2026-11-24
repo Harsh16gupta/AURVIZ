@@ -167,3 +167,24 @@ fun resolveProvider(name: String, settings: ProviderSettings): ProviderConfig =
                 model = settings.geminiModel,
             )
     }
+
+// Ticket #90: first-run provider auto-select (pure, JVM-tested). The
+// preferred provider wins when its key is set; when it is blank, the
+// first configured provider in gemini/deepseek/meta order wins so a
+// keyless preferred provider never causes a first-run HTTP 401 while
+// another provider is Set. When nothing is configured, the normalized
+// preferred name is returned so callers keep a stable default.
+fun firstConfiguredProvider(preferred: String, settings: ProviderSettings): String {
+    val want = preferred.trim().lowercase().takeIf { it in setOf("gemini", "deepseek", "meta") } ?: "gemini"
+    fun hasKey(name: String): Boolean =
+        when (name) {
+            "deepseek" -> settings.deepseekKey
+            "meta" -> settings.metaKey
+            else -> settings.geminiKey
+        }.isNotBlank()
+    if (hasKey(want)) return want
+    for (name in listOf("gemini", "deepseek", "meta")) {
+        if (hasKey(name)) return name
+    }
+    return want
+}
