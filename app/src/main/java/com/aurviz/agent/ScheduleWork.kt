@@ -63,57 +63,30 @@ class ScheduleWorker(context: Context, params: WorkerParameters) : Worker(contex
         try {
             val scheduleStore = RoomScheduleStore(db.schedules())
             val schedule = scheduleStore.list().find { it.id == scheduleId } ?: return Result.failure()
-            val tokens = TokenStore()
-            try {
-                TokenVault(applicationContext).loadInto(tokens)
-            } catch (_: Exception) {
-            }
-            val gmail =
-                GmailHttpApi(
-                    tokens,
-                    BuildConfig.GOOGLE_OAUTH_CLIENT_ID,
-                    BuildConfig.GOOGLE_OAUTH_CLIENT_SECRET,
-                )
-            val full =
-                defaultToolRegistry(
-                    gmailApi = gmail,
-                    scheduleStore = scheduleStore,
-                    memoryStore = RoomMemoryStore(db.memories()),
-                    backgroundWebLoader = OkHttpBackgroundPageLoader(),
-                )
-            val vaultKeys =
-                try {
-                    TokenVault(applicationContext).loadLlmKeys()
-                } catch (_: Exception) {
-                    LlmKeys()
+            val full = buildRoutineRegistry(scheduleStore, db)
+            val chat = buildRoutineChat(full)
+            val outcome =
+                fireSchedule(scheduleId, fireTime, scheduleStore) { sched ->
+                    runScheduledRoutine(sched, fireTime, chat, full, RoomScheduleRunStore(db.runs()), RoomPendingApprovalStore(db.approvals()))
                 }
-            val chat =
-                HeadlessChatLlm(
-                    defaultCandidates(BuildConfig.LLM_DEFAULT_PROVIDER, vaultKeys),
-                    // Ticket 39 (minimal): the scheduled model sees the
-                    // read-only view — allowed reads plus gated writes by
-                    // name, so attempts become PendingApproval rows.
-                    scheduledRegistry(full).toolSchemas(),
-                )
-            return when (
-                val outcome =
-                    runScheduledRoutine(
-                        schedule,
-                        fireTime,
-                        chat,
-                        full,
-                        RoomScheduleRunStore(db.runs()),
-                        RoomPendingApprovalStore(db.approvals()),
-                    )
-            ) {
-                is ScheduledRunOutcome.DuplicateSkipped -> Result.success()
-                is ScheduledRunOutcome.Ran -> {
-                    postScheduleNotification(applicationContext, schedule.id, outcome.notification)
+            if (outcome.nextArmMillis != null) {
+                try {
+                    registerRoutineAlarm(applicationContext, schedule)
+                } catch (_: Exception) {
+                }
+            }
+            return when (outcome.status) {
+                FireStatus.RAN -> {
+                    val note = outcome.notification
+                    if (note != null) postScheduleNotification(applicationContext, schedule.id, note)
                     if (outcome.blocked.isNotEmpty()) {
                         postPendingApprovalNotification(applicationContext, schedule, outcome.blocked.size)
                     }
                     Result.success()
                 }
+                FireStatus.DUPLICATE_SKIPPED -> Result.success()
+                FireStatus.SCHEDULE_MISSING -> Result.failure()
+                FireStatus.FAILED -> Result.retry()
             }
         } catch (_: Exception) {
             // Transient failure (DB/LLM throw): retry with the same
@@ -127,6 +100,39 @@ class ScheduleWorker(context: Context, params: WorkerParameters) : Worker(contex
             } catch (_: Exception) {
             }
         }
+    }
+
+    private fun buildRoutineRegistry(scheduleStore: RoomScheduleStore, db: AppDb): ToolRegistry {
+        val tokens = TokenStore()
+        try {
+            TokenVault(applicationContext).loadInto(tokens)
+        } catch (_: Exception) {
+        }
+        val gmail =
+            GmailHttpApi(
+                tokens,
+                BuildConfig.GOOGLE_OAUTH_CLIENT_ID,
+                BuildConfig.GOOGLE_OAUTH_CLIENT_SECRET,
+            )
+        return defaultToolRegistry(
+            gmailApi = gmail,
+            scheduleStore = scheduleStore,
+            memoryStore = RoomMemoryStore(db.memories()),
+            backgroundWebLoader = OkHttpBackgroundPageLoader(),
+        )
+    }
+
+    private fun buildRoutineChat(full: ToolRegistry): HeadlessChatLlm {
+        val vaultKeys =
+            try {
+                TokenVault(applicationContext).loadLlmKeys()
+            } catch (_: Exception) {
+                LlmKeys()
+            }
+        return HeadlessChatLlm(
+            defaultCandidates(BuildConfig.LLM_DEFAULT_PROVIDER, vaultKeys),
+            scheduledRegistry(full).toolSchemas(),
+        )
     }
 }
 

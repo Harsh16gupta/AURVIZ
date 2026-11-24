@@ -2,6 +2,45 @@
 
 Every case where the AI was wrong and how it was caught. Add an entry with file:line evidence before moving on.
 
+## 2026-11-24 — Issue #80 T3 thin Worker behind one fire seam (`main`)
+
+- **Dirty-tree build failed on the T3 seam before any test ran.**
+  `ScheduleWork.kt:67` called `buildRoutineChat(full)` (1 arg) against the
+  3-param `buildRoutineChat(schedule, scheduleStore, db)` definition
+  (`ScheduleWork.kt:122`), so `:app:compileDebugKotlin` failed with
+  argument-type mismatch. Caught by compiling before testing; fixed by
+  thinning the adapter to `buildRoutineChat(full: ToolRegistry)`
+  (`ScheduleWork.kt:125-136`), which reuses the already-built registry
+  instead of rebuilding Room stores inside the chat builder.
+- **FireOutcome dropped the notification wording and blocked count.**
+  First draft carried only `status/nextArm/run`, so the Worker recomputed
+  the note via `buildResultNotification(schedule, run.result)` — losing the
+  "(N request(s) need your Confirmation)" suffix plus retry disclosure, and
+  hardcoding blocked=1 for every BLOCKED_WRITE. Caught on re-read of
+  `ScheduledRun.kt:587-600` (resultText holds answer/error only; the suffix
+  lives in the notification). Fixed by carrying
+  `notification + blocked: List<PendingApproval>` through `FireOutcome`
+  (`ScheduleRuntime.kt:11-17,34-35`); the Worker posts
+  `outcome.notification` and `outcome.blocked.size` verbatim
+  (`ScheduleWork.kt:78-86`).
+- **Foreign uncommitted work parked, not committed.** Same condition as
+  #67/#70/#72-#76: `GLOSSARY.md`, `HANDOFF.md` plus
+  `architecture-deep-dive.html` / `docs/AURVIZ_EVOLUTION_PLAN.md` carry
+  unrelated mods — untouched here; the commit holds only
+  `ScheduleRuntime.kt`, `ScheduleWork.kt`, `ScheduleRuntimeTest.kt`, and
+  this log.
+- Tests: new `ScheduleRuntimeTest` (10 tests: double-delivery no-second-LLM,
+  held-write, evil-forward red-team via fire, stale-reclaim single-winner +
+  fresh-duplicate skip, missing-schedule null-arm, transport-throw FAILED
+  with arm, Asia/Kolkata wall-clock re-arm, pure-runtime no-android-imports,
+  Worker-delegates-to-fire, receivers-enqueue-only). Full
+  `:app:testDebugUnitTest` green (455 tests, 0 failures; 445 at #79 + 10
+  new). Secret scan clean on touched files (only pre-existing
+  TokenVault/BuildConfig refs and test dummy strings).
+- Glossary check: Schedule / PendingApproval / Confirmation / Task Execution
+  used per `GLOSSARY.md`; no ADR conflict (fire seam + read-only allowlist
+  + re-arm are #77's decided design).
+
 ## 2026-11-24 — Issue #76 legacy getImportantEmails deletion (`main`)
 
 - **First AgentLoopTest edit targeted lines the replaceAll had already migrated.**
