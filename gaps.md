@@ -38,30 +38,45 @@ no agent loop) is superseded — every P0 item below shipped.
   provider sheet (`selectedProvider`, `null` = Auto); visible
   "retried on Y" disclosure, never silent mid-run replay.
 - **UI**: full Jetpack Compose Light/Dark (Midnight/Daylight) system with
-  5 screens — Command (scrollable `Interaction` feed, live `ThinkingIndicator`,
-  Stop/Cancel, provider sheet, settled Confirmation receipts), Browser
-  (Back/Forward/Reload, 2dp load progress, extracted-text + links
-  inspector, Save to Memory), Schedules (natural-language creator,
-  enable/disable toggles, Run Now, 2-tap delete, run history),
-  Memory (search + category/source filters, inline edit, delete with
-  4 s undo), Settings (theme, haptics, connections, Confirmation rules,
-  permissions, `Plan`/`Tool`/`Recall` telemetry).
-- **Tests**: 337 unit tests, 0 failures (`./gradlew
-  :app:testDebugUnitTest`, 30 test classes incl. `PerfTimingsTest`).
+  6 screens — Onboarding, Command (scrollable Room-persisted
+  `Interaction` feed, live `ThinkingIndicator`, Stop/Cancel, provider
+  sheet, settled Confirmation receipts, Markdown `Session`
+  export/share), Browser (Back/Forward/Reload, 2dp load progress,
+  Page · Text · Links inspector, Save to Memory), Schedules
+  (natural-language creator, human cadence + live `"Fires in Xh Ym"`
+  countdown, enable/disable toggles, Run Now, 2-tap delete, run
+  history), Memory (search + category/source filters, inline edit,
+  delete with 4 s undo), Settings (theme, haptics, connections,
+  Confirmation rules, 1-tap System Diagnostics, permissions,
+  `Plan`/`Tool`/`Recall` telemetry) — plus the `SideDrawer`
+  (`Sessions` with search and `New Session`, cold-start transcript
+  hydration), the live-RMS `VoiceCommandSheet` waveform, the
+  `ACTION_SEND` Share Sheet target, launcher shortcuts
+  (`shortcuts.xml`), and `app/proguard-rules.pro` wired into the
+  `release` build type.
+- **Persistence**: Room v6 (`interactions` table for the `Interaction`
+  feed plus persisted `Sessions` with transcript hydration,
+  `memories`/`memoriesFts`, `schedules`, `schedule_runs`,
+  `pending_approvals`) with lossless full-row Memory undo
+  (`restoreMemoryRow`).
+- **Tests**: 626 unit tests, 0 failures (`./gradlew
+  :app:testDebugUnitTest`, 52 test classes incl. `PerfTimingsTest`).
   Debug APK via `./gradlew :app:assembleDebug`.
 
 ## 2. Genuine remaining gaps / trade-offs (honest list)
 
-1. **Interaction feed is in-memory** (latest 50 in `AgentUiState`), not
-   Room-persisted — past commands vanish on process death. Persisting
-   `InteractionRecord` rows is the natural follow-up.
-2. **Memory undo restores text+source only** — `restoreMemory` saves with
-   default category/importance. Restoring the full row (category,
-   importance, useCount) needs a tombstone or a restore payload.
-3. **No live RMS waveform** — Android `SpeechRecognizer` does not expose
-   audio levels to `onRmsChanged` usefully; the orb is driven by
-   `VoiceUiState` (Listening/Hearing/Thinking/Muted), never blocked on
-   audio levels. By design, not a bug.
+1. **Interaction feed persistence — SHIPPED (T4, #109).** `InteractionRecord`
+   rows are Room v6 persisted (`interactions` table in `InteractionDb.kt`)
+   with per-`Session` transcript hydration on cold start — past commands
+   survive process death.
+2. **Full-row Memory undo — SHIPPED (T4, #109).** `restoreMemoryRow`
+   (`Memory.kt:110`) re-saves the full row (text, source, category,
+   importance, createdAt, lastUsed, useCount), so a restored Memory keeps
+   its ranking state.
+3. **Live RMS waveform — SHIPPED (T2, #107).** `onRmsChanged` drives the
+   `VoiceCommandSheet` waveform (`MainActivity.kt` + `VoiceCommandSheet.kt`),
+   falling back to `VoiceUiState` when levels are unavailable. By design
+   where levels are missing, not a bug.
 4. **Device-only proof outstanding** — on-device scheduling proof
    (`docs/SCHEDULING_TEST.md`), STT/LLM-first-token/end-to-end medians,
    and the Android Studio profiler screenshot (`docs/PERF_TIMINGS.md`

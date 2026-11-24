@@ -155,4 +155,25 @@ class BackupRulesTest {
         assertTrue(names.contains("shortcut_new_session_short"))
         assertTrue(names.contains("shortcut_schedules_short"))
     }
+
+    // Ticket #110 (T5): release hardening ships R8 rules for Tink/Room/
+    // WorkManager/OkHttp and wires them into the release build type.
+    @Test
+    fun proguardRulesExistAndAreWiredIntoRelease() {
+        val module = moduleDir()
+        val rules = File(module, "proguard-rules.pro")
+        assertTrue("app/proguard-rules.pro must exist", rules.exists())
+        val text = rules.readText()
+        assertTrue("rules must keep Tink", text.contains("-keep class com.google.crypto.tink.**"))
+        assertTrue("rules must keep RoomDatabase", text.contains("extends androidx.room.RoomDatabase"))
+        assertTrue("rules must keep Room entities", text.contains("@androidx.room.Entity"))
+        assertTrue("rules must keep Room DAOs", text.contains("@androidx.room.Dao"))
+        assertTrue("rules must keep WorkManager workers", text.contains("extends androidx.work.Worker"))
+        assertTrue("rules must silence OkHttp", text.contains("okhttp3.**"))
+        val gradle = File(module, "build.gradle.kts").readText()
+        assertTrue(
+            "release build type must reference proguard-rules.pro",
+            gradle.contains("proguard-rules.pro")
+        )
+    }
 }

@@ -49,6 +49,10 @@ android {
             buildConfigField("String", "GEMINI_API_KEY", "\"\"")
             buildConfigField("String", "DEEPSEEK_API_KEY", "\"\"")
             buildConfigField("String", "META_API_KEY", "\"\"")
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
 

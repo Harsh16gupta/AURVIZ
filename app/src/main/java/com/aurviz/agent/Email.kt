@@ -71,7 +71,7 @@ fun readEmail(api: GmailApi, id: String): EmailDetail = api.readMessage(id)
 
 // Where the Gmail sign-in tokens live. revoke() = disconnect:
 // tokens gone, nothing can send until the user connects again.
-// (#8 moves these into encrypted storage; memory-only for now.)
+// Persisted to EncryptedSharedPreferences via TokenVault.kt.
 class TokenStore {
     var gmailAccessToken: String? = null
     var gmailRefreshToken: String? = null
