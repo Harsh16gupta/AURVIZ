@@ -2,6 +2,62 @@
 
 Every case where the AI was wrong and how it was caught. Add an entry with file:line evidence before moving on.
 
+## 2026-11-24 — Issue #69 audit: one genuine gap, ticket left OPEN (`main`)
+
+- Audited #69 (T4 schedule writes + voice parity through judge) against the
+  tree before writing code. Bullets 2-4 fully satisfied; bullet 1 PARTIALLY
+  satisfied — the `unschedule` typed/voice command path disarms with no
+  Confirmation. Ticket left OPEN; gap reported on the issue, nothing
+  implemented pending scope sign-off.
+- Bullet 1 (create/cancel require Confirmation; no silent arm/disarm):
+  SATISFIED for the judge path — `ScheduleTools.kt:30-32`
+  `create_schedule` MEDIUM + `requiresConfirmation`, `:100-102` same for
+  `cancel_schedule`; kernel refuses gated Tools ungated
+  (`ToolRegistry.kt:159-173`); loop routes every call through
+  `executeGated` (`AgentLoop.kt:186-189`); typed create fast path is
+  preview-gated (`AgentViewModel.kt:991-1036` `pendingSchedule` +
+  `approveSchedule`/`rejectSchedule`); screen delete is inline-confirmed
+  (`SchedulesScreen.kt:87,212-245` `confirmDeleteId`, added in #89).
+  MISSING: `handleUnschedule` (`AgentViewModel.kt:1184-1200`) deletes the
+  row plus cancels alarm/work (`:1193-1195`) with no Confirmation of any
+  kind — reachable from typed text (`:529`) AND voice transcript (voice
+  routes into the same `sendCommand`, `AgentNav.kt:467-471`), so a
+  misrecognized "unschedule 2" silently disarms a routine. Every other
+  destructive path (email send, schedule create, forget, screen delete)
+  has a confirm step; this is the lone exception.
+- Bullet 2 (voice parity): SATISFIED — voice transcript enters the single
+  entry point (`AgentNav.kt:467-471` `vm.sendCommand(text)`), voice wins
+  over typed (`VoiceInput.kt:38-39` `resolveCommandInput`), blank
+  transcripts can't confirm (`AgentUiState.kt:86-87` `canConfirmVoice`).
+  Tests: `ScheduleWriteConfirmTest.kt:132-146` voice drives identical
+  gated outcomes, `:149-158` voice reject; `VoiceInputTest.kt:42-56`
+  blank-voice fallback; `VoiceSheetStateTest.kt:38-40` confirm guard.
+- Bullet 3 (reject/timeout without side effects): SATISFIED for the judge
+  path — `ToolRegistry.kt:204-217` reject/timeout return
+  `cancelled_by_user` without running; `Schedule.kt:161`
+  `onApprovedWrite` returns `None` unless approved Success;
+  `AgentViewModel.kt:1150-1182` side-effect sync acts only on approved
+  Success (effective args, never the original call). Tests:
+  `ScheduleWriteConfirmTest.kt:35-57` create reject/timeout arm nothing,
+  `:60-83` cancel reject/timeout leave armed, `:86-96` approve disarms.
+- Bullet 4 (approve/reject/timeout x create/cancel x typed/voice):
+  SATISFIED at the gate seam — `ScheduleWriteConfirmTest.kt` whole file:
+  create reject/timeout (`:35-57`), cancel reject/timeout/approve
+  (`:60-96`), loop NeedsApproval for both (`:123-129` typed,
+  `:132-146` voice-identical, `:149-158` voice reject); plus
+  `ScheduleToolsTest.kt` timeout cases and `ApprovalGateTest.kt`
+  fail-closed default confirmer. (The `unschedule` fast path has no
+  approve/reject/timeout at all — same gap as bullet 1.)
+- Fix sketch (not implemented): mirror the create preview — publish a
+  `pendingUnschedule` + preview line in `handleUnschedule`, add
+  `approveUnschedule`/`rejectUnschedule`, render in `CommandScreen`/
+  `SchedulesScreen`; JVM tests for approve/reject/timeout-equivalent
+  (reject path) on the fast path. Needs UX sign-off first since it adds
+  a confirm step to an explicit command.
+- Tests: full `:app:testDebugUnitTest --rerun-tasks` green (516 tests /
+  48 files, 0 failures/errors), secret scan clean. No implementation
+  commit beyond this log entry; #69 stays OPEN.
+
 ## 2026-11-24 — Issue #68 audit: already-implemented-but-open (`main`)
 
 - Audited #68 (T3 allow-always Preference per recipient) against the tree
