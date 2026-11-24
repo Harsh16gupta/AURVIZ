@@ -233,7 +233,7 @@ data class AgentUiState(
     // Interactive AI provider override (null = Auto/Default).
     val selectedProvider: String? = null,
     val confirmSendEmail: Boolean = true,
-    // Disabled Schedule ids (UiPrefs-backed) + recent run history.
+    // Disabled Schedule ids (UiPrefs-backed) + recent Task Execution runs.
     val disabledScheduleIds: Set<String> = emptySet(),
     // Ticket #68: revocable per-recipient allow-always grants
     // (GLOSSARY Preference, UiPrefs-backed). Sends to one listed address
