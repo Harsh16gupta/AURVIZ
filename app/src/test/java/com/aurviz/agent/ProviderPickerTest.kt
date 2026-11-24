@@ -17,17 +17,9 @@ class ProviderPickerTest {
         ProviderSettings(
             geminiKey = "gemini-key",
             geminiModel = "gemini-2.5-flash",
-            groqKey = "groq-key",
-            groqModel = "llama-3.1-8b-instant",
+            deepseekKey = "deepseek-key",
+            deepseekModel = "deepseek-flash",
         )
-
-    @Test
-    fun groqNameUsesGroqAddressKeyModel() {
-        val config = resolveProvider("groq", settings())
-        assertEquals("https://api.groq.com/openai/v1", config.baseUrl)
-        assertEquals("groq-key", config.apiKey)
-        assertEquals("llama-3.1-8b-instant", config.model)
-    }
 
     @Test
     fun unknownNameFallsBackToGemini() {
@@ -64,27 +56,27 @@ class ProviderPickerTest {
 
     @Test
     fun defaultCandidatesOrdersShippedPairGeminiFirst() {
-        // ADR-0004 amended: DeepSeek + Meta are now wired alongside Gemini/Groq.
-        val candidates = defaultCandidates("gemini", LlmKeys(geminiKey = "g", groqKey = "q", deepseekKey = "d", metaKey = "m"))
-        assertEquals(listOf("gemini", "deepseek", "meta", "groq"), candidates.map { it.name })
+        // ADR-0004 amended: DeepSeek + Meta are now wired alongside Gemini.
+        val candidates = defaultCandidates("gemini", LlmKeys(geminiKey = "g", deepseekKey = "d", metaKey = "m"))
+        assertEquals(listOf("gemini", "deepseek", "meta"), candidates.map { it.name })
     }
 
     @Test
     fun defaultCandidatesPutsPreferredShippedProviderFirst() {
-        val candidates = defaultCandidates("groq", LlmKeys(geminiKey = "g", groqKey = "q", deepseekKey = "d", metaKey = "m"))
-        assertEquals(listOf("groq", "deepseek", "meta", "gemini"), candidates.map { it.name })
+        val candidates = defaultCandidates("meta", LlmKeys(geminiKey = "g", deepseekKey = "d", metaKey = "m"))
+        assertEquals(listOf("meta", "deepseek", "gemini"), candidates.map { it.name })
     }
 
     @Test
     fun defaultCandidatesIncludesDeepSeekAndMeta() {
         // ADR-0004 amended: DeepSeek and direct Meta are now wired providers.
-        for (preferred in listOf("gemini", "groq", "deepseek", "meta")) {
-            val names = defaultCandidates(preferred, LlmKeys(geminiKey = "g", groqKey = "q", deepseekKey = "d", metaKey = "m")).map { it.name }
+        for (preferred in listOf("gemini", "deepseek", "meta")) {
+            val names = defaultCandidates(preferred, LlmKeys(geminiKey = "g", deepseekKey = "d", metaKey = "m")).map { it.name }
             assertTrue("preferred=$preferred -> $names", "deepseek" in names)
             assertTrue("preferred=$preferred -> $names", "meta" in names)
             assertEquals(preferred, names.first())
         }
-        val blankNames = defaultCandidates("  ", LlmKeys(geminiKey = "g", groqKey = "q", deepseekKey = "d", metaKey = "m")).map { it.name }
+        val blankNames = defaultCandidates("  ", LlmKeys(geminiKey = "g", deepseekKey = "d", metaKey = "m")).map { it.name }
         assertEquals("gemini", blankNames.first())
     }
 
@@ -103,10 +95,10 @@ class ProviderPickerTest {
     @Test
     fun rateLimitRetriesNextAndSurfacesWhichRan() {
         val first = failOn("gemini", HttpFailure("rate_limited", 0, true))
-        val second = successOn("groq")
+        val second = successOn("deepseek")
         val outcome = planWithFallbackMessages(userTurn("check mail"), listOf(first, second), sleeper = {})
-        assertEquals("groq", outcome.providerName)
-        assertEquals(listOf("gemini", "groq"), outcome.tried)
+        assertEquals("deepseek", outcome.providerName)
+        assertEquals(listOf("gemini", "deepseek"), outcome.tried)
         assertEquals("search_emails", outcome.result.toolCalls[0].name)
     }
 
@@ -121,14 +113,14 @@ class ProviderPickerTest {
                         throw AssertionError("no-key provider must not be called")
                 },
             )
-        val outcome = planWithFallbackMessages(userTurn("check mail"), listOf(noKey, successOn("groq")))
-        assertEquals("groq", outcome.providerName)
-        assertEquals(listOf("groq"), outcome.tried)
+        val outcome = planWithFallbackMessages(userTurn("check mail"), listOf(noKey, successOn("deepseek")))
+        assertEquals("deepseek", outcome.providerName)
+        assertEquals(listOf("deepseek"), outcome.tried)
     }
 
     @Test
     fun authErrorStopsWithoutRetrying() {
-        val badKey = failOn("groq", HttpFailure("auth", null, false))
+        val badKey = failOn("deepseek", HttpFailure("auth", null, false))
         val next = successOn("gemini")
         val slept = mutableListOf<Long>()
         var stopped = false
@@ -160,9 +152,9 @@ class ProviderPickerTest {
     @Test
     fun retryDisclosureNamesRetriedProvider() {
         val first = failOn("gemini", HttpFailure("rate_limited", 0, true))
-        val second = successOn("groq")
+        val second = successOn("deepseek")
         val outcome = planWithFallbackMessages(userTurn("check mail"), listOf(first, second), sleeper = {})
-        assertEquals("Retried on groq (tried gemini, groq)", retryDisclosure(outcome))
+        assertEquals("Retried on deepseek (tried gemini, deepseek)", retryDisclosure(outcome))
     }
 
     @Test
@@ -190,11 +182,11 @@ class ProviderPickerTest {
             )
         val backup =
             NamedProvider(
-                "groq",
-                "groq-key",
+                "deepseek",
+                "deepseek-key",
                 object : StructuredLlmProvider {
                     override fun chatMessages(messages: List<ChatMessage>, tools: JSONArray): LlmResult {
-                        seenMessages["groq"] = messages.toList()
+                        seenMessages["deepseek"] = messages.toList()
                         return LlmResult(emptyList(), "done")
                     }
                 },
@@ -202,15 +194,15 @@ class ProviderPickerTest {
         val prompt = "Known: take nightly meds. Summarize inbox"
         val outcome = planWithFallbackMessages(userTurn(prompt), listOf(flaky, backup), sleeper = {})
         val geminiUser = seenMessages["gemini"]!!.single { it.role == "user" }.content
-        val groqUser = seenMessages["groq"]!!.single { it.role == "user" }.content
+        val deepseekUser = seenMessages["deepseek"]!!.single { it.role == "user" }.content
         assertEquals(prompt, geminiUser)
-        assertEquals(prompt, groqUser)
-        assertEquals(listOf("gemini", "groq"), outcome.tried)
+        assertEquals(prompt, deepseekUser)
+        assertEquals(listOf("gemini", "deepseek"), outcome.tried)
         val state = AgentUiState(providerUsed = outcome.providerName, providersTried = outcome.tried)
         val disclosure = retryDisclosure(outcome)
-        assertEquals("Retried on groq (tried gemini, groq)", disclosure)
+        assertEquals("Retried on deepseek (tried gemini, deepseek)", disclosure)
         assertEquals(outcome.tried, state.providersTried)
-        assertEquals("groq", state.providerUsed)
+        assertEquals("deepseek", state.providerUsed)
     }
 
     @Test
@@ -237,17 +229,17 @@ class ProviderPickerTest {
     @Test
     fun fallbackSleepsHonouringRetryAfterBeforeNextProvider() {
         val first = failOn("gemini", HttpFailure("rate_limited", 5, true))
-        val second = successOn("groq")
+        val second = successOn("deepseek")
         val slept = mutableListOf<Long>()
         val outcome = planWithFallbackMessages(userTurn("check mail"), listOf(first, second), sleeper = { slept += it })
-        assertEquals("groq", outcome.providerName)
+        assertEquals("deepseek", outcome.providerName)
         assertEquals(listOf(5_000L), slept)
     }
 
     @Test
     fun consecutiveRateLimitsBackOffExponentially() {
         val first = failOn("gemini", HttpFailure("rate_limited", 0, true))
-        val second = failOn("groq", HttpFailure("rate_limited", null, true))
+        val second = failOn("deepseek", HttpFailure("rate_limited", null, true))
         val third = successOn("gemini")
         val slept = mutableListOf<Long>()
         val outcome = planWithFallbackMessages(userTurn("check mail"), listOf(first, second, third), sleeper = { slept += it })

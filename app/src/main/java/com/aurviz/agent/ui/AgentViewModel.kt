@@ -728,16 +728,10 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
 
     // --- AI keys (ticket 36): user-entered, vault-persisted, never in UI state ---
 
-    fun saveLlmKeys(geminiKey: String, groqKey: String) {
-        val existing = tokenVault.loadLlmKeys()
-        saveLlmKeys(geminiKey, groqKey, existing.deepseekKey, existing.metaKey)
-    }
-
-    fun saveLlmKeys(geminiKey: String, groqKey: String, deepseekKey: String, metaKey: String) {
+    fun saveLlmKeys(geminiKey: String, deepseekKey: String, metaKey: String) {
         tokenVault.saveLlmKeys(
             LlmKeys(
                 geminiKey = geminiKey.trim(),
-                groqKey = groqKey.trim(),
                 deepseekKey = deepseekKey.trim(),
                 metaKey = metaKey.trim(),
             ),
@@ -755,7 +749,6 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         _state.update {
             it.copy(
                 geminiKeySet = keys.geminiKey.isNotBlank(),
-                groqKeySet = keys.groqKey.isNotBlank(),
                 deepseekKeySet = keys.deepseekKey.isNotBlank(),
                 metaKeySet = keys.metaKey.isNotBlank(),
             )

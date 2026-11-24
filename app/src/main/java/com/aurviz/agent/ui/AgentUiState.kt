@@ -98,7 +98,6 @@ data class AgentUiState(
     // Ticket 36: whether a user-entered key exists in TokenVault per provider.
     // The key values themselves never enter UI state — only these flags.
     val geminiKeySet: Boolean = false,
-    val groqKeySet: Boolean = false,
     val deepseekKeySet: Boolean = false,
     val metaKeySet: Boolean = false,
     val sending: Boolean = false,

@@ -33,7 +33,7 @@ flowchart TB
     SCHED[Scheduler: exact alarm -> Worker -> loop<br/>read-only allowlist]
     MEMDB[(Room: memories<br/>schedules, schedule_runs<br/>pending_approvals)]
     VAULT[[TokenVault<br/>EncryptedSharedPreferences]]
-    LLM[(Gemini default + Groq fallback<br/>OpenAI-shape HTTP)]
+    LLM[(DeepSeek default + fallbacks<br/>OpenAI-shape HTTP)]
 
     CMD -->|command| VM
     VM -->|memories section + user text| LOOP
@@ -93,8 +93,8 @@ no cosine, no cache.
 
 ## 4. LLM providers and fallback (ADR-0004, re-amended #46)
 
-DeepSeek (`deepseek-flash`) default with Gemini Flash, Groq-hosted
-`llama-3.1-8b-instant`, and Meta (`muse-spark-1.3`) fallbacks over one
+DeepSeek (`deepseek-flash`) default with Gemini Flash
+and Meta (`muse-spark-1.3`) fallbacks over one
 OpenAI-shape OkHttp client (connect 15 s, read 60 s, backoff honouring
 `retry-after`). Fallback triggers on 429/5xx (never 401), never silently
 mid-conversation with private context — the UI shows "retried on Y" from

@@ -1,7 +1,7 @@
 # T1 tool-loop spike (issue #9)
 
-One OpenAI-shape HTTP client (`t1_llm_provider.py`) covering Gemini / Groq /
-DeepSeek — only base URL + key + model change (ADR-0004).
+One OpenAI-shape HTTP client (`t1_llm_provider.py`) covering Gemini /
+DeepSeek / Meta — only base URL + key + model change (ADR-0004).
 
 ## What was verified (2026-11-22, TDD red→green, 6 tests)
 
@@ -14,7 +14,7 @@ DeepSeek — only base URL + key + model change (ADR-0004).
 - `FakeLlmProvider.plan()` returns canned `getImportantEmails(max_results=5)`
   for planner tests.
 - LIVE: Gemini compat endpoint returned
-  `tool_calls=[getImportantEmails(max_results=5)]`. Groq skipped (no key).
+  `tool_calls=[getImportantEmails(max_results=5)]`.
 
 ## Run
 

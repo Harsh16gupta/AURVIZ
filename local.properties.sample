@@ -6,8 +6,6 @@
 LLM_DEFAULT_PROVIDER=deepseek
 GEMINI_API_KEY=
 GEMINI_MODEL=gemini-2.5-flash
-GROQ_API_KEY=
-GROQ_MODEL=llama-3.1-8b-instant
 DEEPSEEK_API_KEY=
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-flash

@@ -30,7 +30,7 @@ class ProviderPinningTest {
     fun foregroundPinsAfterFirstAnswerAndNeverReplaysPrivateTranscript() {
         val first = Scripted(listOf(ok("turn1"), ok("turn2")))
         val second = Scripted(listOf(ok("should-never-run")))
-        val chat = PinnedFallbackChatLlm(listOf(NamedProvider("gemini", "k", first), NamedProvider("groq", "k", second)))
+        val chat = PinnedFallbackChatLlm(listOf(NamedProvider("gemini", "k", first), NamedProvider("deepseek", "k", second)))
         val m1 = listOf(ChatMessage("system", "sys [memories] private [/memories]"), ChatMessage("user", "hi"))
         val m2 = m1 + ChatMessage("tool", "private mail body", toolCallId = "c1")
         chat.chat(m1)
@@ -58,13 +58,13 @@ class ProviderPinningTest {
     @Test
     fun nonFallbackFailureRecordsTriedBeforeStop() {
         val badKey = Scripted(listOf(LlmException(HttpFailure("auth", null, false), "HTTP 401")))
-        val chat = PinnedFallbackChatLlm(listOf(NamedProvider("groq", "k", badKey)))
+        val chat = PinnedFallbackChatLlm(listOf(NamedProvider("deepseek", "k", badKey)))
         try {
             chat.chat(listOf(ChatMessage("user", "hi")))
             throw AssertionError("expected 401")
         } catch (e: LlmException) {
             assertEquals("auth", e.failure.kind)
-            assertEquals(listOf("groq"), chat.tried)
+            assertEquals(listOf("deepseek"), chat.tried)
         }
     }
 
@@ -74,16 +74,16 @@ class ProviderPinningTest {
         val chat = PinnedFallbackChatLlm(
             listOf(
                 NamedProvider("gemini", "k", flaky),
-                NamedProvider("groq", "k", Scripted(listOf(ok("done")))),
+                NamedProvider("deepseek", "k", Scripted(listOf(ok("done")))),
             ),
         )
-        // First turn retries gemini->groq and pins groq; loop then answers.
+        // First turn retries gemini->deepseek and pins deepseek; loop then answers.
         val first = chat.chat(listOf(ChatMessage("system", "sys"), ChatMessage("user", "hi")))
         assertEquals("done", first.content)
-        assertEquals(listOf("gemini", "groq"), chat.tried)
+        assertEquals(listOf("gemini", "deepseek"), chat.tried)
         val summary = scheduledSummary("done", null, 0, chat.tried.toList(), chat.lastProvider)
-        assertTrue(summary.contains("retried on groq"))
-        assertTrue(summary.contains("gemini, groq"))
+        assertTrue(summary.contains("retried on deepseek"))
+        assertTrue(summary.contains("gemini, deepseek"))
     }
 
     @Test
@@ -101,8 +101,8 @@ class ProviderPinningTest {
 
     @Test
     fun scheduledFailureSummaryNamesTriedProviders() {
-        val summary = scheduledSummary("Routine failed: HTTP 500", "HTTP 500", 0, listOf("gemini", "groq"), null)
-        assertTrue(summary.contains("gemini, groq"))
+        val summary = scheduledSummary("Routine failed: HTTP 500", "HTTP 500", 0, listOf("gemini", "deepseek"), null)
+        assertTrue(summary.contains("gemini, deepseek"))
         assertTrue(summary.contains("no provider answered"))
     }
 }

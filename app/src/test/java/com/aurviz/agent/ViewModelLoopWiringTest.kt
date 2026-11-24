@@ -130,8 +130,8 @@ class ViewModelLoopWiringTest {
             )
         val backup =
             NamedProvider(
-                "groq",
-                "groq-key",
+                "deepseek",
+                "deepseek-key",
                 ScriptedMessagesProvider(listOf(searchCall(), answer("done"))),
             )
         val chat = PinnedFallbackChatLlm(listOf(flaky, backup))
@@ -140,13 +140,13 @@ class ViewModelLoopWiringTest {
         assertTrue(result is AgentLoopResult.Answered)
         // The private-context prompt was replayed to both providers, so
         // both are reported — never a silent retry (ADR-0004).
-        assertEquals(listOf("gemini", "groq"), chat.tried)
-        assertEquals("groq", chat.lastProvider)
+        assertEquals(listOf("gemini", "deepseek"), chat.tried)
+        assertEquals("deepseek", chat.lastProvider)
 
         val state = AgentUiState(providerUsed = chat.lastProvider, providersTried = chat.tried.toList())
-        assertEquals("groq", state.providerUsed)
-        assertEquals(listOf("gemini", "groq"), state.providersTried)
-        assertEquals("Retried on groq (tried gemini, groq)", state.retryLine())
+        assertEquals("deepseek", state.providerUsed)
+        assertEquals(listOf("gemini", "deepseek"), state.providersTried)
+        assertEquals("Retried on deepseek (tried gemini, deepseek)", state.retryLine())
     }
 
     @Test
@@ -160,8 +160,8 @@ class ViewModelLoopWiringTest {
 
     @Test
     fun totalFailureStillDisclosesTriedProviders() {
-        val state = AgentUiState(providerUsed = null, providersTried = listOf("gemini", "groq"))
-        assertEquals("No provider answered (tried gemini, groq)", state.retryLine())
+        val state = AgentUiState(providerUsed = null, providersTried = listOf("gemini", "deepseek"))
+        assertEquals("No provider answered (tried gemini, deepseek)", state.retryLine())
     }
 
     @Test

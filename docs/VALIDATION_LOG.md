@@ -749,3 +749,32 @@ Every case where the AI was wrong and how it was caught. Add an entry with file:
   0 failures). No UI touched, so no `assembleDebug` per ticket rule.
 - Glossary check: Arm/Disarm follow the spec wording; no ADR conflict
   (owned-seam delegation is #77's decided design).
+
+## 2026-11-24 — Groq provider removed from the codebase
+
+- **Groq is gone from providers, keys, UI, and build config.**
+  `ProviderPicker.kt` no longer declares `groqKey`/`groqModel`, the
+  `resolveProvider("groq")` branch, or the `groq` slot in the fallback
+  order (now `preferred → deepseek → meta → gemini`);
+  `LlmProvider.kt` drops `GROQ_BASE_URL` and the `"groq"` arm of
+  `Providers.default()`; `TokenVault.kt`/`LlmKeys` drop `groqKey`
+  (`clearLlmKeys` still removes the legacy `llm_groq_key` pref so
+  upgrading installs shed the orphaned entry);
+  `AgentViewModel.saveLlmKeys` is now
+  `(geminiKey, deepseekKey, metaKey)`; `AgentUiState.groqKeySet` removed;
+  `CommandScreen.kt` provider sheet and `SettingsScreen.kt` key rows no
+  longer list Groq; `app/build.gradle.kts` and `local.properties.sample`
+  drop `GROQ_API_KEY`/`GROQ_MODEL`; `spike/t1_live_check.py` checks Gemini
+  only. Tests re-pinned from `groq` to `deepseek` as the fallback fixture
+  (`ProviderPickerTest`, `ProviderPinningTest`,
+  `ViewModelLoopWiringTest`, `LlmKeysTest`).
+- **Docs amended, history kept.** ADR-0004 re-amended (title, Status,
+  fallback order) instead of silently contradicting it; README,
+  ARCHITECTURE, gaps, SECURITY, SCHEDULING_TEST, AURVIZ_EVOLUTION_PLAN,
+  and spike docs updated. Historical records left intact:
+  `docs/research/0001-llm-android-stack.md` (§2 Groq API notes),
+  `docs/VALIDATION_LOG.md` prior entries, `RESEARCH_PATTERNS.md`
+  retry-after example.
+- Glossary check: no glossary term for Groq; remaining providers
+  (Gemini/DeepSeek/Meta) match ADR-0004 as amended. Full
+  `:app:testDebugUnitTest` required after this change.

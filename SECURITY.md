@@ -5,11 +5,11 @@
 - Debug builds may read LLM keys from `local.properties` (git-ignored, see
   `local.properties.sample`). Never commit real keys.
 - Release builds compile with **empty** API-key `BuildConfig` fields. Release
-  users enter Gemini/Groq keys in Settings; they are persisted in `TokenVault`
+  users enter Gemini/DeepSeek/Meta keys in Settings; they are persisted in `TokenVault`
   and override `BuildConfig` per provider at call time.
 - OAuth client ID/secret stay in `BuildConfig` from `local.properties`.
 - Verified ticket 37: release `BuildConfig` shows `GEMINI_API_KEY`,
-  `GROQ_API_KEY`, `DEEPSEEK_API_KEY` all `""`; `assembleRelease` succeeds
+  `DEEPSEEK_API_KEY`, `META_API_KEY` all `""`; `assembleRelease` succeeds
   (`app-release-unsigned.apk`, ~6.7 MB). No keystores are tracked.
 
 ## Encrypted storage (TokenVault)

@@ -10,8 +10,6 @@ import org.json.JSONArray
 data class ProviderSettings(
     val geminiKey: String = "",
     val geminiModel: String = "gemini-2.5-flash",
-    val groqKey: String = "",
-    val groqModel: String = "llama-3.1-8b-instant",
     val deepseekKey: String = "",
     val deepseekModel: String = "deepseek-flash",
     val metaKey: String = "",
@@ -104,7 +102,6 @@ fun retryDisclosure(result: FallbackResult): String? =
 fun effectiveSettings(base: ProviderSettings, user: LlmKeys): ProviderSettings =
     base.copy(
         geminiKey = user.geminiKey.ifBlank { base.geminiKey },
-        groqKey = user.groqKey.ifBlank { base.groqKey },
         deepseekKey = user.deepseekKey.ifBlank { base.deepseekKey },
         metaKey = user.metaKey.ifBlank { base.metaKey },
     )
@@ -115,8 +112,6 @@ fun settingsFromBuildConfig(): ProviderSettings =
     ProviderSettings(
         geminiKey = BuildConfig.GEMINI_API_KEY,
         geminiModel = BuildConfig.GEMINI_MODEL,
-        groqKey = BuildConfig.GROQ_API_KEY,
-        groqModel = BuildConfig.GROQ_MODEL,
         deepseekKey = BuildConfig.DEEPSEEK_API_KEY,
         deepseekModel = BuildConfig.DEEPSEEK_MODEL,
         metaKey = BuildConfig.META_API_KEY,
@@ -132,8 +127,8 @@ fun providerFromConfig(config: ProviderConfig): StructuredLlmProvider =
 fun defaultCandidates(preferred: String, userKeys: LlmKeys = LlmKeys()): List<NamedProvider> {
     val settings = effectiveSettings(settingsFromBuildConfig(), userKeys)
     val preferredName =
-        preferred.trim().lowercase().takeIf { it in setOf("gemini", "groq", "deepseek", "meta") } ?: "gemini"
-    val order = listOf(preferredName, "deepseek", "meta", "gemini", "groq").distinct()
+        preferred.trim().lowercase().takeIf { it in setOf("gemini", "deepseek", "meta") } ?: "gemini"
+    val order = listOf(preferredName, "deepseek", "meta", "gemini").distinct()
     return order.map { name ->
         val config = resolveProvider(name, settings)
         NamedProvider(config.name, config.apiKey, providerFromConfig(config))
@@ -143,13 +138,6 @@ fun defaultCandidates(preferred: String, userKeys: LlmKeys = LlmKeys()): List<Na
 // Pick by name. Unknown names fall back to Gemini so the app never crashes.
 fun resolveProvider(name: String, settings: ProviderSettings): ProviderConfig =
     when (name.trim().lowercase()) {
-        "groq" ->
-            ProviderConfig(
-                name = "groq",
-                baseUrl = Providers.GROQ_BASE_URL,
-                apiKey = settings.groqKey,
-                model = settings.groqModel,
-            )
         "deepseek" ->
             ProviderConfig(
                 name = "deepseek",

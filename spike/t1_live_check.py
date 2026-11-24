@@ -1,4 +1,4 @@
-"""T1 live check: one OpenAI-shape tools call against Gemini and/or Groq.
+"""T1 live check: one OpenAI-shape tools call against Gemini.
 
 Reads keys from local.properties (git-ignored). Never prints key values.
 Exit 0 with a documented outcome even when keys are missing/invalid:
@@ -85,14 +85,6 @@ def main():
             "https://generativelanguage.googleapis.com/v1beta/openai",
             props.get("GEMINI_API_KEY", ""),
             props.get("GEMINI_MODEL", "gemini-2.5-flash"),
-        )
-    )
-    print(
-        try_provider(
-            "groq",
-            "https://api.groq.com/openai/v1",
-            props.get("GROQ_API_KEY", ""),
-            props.get("GROQ_MODEL", "llama-3.1-8b-instant"),
         )
     )
 

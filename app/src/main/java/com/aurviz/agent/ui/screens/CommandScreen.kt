@@ -74,7 +74,7 @@ import com.aurviz.agent.ui.theme.X
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-private val ProviderChoices: List<String?> = listOf(null, "deepseek", "gemini", "groq", "meta")
+private val ProviderChoices: List<String?> = listOf(null, "deepseek", "gemini", "meta")
 
 // The Agent's home: a scrollable Interaction feed, its Plans as Task
 // Execution rows, and the Composer. Sensitive Tools never run here

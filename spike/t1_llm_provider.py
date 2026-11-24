@@ -1,7 +1,7 @@
 """T1 tool-loop spike: OpenAI-shape request builder + parser + error map + fake.
 
 Mirrors the Kotlin LlmProvider contract (see LlmProvider.kt in this dir).
-One HTTP client shape covers Gemini / Groq / DeepSeek: only base_url,
+One HTTP client shape covers Gemini / DeepSeek / Meta: only base_url,
 key and model change (ADR-0004, research 0001).
 """
 import json
@@ -43,7 +43,7 @@ def parse_tool_calls(response):
 def map_http_error(status, headers, body):
     """Map an HTTP failure to kind + retry_after + fallback signal.
 
-    429 carries retry-after (Groq sends retry-after + x-ratelimit-* headers);
+    429 carries retry-after (retry-after + x-ratelimit-* headers);
     401 means the key is bad (no retry); anything else is a generic error
     that the planner may route to the fallback provider.
     """

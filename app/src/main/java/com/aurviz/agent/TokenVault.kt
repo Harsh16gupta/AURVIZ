@@ -11,13 +11,12 @@ import androidx.security.crypto.MasterKey
 // TokenStore itself stays plain + unit-tested; this vault only moves
 // its three fields to and from the encrypted file.
 
-// Ticket 36: user-entered LLM keys (Gemini, Groq, DeepSeek, Meta — the ADR-0004 set) live
+// Ticket 36: user-entered LLM keys (Gemini, DeepSeek, Meta — the ADR-0004 set) live
 // in the same encrypted file. Release APKs carry no embedded keys
 // (BuildConfig key fields are empty in release builds), so these vault
 // entries are the only key source on a release install.
 data class LlmKeys(
     val geminiKey: String = "",
-    val groqKey: String = "",
     val deepseekKey: String = "",
     val metaKey: String = "",
 )
@@ -65,7 +64,6 @@ class TokenVault(private val prefs: SharedPreferences) {
     fun saveLlmKeys(keys: LlmKeys) {
         prefs.edit()
             .putString("llm_gemini_key", keys.geminiKey)
-            .putString("llm_groq_key", keys.groqKey)
             .putString("llm_deepseek_key", keys.deepseekKey)
             .putString("llm_meta_key", keys.metaKey)
             .apply()
@@ -74,7 +72,6 @@ class TokenVault(private val prefs: SharedPreferences) {
     fun loadLlmKeys(): LlmKeys =
         LlmKeys(
             geminiKey = prefs.getString("llm_gemini_key", null).orEmpty(),
-            groqKey = prefs.getString("llm_groq_key", null).orEmpty(),
             deepseekKey = prefs.getString("llm_deepseek_key", null).orEmpty(),
             metaKey = prefs.getString("llm_meta_key", null).orEmpty(),
         )
@@ -82,9 +79,10 @@ class TokenVault(private val prefs: SharedPreferences) {
     fun clearLlmKeys() {
         prefs.edit()
             .remove("llm_gemini_key")
-            .remove("llm_groq_key")
             .remove("llm_deepseek_key")
             .remove("llm_meta_key")
+            // Drop the legacy Groq entry for users upgrading from older builds.
+            .remove("llm_groq_key")
             .apply()
     }
 }

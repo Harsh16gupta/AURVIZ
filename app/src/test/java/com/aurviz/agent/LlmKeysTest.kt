@@ -15,8 +15,8 @@ class LlmKeysTest {
     @Test
     fun userKeysRoundTripThroughVault() {
         val vault = vault()
-        vault.saveLlmKeys(LlmKeys(geminiKey = "user-gemini", groqKey = "user-groq", deepseekKey = "user-deepseek", metaKey = "user-meta"))
-        assertEquals(LlmKeys(geminiKey = "user-gemini", groqKey = "user-groq", deepseekKey = "user-deepseek", metaKey = "user-meta"), vault.loadLlmKeys())
+        vault.saveLlmKeys(LlmKeys(geminiKey = "user-gemini", deepseekKey = "user-deepseek", metaKey = "user-meta"))
+        assertEquals(LlmKeys(geminiKey = "user-gemini", deepseekKey = "user-deepseek", metaKey = "user-meta"), vault.loadLlmKeys())
     }
 
     @Test
@@ -27,9 +27,9 @@ class LlmKeysTest {
     @Test
     fun savingAgainReplacesOldKeys() {
         val vault = vault()
-        vault.saveLlmKeys(LlmKeys(geminiKey = "old", groqKey = "old"))
-        vault.saveLlmKeys(LlmKeys(geminiKey = "new", groqKey = ""))
-        assertEquals(LlmKeys(geminiKey = "new", groqKey = ""), vault.loadLlmKeys())
+        vault.saveLlmKeys(LlmKeys(geminiKey = "old", deepseekKey = "old"))
+        vault.saveLlmKeys(LlmKeys(geminiKey = "new", deepseekKey = ""))
+        assertEquals(LlmKeys(geminiKey = "new", deepseekKey = ""), vault.loadLlmKeys())
     }
 
     @Test
@@ -38,7 +38,7 @@ class LlmKeysTest {
         val tokens = TokenStore()
         tokens.gmailAccessToken = "gmail-token"
         vault.saveFrom(tokens)
-        vault.saveLlmKeys(LlmKeys(geminiKey = "user-gemini", groqKey = "user-groq"))
+        vault.saveLlmKeys(LlmKeys(geminiKey = "user-gemini", deepseekKey = "user-deepseek"))
         vault.clearLlmKeys()
         assertEquals(LlmKeys(), vault.loadLlmKeys())
         val reloaded = TokenStore()
@@ -57,9 +57,9 @@ class LlmKeysTest {
         tokens.gmailRefreshToken = "gmail-refresh"
         tokens.gmailAccount = "user@example.com"
         vault.saveFrom(tokens)
-        vault.saveLlmKeys(LlmKeys(geminiKey = "user-gemini", groqKey = "user-groq"))
+        vault.saveLlmKeys(LlmKeys(geminiKey = "user-gemini", deepseekKey = "user-deepseek"))
         vault.clearGmail()
-        assertEquals(LlmKeys(geminiKey = "user-gemini", groqKey = "user-groq"), vault.loadLlmKeys())
+        assertEquals(LlmKeys(geminiKey = "user-gemini", deepseekKey = "user-deepseek"), vault.loadLlmKeys())
         val reloaded = TokenStore()
         vault.loadInto(reloaded)
         assertEquals(null, reloaded.gmailAccessToken)
@@ -73,21 +73,21 @@ class LlmKeysTest {
             ProviderSettings(
                 geminiKey = "build-gemini",
                 geminiModel = "gemini-2.5-flash",
-                groqKey = "build-groq",
-                groqModel = "llama-3.1-8b-instant",
+                deepseekKey = "build-deepseek",
+                deepseekModel = "deepseek-flash",
             )
-        val effective = effectiveSettings(base, LlmKeys(geminiKey = "user-gemini", groqKey = ""))
+        val effective = effectiveSettings(base, LlmKeys(geminiKey = "user-gemini", deepseekKey = ""))
         assertEquals("user-gemini", effective.geminiKey)
-        assertEquals("build-groq", effective.groqKey)
+        assertEquals("build-deepseek", effective.deepseekKey)
         assertEquals("gemini-2.5-flash", effective.geminiModel)
     }
 
     @Test
     fun blankUserKeysFallBackToBuildConfig() {
-        val base = ProviderSettings(geminiKey = "build-gemini", groqKey = "build-groq")
+        val base = ProviderSettings(geminiKey = "build-gemini", deepseekKey = "build-deepseek")
         val effective = effectiveSettings(base, LlmKeys())
         assertEquals("build-gemini", effective.geminiKey)
-        assertEquals("build-groq", effective.groqKey)
+        assertEquals("build-deepseek", effective.deepseekKey)
     }
 
     @Test
@@ -98,7 +98,7 @@ class LlmKeysTest {
         // with a baked-in key.
         val effective = effectiveSettings(ProviderSettings(), LlmKeys())
         assertEquals("", effective.geminiKey)
-        assertEquals("", effective.groqKey)
+        assertEquals("", effective.deepseekKey)
     }
 }
 

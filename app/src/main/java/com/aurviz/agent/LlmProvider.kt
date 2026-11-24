@@ -168,8 +168,8 @@ fun parseToolCalls(response: JSONObject): LlmResult {
     return LlmResult(calls, content)
 }
 
-/** Maps HTTP failures to planner signals. 429 carries retry-after (Groq sends
- *  retry-after + x-ratelimit-*); 401 means bad key (no retry); other errors
+/** Maps HTTP failures to planner signals. 429 carries retry-after
+ *  (retry-after + x-ratelimit-*); 401 means bad key (no retry); other errors
  *  fall back to the next provider. Header lookup is case-insensitive. */
 fun mapHttpError(status: Int, headers: Map<String, String>, body: String): HttpFailure {
     val lowered = headers.mapKeys { it.key.lowercase() }
@@ -192,7 +192,7 @@ fun llmHttpClient(): OkHttpClient =
         .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
         .build()
 
-/** OpenAI-shape chat/completions client. Covers Gemini compat, Groq, DeepSeek, and Meta. */
+/** OpenAI-shape chat/completions client. Covers Gemini compat, DeepSeek, and Meta. */
 class OpenAiChatProvider(
     private val baseUrl: String,
     private val apiKey: String,
@@ -225,7 +225,6 @@ class OpenAiChatProvider(
 /** Provider endpoints. Keys/models come from BuildConfig (local.properties). */
 object Providers {
     const val GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
-    const val GROQ_BASE_URL = "https://api.groq.com/openai/v1"
     val DEEPSEEK_BASE_URL: String
         get() = BuildConfig.DEEPSEEK_BASE_URL.ifBlank { "https://api.deepseek.com" }
     val META_BASE_URL: String
@@ -233,7 +232,6 @@ object Providers {
 
     fun default(): StructuredLlmProvider =
         when (BuildConfig.LLM_DEFAULT_PROVIDER) {
-            "groq" -> OpenAiChatProvider(GROQ_BASE_URL, BuildConfig.GROQ_API_KEY, BuildConfig.GROQ_MODEL)
             "deepseek" -> OpenAiChatProvider(DEEPSEEK_BASE_URL, BuildConfig.DEEPSEEK_API_KEY, BuildConfig.DEEPSEEK_MODEL)
             "meta" -> OpenAiChatProvider(META_BASE_URL, BuildConfig.META_API_KEY, BuildConfig.META_MODEL)
             else -> OpenAiChatProvider(GEMINI_BASE_URL, BuildConfig.GEMINI_API_KEY, BuildConfig.GEMINI_MODEL)

@@ -49,7 +49,7 @@ fun SettingsScreen(
     onRevokeGmail: () -> Unit,
     onPasteLink: (String) -> Unit,
     onDismissPasteFallback: () -> Unit,
-    onSaveLlmKeys: (String, String, String, String) -> Unit,
+    onSaveLlmKeys: (String, String, String) -> Unit,
     onClearLlmKeys: () -> Unit,
     onOpenExactAlarmSettings: () -> Unit,
     onRefreshExactAlarm: () -> Unit,
@@ -73,7 +73,6 @@ fun SettingsScreen(
     var newAllow by remember { mutableStateOf("") }
     // Key fields always start empty: saved keys are never read back into UI.
     var geminiKey by remember { mutableStateOf("") }
-    var groqKey by remember { mutableStateOf("") }
     var deepseekKey by remember { mutableStateOf("") }
     var metaKey by remember { mutableStateOf("") }
     val haptics = LocalHaptics.current
@@ -82,7 +81,6 @@ fun SettingsScreen(
         onDispose {
             pasted = ""
             geminiKey = ""
-            groqKey = ""
             deepseekKey = ""
             metaKey = ""
         }
@@ -195,17 +193,6 @@ fun SettingsScreen(
                 label = "Paste Gemini API key",
             )
             OptionRow(
-                title = "Groq",
-                description = "Fallback provider.",
-                badge = if (state.groqKeySet) "Set" else null,
-                value = if (state.groqKeySet) null else "Not set",
-            )
-            TextField(
-                value = groqKey,
-                onValueChange = { groqKey = it },
-                label = "Paste Groq API key",
-            )
-            OptionRow(
                 title = "DeepSeek",
                 description = "DeepSeek flash provider.",
                 badge = if (state.deepseekKeySet) "Set" else null,
@@ -230,9 +217,8 @@ fun SettingsScreen(
             Row(horizontalArrangement = Arrangement.spacedBy(Space * 2)) {
                 Button(
                     onClick = {
-                        onSaveLlmKeys(geminiKey, groqKey, deepseekKey, metaKey)
+                        onSaveLlmKeys(geminiKey, deepseekKey, metaKey)
                         geminiKey = ""
-                        groqKey = ""
                         deepseekKey = ""
                         metaKey = ""
                     },
@@ -243,7 +229,6 @@ fun SettingsScreen(
                     onClick = {
                         onClearLlmKeys()
                         geminiKey = ""
-                        groqKey = ""
                         deepseekKey = ""
                         metaKey = ""
                     },
