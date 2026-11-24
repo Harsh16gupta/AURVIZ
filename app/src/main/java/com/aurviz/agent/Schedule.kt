@@ -136,20 +136,41 @@ fun nextFireTime(schedule: Schedule, zone: ZoneId, now: ZonedDateTime): ZonedDat
 
 // Loop-created schedule side effects (ADR-0002): a create/cancel that the
 // Task Execution ran must arm/disarm its alarm + Worker like the manual
-// and held-approval paths. Pure decision; the ViewModel maps ARM/DISARM
+// and held-approval paths. Pure decision; the ViewModel maps Arm/Disarm
 // to register/cancel calls on the IO thread. Only an approved Success
 // counts: reject/timeout arrive as Success(cancelled_by_user) with
 // approved=false, and acting on those would arm/disarm a routine the
 // user just rejected.
-enum class LoopScheduleSideEffect { ARM, DISARM }
 
-fun loopScheduleSideEffect(callName: String, approved: Boolean, result: ToolResult): LoopScheduleSideEffect? {
-    if (!approved) return null
-    if (result !is ToolResult.Success) return null
-    return when (callName) {
-        "create_schedule" -> LoopScheduleSideEffect.ARM
-        "cancel_schedule" -> LoopScheduleSideEffect.DISARM
-        else -> null
+// #79 T2: single owned seam for all approved-write re-arm. Both
+// AgentViewModel call sites (syncAlarmsForApproved for held approvals,
+// syncLoopScheduleSideEffect for foreground loop) delegate here instead
+// of mirroring "create_schedule"/"cancel_schedule" strings by hand.
+sealed interface ScheduleSideEffect {
+    data class Arm(val scheduleId: String) : ScheduleSideEffect
+    data class Disarm(val scheduleId: String) : ScheduleSideEffect
+    data object None : ScheduleSideEffect
+}
+
+fun onApprovedWrite(
+    toolName: String,
+    arguments: Map<String, Any?>,
+    approved: Boolean,
+    result: ToolResult,
+): ScheduleSideEffect {
+    if (!approved || result !is ToolResult.Success) return ScheduleSideEffect.None
+    return when (toolName) {
+        "create_schedule" -> {
+            val newId = (result.data as? Map<*, *>)?.get("id") as? String
+                ?: return ScheduleSideEffect.None
+            ScheduleSideEffect.Arm(newId)
+        }
+        "cancel_schedule" -> {
+            val target = arguments["schedule_id"] as? String
+                ?: return ScheduleSideEffect.None
+            ScheduleSideEffect.Disarm(target)
+        }
+        else -> ScheduleSideEffect.None
     }
 }
 

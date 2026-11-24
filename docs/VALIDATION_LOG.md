@@ -572,3 +572,44 @@ Every case where the AI was wrong and how it was caught. Add an entry with file:
   per ticket rule.
 - Glossary check: Schedule / PendingApproval used per `GLOSSARY.md`;
   no ADR conflict (codec unification is #77's decided design, no migration).
+
+## 2026-11-24 — Issue #79 T2 single approved-write side-effect (`main`)
+
+- **Prior-session T2 hunks broke the dirty-tree build.** `AgentViewModel.kt`
+  called `onApprovedWrite`/`ScheduleSideEffect` with no import
+  (`AgentViewModel.kt:70-71` imported the now-unused
+  `loopScheduleSideEffect`/`LoopScheduleSideEffect` instead), so
+  `:app:compileDebugKotlin` failed and the suite could not run. Fixed by
+  swapping the two imports; the `scheduleId` errors at `1068/1078` were
+  the same missing import (smart-cast on `effect`), not a second defect.
+- **Legacy test pinned the old contract.** `ScheduleTest:278` asserted the
+  3-arg `loopScheduleSideEffect("create_schedule", …)` → ARM with an
+  id-less result; under the owned seam an id-less approved create arms
+  nothing. Red observed on the old assertion (then a compile block
+  before the import fix). Per review, the whole shim family was deleted
+  instead of re-pinned, so this test was removed and its assertions
+  folded into the `onApprovedWrite` block below.
+- **Both ViewModel paths delegate, no mirrors left.** `git diff` confirms
+  `syncAlarmsForApproved` + `syncLoopScheduleSideEffect`
+  (`AgentViewModel.kt:1043-1090`) call `onApprovedWrite` with real
+  toolName/args/approved/result; grep finds no `"create_schedule"` /
+  `"cancel_schedule"` literals left in the file. Adapter executes:
+  Arm → `registerRoutineAlarm`, Disarm → `cancelRoutineWork` +
+  `cancelRoutineAlarm`.
+- **Review drove shim deletion.** Both review axes flagged the
+  `loopScheduleSideEffect` shims: the 3-arg cancel fallback (DISARM with
+  empty args) contradicts "missing target disarms nothing", the `ToolCall`
+  overload has zero callers, and `LoopScheduleSideEffect` vs
+  `ScheduleSideEffect` is a dual vocabulary. Deleted the enum, both
+  overloads, and the legacy 3-arg test (its assertions live on in the 7
+  `onApprovedWrite` tests); also fixed the stale `// Ticket 2:` comment
+  to `#79 T2`. `grep` confirms no `LoopScheduleSideEffect` /
+  `loopScheduleSideEffect` references remain (the ViewModel's private
+  `syncLoopScheduleSideEffect` is a different function and stays).
+- Tests: new `onApprovedWrite` block in `ScheduleTest` (7 tests: Arm on
+  id, None on missing id/target, approved=false, non-Success, send/read
+  names). Full `:app:testDebugUnitTest` green in the T1+T2 isolation
+  tree (ScheduleWork T3 stashed, `ScheduleRuntime.kt` aside: 445 tests,
+  0 failures). No UI touched, so no `assembleDebug` per ticket rule.
+- Glossary check: Arm/Disarm follow the spec wording; no ADR conflict
+  (owned-seam delegation is #77's decided design).

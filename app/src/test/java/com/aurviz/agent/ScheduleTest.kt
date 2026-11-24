@@ -270,20 +270,58 @@ class ScheduleTest {
         assertFalse(routineForegroundNotificationId("sched_1") == routineNotificationId("sched_1"))
     }
 
+    // --- Ticket #79: single owned seam for approved-write re-arm. ---
+
     @Test
-    fun loopCreateArmsAndCancelDisarmsOnlyOnApprovedSuccess() {
+    fun approvedCreateWithIdInResultArms() {
+        val effect = onApprovedWrite("create_schedule", emptyMap(), true, ToolResult.Success(mapOf("id" to "sched_3")))
+        assertEquals(ScheduleSideEffect.Arm("sched_3"), effect)
+    }
+
+    @Test
+    fun approvedCreateWithoutIdArmsNothing() {
         val ok = ToolResult.Success(mapOf("ok" to true))
+        assertEquals(ScheduleSideEffect.None, onApprovedWrite("create_schedule", emptyMap(), true, ok))
+    }
+
+    @Test
+    fun approvedCancelWithTargetDisarms() {
+        val ok = ToolResult.Success(mapOf("ok" to true))
+        val effect = onApprovedWrite("cancel_schedule", mapOf("schedule_id" to "sched_3"), true, ok)
+        assertEquals(ScheduleSideEffect.Disarm("sched_3"), effect)
+    }
+
+    @Test
+    fun approvedCancelWithoutTargetDisarmsNothing() {
+        val ok = ToolResult.Success(mapOf("ok" to true))
+        assertEquals(ScheduleSideEffect.None, onApprovedWrite("cancel_schedule", emptyMap(), true, ok))
+    }
+
+    @Test
+    fun rejectedOrTimedOutProducesNoEffect() {
         val cancelled = ToolResult.Success(mapOf("status" to "cancelled_by_user"))
+        for (tool in listOf("create_schedule", "cancel_schedule", "send_email")) {
+            assertEquals(
+                ScheduleSideEffect.None,
+                onApprovedWrite(tool, mapOf("schedule_id" to "sched_3"), false, cancelled),
+            )
+        }
+    }
+
+    @Test
+    fun nonSuccessResultProducesNoEffect() {
         val failed = ToolResult.Failure("nope", retryable = false)
-        assertEquals(LoopScheduleSideEffect.ARM, loopScheduleSideEffect("create_schedule", true, ok))
-        assertEquals(LoopScheduleSideEffect.DISARM, loopScheduleSideEffect("cancel_schedule", true, ok))
-        // Reject/timeout report Success(cancelled_by_user) with approved=false:
-        // a rejected cancel must not disarm, a rejected create must not arm.
-        assertNull(loopScheduleSideEffect("create_schedule", false, cancelled))
-        assertNull(loopScheduleSideEffect("cancel_schedule", false, cancelled))
-        assertNull(loopScheduleSideEffect("create_schedule", true, failed))
-        assertNull(loopScheduleSideEffect("cancel_schedule", true, failed))
-        assertNull(loopScheduleSideEffect("send_email", true, ok))
-        assertNull(loopScheduleSideEffect("search_emails", true, ok))
+        assertEquals(ScheduleSideEffect.None, onApprovedWrite("create_schedule", emptyMap(), true, failed))
+        assertEquals(
+            ScheduleSideEffect.None,
+            onApprovedWrite("cancel_schedule", mapOf("schedule_id" to "sched_3"), true, failed),
+        )
+    }
+
+    @Test
+    fun otherToolNamesProduceNoEffect() {
+        val created = ToolResult.Success(mapOf("id" to "sched_3"))
+        assertEquals(ScheduleSideEffect.None, onApprovedWrite("send_email", emptyMap(), true, created))
+        assertEquals(ScheduleSideEffect.None, onApprovedWrite("search_emails", emptyMap(), true, created))
     }
 }

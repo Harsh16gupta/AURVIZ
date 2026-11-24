@@ -67,8 +67,8 @@ import com.aurviz.agent.formatSchedulePreview
 import com.aurviz.agent.forgetPreview
 import com.aurviz.agent.knownAddressesFromInbox
 import com.aurviz.agent.listSchedules
-import com.aurviz.agent.loopScheduleSideEffect
-import com.aurviz.agent.LoopScheduleSideEffect
+import com.aurviz.agent.onApprovedWrite
+import com.aurviz.agent.ScheduleSideEffect
 import com.aurviz.agent.newCodeVerifier
 import com.aurviz.agent.openPage
 import com.aurviz.agent.parseSchedule
@@ -1042,16 +1042,15 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun syncAlarmsForApproved(approval: PendingApproval, result: ToolResult.Success) {
         val app = getApplication<Application>()
-        when (approval.toolName) {
-            "create_schedule" -> {
-                val newId = (result.data as? Map<*, *>)?.get("id") as? String ?: return
-                listSchedules(scheduleStore).find { it.id == newId }?.let { registerRoutineAlarm(app, it) }
+        when (val effect = onApprovedWrite(approval.toolName, approval.arguments, true, result)) {
+            is ScheduleSideEffect.Arm -> {
+                listSchedules(scheduleStore).find { it.id == effect.scheduleId }?.let { registerRoutineAlarm(app, it) }
             }
-            "cancel_schedule" -> {
-                val target = approval.arguments["schedule_id"] as? String ?: return
-                cancelRoutineWork(app, target)
-                cancelRoutineAlarm(app, target)
+            is ScheduleSideEffect.Disarm -> {
+                cancelRoutineWork(app, effect.scheduleId)
+                cancelRoutineAlarm(app, effect.scheduleId)
             }
+            ScheduleSideEffect.None -> Unit
         }
     }
 
@@ -1065,30 +1064,27 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
     // actually ran (edited-approve), never the model's original call.
     private fun syncLoopScheduleSideEffect(event: AgentEvent.StepDone) {
         val call = event.call.copy(arguments = event.effectiveArgs)
-        when (loopScheduleSideEffect(call.name, event.approved, event.result)) {
-            LoopScheduleSideEffect.ARM -> {
-                val newId = (event.result as? ToolResult.Success)?.data
-                    .let { it as? Map<*, *> }?.get("id") as? String ?: return
+        when (val effect = onApprovedWrite(call.name, call.arguments, event.approved, event.result)) {
+            is ScheduleSideEffect.Arm -> {
                 try {
                     val app = getApplication<Application>()
-                    listSchedules(scheduleStore).find { it.id == newId }
+                    listSchedules(scheduleStore).find { it.id == effect.scheduleId }
                         ?.let { registerRoutineAlarm(app, it) }
                     refreshSchedules()
                     refreshExactAlarmFlag()
                 } catch (_: Exception) {
                 }
             }
-            LoopScheduleSideEffect.DISARM -> {
-                val target = call.arguments["schedule_id"] as? String ?: return
+            is ScheduleSideEffect.Disarm -> {
                 try {
                     val app = getApplication<Application>()
-                    cancelRoutineWork(app, target)
-                    cancelRoutineAlarm(app, target)
+                    cancelRoutineWork(app, effect.scheduleId)
+                    cancelRoutineAlarm(app, effect.scheduleId)
                     refreshSchedules()
                 } catch (_: Exception) {
                 }
             }
-            null -> Unit
+            ScheduleSideEffect.None -> Unit
         }
     }
 
