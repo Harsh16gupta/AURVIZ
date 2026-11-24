@@ -12,3 +12,5 @@ local.properties
 # Raw reference UI kit (source material only, never ship).
 ui_reference/
 .kotlin/
+# macOS
+.DS_Store
