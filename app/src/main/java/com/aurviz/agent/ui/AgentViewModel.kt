@@ -705,6 +705,9 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                 createdAt = memory.createdAt,
                 lastUsed = memory.lastUsed,
                 useCount = memory.useCount,
+                originId = memory.originId,
+                originSnippet = memory.originSnippet,
+                originTimestamp = memory.originTimestamp,
             )
             refreshMemories()
         }

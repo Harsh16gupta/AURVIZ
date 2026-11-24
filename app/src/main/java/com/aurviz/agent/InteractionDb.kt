@@ -77,4 +77,4 @@ val MIGRATION_5_6 =
 // Single ordered migration chain. AgentViewModel AND ScheduleWork both
 // build AppDb from this array — a new Migration lands here once and is
 // registered at every open site, never at just one.
-val AppMigrations = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+val AppMigrations = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)

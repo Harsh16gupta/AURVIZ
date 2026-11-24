@@ -38,6 +38,24 @@ class ScheduleMemoryPolishTest {
     }
 
     @Test
+    fun restoreMemoryRowKeepsProvenanceFields() {
+        val store = InMemoryStore()
+        val saved =
+            store.save(
+                "my boss is Priya",
+                source = "you told me",
+                originId = "in_99",
+                originSnippet = "snippet",
+                originTimestamp = 5555L,
+            )
+        store.delete(saved.id)
+        val restored = restoreMemoryRow(store, saved)
+        assertEquals("in_99", restored.originId)
+        assertEquals("snippet", restored.originSnippet)
+        assertEquals(5555L, restored.originTimestamp)
+    }
+
+    @Test
     fun titleCaseFacetCapitalizesEachWord() {
         assertEquals("You Told Me", titleCaseFacet("you told me"))
         assertEquals("Auto Saved", titleCaseFacet("auto-saved"))

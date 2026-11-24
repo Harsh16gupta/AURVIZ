@@ -143,9 +143,9 @@ class V2ShellPartATest {
         assertTrue(text.contains("SELECT * FROM interactions WHERE sessionId = :sessionId ORDER BY timestampMs ASC"))
         assertTrue(text.contains("fun deleteSession("))
         assertTrue(text.contains("DELETE FROM interactions WHERE sessionId = :sessionId"))
-        // Room stays on version 6: no bump for the new queries.
+        // Room stays on version 7: provenance columns only, FTS untouched.
         val mem = mainText("com/aurviz/agent/MemoryDb.kt")
-        assertTrue(mem.contains("version = 6"))
+        assertTrue(mem.contains("version = 7"))
     }
 
     @Test

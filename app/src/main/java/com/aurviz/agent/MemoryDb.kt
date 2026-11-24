@@ -30,6 +30,9 @@ data class MemoryRow(
     val createdAt: Long = 0L,
     val lastUsed: Long = 0L,
     val useCount: Int = 0,
+    val originId: String? = null,
+    val originSnippet: String? = null,
+    val originTimestamp: Long? = null,
 )
 
 @Dao
@@ -64,7 +67,7 @@ data class MemoryFts(
 
 @Database(
     entities = [MemoryRow::class, MemoryFts::class, ScheduleRow::class, ScheduleRunRow::class, PendingApprovalRow::class, InteractionRow::class],
-    version = 6,
+    version = 7,
     exportSchema = false,
 )
 abstract class AppDb : RoomDatabase() {
@@ -104,6 +107,17 @@ val MIGRATION_4_5 =
         }
     }
 
+// Version 6 -> 7 adds nullable source-moment provenance columns (ADR-0006);
+// existing rows keep null provenance and identical recall ranking.
+val MIGRATION_6_7 =
+    object : Migration(6, 7) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE `memories` ADD COLUMN `originId` TEXT")
+            db.execSQL("ALTER TABLE `memories` ADD COLUMN `originSnippet` TEXT")
+            db.execSQL("ALTER TABLE `memories` ADD COLUMN `originTimestamp` INTEGER")
+        }
+    }
+
 // Adapter: Room rows in, Memory objects out. Ids round-trip
 // ("room_12" -> pid 12) so forget-by-id works on the phone too.
 class RoomMemoryStore(private val dao: MemoryDao) : MemoryStore {
@@ -115,6 +129,9 @@ class RoomMemoryStore(private val dao: MemoryDao) : MemoryStore {
         createdAt: Long,
         lastUsed: Long,
         useCount: Int,
+        originId: String?,
+        originSnippet: String?,
+        originTimestamp: Long?,
     ): Memory {
         val pid =
             dao.insert(
@@ -126,9 +143,24 @@ class RoomMemoryStore(private val dao: MemoryDao) : MemoryStore {
                     createdAt = createdAt,
                     lastUsed = lastUsed,
                     useCount = useCount,
+                    originId = originId,
+                    originSnippet = originSnippet,
+                    originTimestamp = originTimestamp,
                 ),
             )
-        return Memory("room_$pid", text, source, category, importance, createdAt, lastUsed, useCount)
+        return Memory(
+            "room_$pid",
+            text,
+            source,
+            category,
+            importance,
+            createdAt,
+            lastUsed,
+            useCount,
+            originId,
+            originSnippet,
+            originTimestamp,
+        )
     }
 
     override fun list(): List<Memory> =
@@ -142,6 +174,9 @@ class RoomMemoryStore(private val dao: MemoryDao) : MemoryStore {
                 it.createdAt,
                 it.lastUsed,
                 it.useCount,
+                it.originId,
+                it.originSnippet,
+                it.originTimestamp,
             )
         }
 
@@ -157,6 +192,9 @@ class RoomMemoryStore(private val dao: MemoryDao) : MemoryStore {
                 it.createdAt,
                 it.lastUsed,
                 it.useCount,
+                it.originId,
+                it.originSnippet,
+                it.originTimestamp,
             )
         }
 

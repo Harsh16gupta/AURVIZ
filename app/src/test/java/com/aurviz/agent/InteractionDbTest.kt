@@ -71,11 +71,12 @@ class InteractionDbTest {
     // array, so registering here registers at both.
     @Test
     fun appMigrationsRegister56After45() {
-        assertEquals(5, AppMigrations.size)
+        assertEquals(6, AppMigrations.size)
         val last = AppMigrations.last()
-        assertEquals(5, last.startVersion)
-        assertEquals(6, last.endVersion)
+        assertEquals(6, last.startVersion)
+        assertEquals(7, last.endVersion)
         assertTrue(AppMigrations.contains(MIGRATION_5_6))
+        assertTrue(AppMigrations.contains(MIGRATION_6_7))
     }
 
     // --- drawer grouping seam ---

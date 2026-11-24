@@ -239,4 +239,103 @@ class MemoryTest {
         assertTrue(db.contains("MIGRATION_4_5"))
         assertTrue(db.contains("USING FTS4"))
     }
+
+    @Test
+    fun provenanceColumnsDefaultToNull() {
+        val store = InMemoryStore()
+        val memory = store.save("my boss is Priya", source = "you told me")
+        assertEquals(null, memory.originId)
+        assertEquals(null, memory.originSnippet)
+        assertEquals(null, memory.originTimestamp)
+    }
+
+    @Test
+    fun saveAndRememberFactRoundTripProvenance() {
+        val store = InMemoryStore()
+        val saved =
+            rememberFact(
+                store,
+                "my boss is Priya",
+                source = "you told me",
+                originId = "in_42",
+                originSnippet = "remember my boss is Priya",
+                originTimestamp = 1700000000L,
+            )
+        assertEquals("in_42", saved.originId)
+        assertEquals("remember my boss is Priya", saved.originSnippet)
+        assertEquals(1700000000L, saved.originTimestamp)
+        val listed = store.list().first()
+        assertEquals("in_42", listed.originId)
+        assertEquals("remember my boss is Priya", listed.originSnippet)
+        assertEquals(1700000000L, listed.originTimestamp)
+    }
+
+    @Test
+    fun migration67AddsNullableProvenanceColumns() {
+        val statements = mutableListOf<String>()
+        val handler = { _: Any, method: java.lang.reflect.Method, args: Array<out Any>? ->
+            if (method.name == "execSQL") statements += args!![0] as String
+            when (method.returnType) {
+                java.lang.Boolean.TYPE -> false
+                java.lang.Integer.TYPE -> 0
+                java.lang.Long.TYPE -> 0L
+                else -> null
+            }
+        }
+        val db =
+            Proxy.newProxyInstance(
+                javaClass.classLoader,
+                arrayOf(SupportSQLiteDatabase::class.java),
+                handler,
+            ) as SupportSQLiteDatabase
+        MIGRATION_6_7.migrate(db)
+        assertEquals(3, statements.size)
+        val joined = statements.joinToString("\n")
+        assertTrue(joined.contains("ALTER TABLE `memories` ADD COLUMN `originId` TEXT"))
+        assertTrue(joined.contains("ADD COLUMN `originSnippet` TEXT"))
+        assertTrue(joined.contains("ADD COLUMN `originTimestamp` INTEGER"))
+    }
+
+    @Test
+    fun roomMemoryStoreRoundTripsProvenanceThroughDao() {
+        val rows = mutableListOf<MemoryRow>()
+        var nextPid = 0L
+        val dao =
+            object : MemoryDao {
+                override fun listAll(): List<MemoryRow> = rows.toList()
+
+                override fun searchFts(query: String): List<MemoryRow> = rows.toList()
+
+                override fun insert(row: MemoryRow): Long {
+                    nextPid += 1
+                    rows += row.copy(pid = nextPid)
+                    return nextPid
+                }
+
+                override fun deleteById(pid: Long) {
+                    rows.removeAll { it.pid == pid }
+                }
+
+                override fun markUsed(pid: Long, nowMs: Long) {
+                }
+            }
+        val store = RoomMemoryStore(dao)
+        store.save(
+            "my boss is Priya",
+            source = "you told me",
+            originId = "s_1",
+            originSnippet = "boss is Priya",
+            originTimestamp = 12345L,
+        )
+        val listed = store.list()
+        assertEquals(1, listed.size)
+        assertEquals("s_1", listed[0].originId)
+        assertEquals("boss is Priya", listed[0].originSnippet)
+        assertEquals(12345L, listed[0].originTimestamp)
+        val fts = store.searchFts("boss*")
+        assertEquals(1, fts.size)
+        assertEquals("s_1", fts[0].originId)
+        assertEquals("boss is Priya", fts[0].originSnippet)
+        assertEquals(12345L, fts[0].originTimestamp)
+    }
 }

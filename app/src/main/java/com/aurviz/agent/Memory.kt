@@ -17,6 +17,9 @@ data class Memory(
     val createdAt: Long = 0L,
     val lastUsed: Long = 0L,
     val useCount: Int = 0,
+    val originId: String? = null,
+    val originSnippet: String? = null,
+    val originTimestamp: Long? = null,
 )
 
 // The plug shape. Tests use InMemoryStore; Room implements this on the phone.
@@ -30,6 +33,9 @@ interface MemoryStore {
         createdAt: Long = System.currentTimeMillis(),
         lastUsed: Long = 0L,
         useCount: Int = 0,
+        originId: String? = null,
+        originSnippet: String? = null,
+        originTimestamp: Long? = null,
     ): Memory
     fun list(): List<Memory>
     fun delete(id: String)
@@ -65,8 +71,24 @@ class InMemoryStore : MemoryStore {
         createdAt: Long,
         lastUsed: Long,
         useCount: Int,
+        originId: String?,
+        originSnippet: String?,
+        originTimestamp: Long?,
     ): Memory {
-        val memory = Memory("mem_${++nextId}", text, source, category, importance, createdAt, lastUsed, useCount)
+        val memory =
+            Memory(
+                id = "mem_${++nextId}",
+                text = text,
+                source = source,
+                category = category,
+                importance = importance,
+                createdAt = createdAt,
+                lastUsed = lastUsed,
+                useCount = useCount,
+                originId = originId,
+                originSnippet = originSnippet,
+                originTimestamp = originTimestamp,
+            )
         items += memory
         return memory
     }
@@ -93,10 +115,22 @@ fun rememberFact(
     category: String = "general",
     importance: Int = 0,
     createdAt: Long = System.currentTimeMillis(),
+    originId: String? = null,
+    originSnippet: String? = null,
+    originTimestamp: Long? = null,
 ): Memory {
     val key = text.trim().lowercase()
     store.list().find { it.text.trim().lowercase() == key && it.source == source }?.let { return it }
-    return store.save(text, source, category = category, importance = importance, createdAt = createdAt)
+    return store.save(
+        text,
+        source,
+        category = category,
+        importance = importance,
+        createdAt = createdAt,
+        originId = originId,
+        originSnippet = originSnippet,
+        originTimestamp = originTimestamp,
+    )
 }
 
 // Show what "forget boss" WOULD delete, without deleting anything.
@@ -116,6 +150,9 @@ fun restoreMemoryRow(store: MemoryStore, memory: Memory): Memory =
         createdAt = memory.createdAt,
         lastUsed = memory.lastUsed,
         useCount = memory.useCount,
+        originId = memory.originId,
+        originSnippet = memory.originSnippet,
+        originTimestamp = memory.originTimestamp,
     )
 
 // Ticket #89: title-case facet labels ("you told me" -> "You Told Me").
