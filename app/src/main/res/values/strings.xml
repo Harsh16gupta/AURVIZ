@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="shortcut_voice_short">Voice Command</string>
+    <string name="shortcut_new_session_short">New Session</string>
+    <string name="shortcut_schedules_short">Schedules</string>
+</resources>

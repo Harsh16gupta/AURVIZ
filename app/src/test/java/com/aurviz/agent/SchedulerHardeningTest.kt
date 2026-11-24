@@ -75,6 +75,50 @@ class SchedulerHardeningTest {
         assertTrue(seen.isEmpty())
     }
 
+    // --- Ticket #107 (T2, fix 1): disabled Schedules never re-arm. ---
+
+    @Test
+    fun rescheduleAllSkipsDisabledIds() {
+        val store = InMemoryScheduleStore()
+        val morning = store.save("morning report", 9, 0)
+        val evening = store.save("evening report", 18, 0)
+        val seen = mutableListOf<Schedule>()
+        val count = rescheduleAll(store, setOf(morning.id)) { seen += it }
+        assertEquals(1, count)
+        assertEquals(listOf(evening.id), seen.map { it.id })
+    }
+
+    @Test
+    fun rescheduleAllWithAllDisabledRegistersNothing() {
+        val store = InMemoryScheduleStore()
+        val only = store.save("paused routine", 9, 0)
+        val seen = mutableListOf<Schedule>()
+        assertEquals(0, rescheduleAll(store, setOf(only.id)) { seen += it })
+        assertTrue(seen.isEmpty())
+    }
+
+    @Test
+    fun rescheduleAllWithUnknownDisabledIdsStillRearmsKnown() {
+        val store = InMemoryScheduleStore()
+        val kept = store.save("kept routine", 9, 0)
+        val seen = mutableListOf<Schedule>()
+        assertEquals(1, rescheduleAll(store, setOf("sched_nope")) { seen += it })
+        assertEquals(listOf(kept.id), seen.map { it.id })
+    }
+
+    @Test
+    fun rearmPathsFilterDisabledSchedules() {
+        // After-fire (Worker), boot/timezone (Worker), and resume
+        // (ViewModel) re-arms must all consult disabledScheduleIds so a
+        // disabled Schedule is never re-armed.
+        val work = File(moduleDir(), "src/main/java/com/aurviz/agent/ScheduleWork.kt").readText()
+        assertTrue(work.contains("disabledScheduleIds"))
+        assertTrue(work.contains("schedule.id !in disabledIds"))
+        val vm = File(moduleDir(), "src/main/java/com/aurviz/agent/ui/AgentViewModel.kt").readText()
+        assertTrue(vm.contains("rescheduleAll(scheduleStore, disabledIds)"))
+        assertTrue(vm.contains("val disabledIds = state.value.disabledScheduleIds"))
+    }
+
     @Test
     fun weeklyTriggerLandsOnNextAllowedDayNotTomorrow() {
         // 2026-11-21 is a Saturday (same anchor as ScheduleTest).
@@ -244,5 +288,25 @@ class SchedulerHardeningTest {
         // pins the override (the runtime behavior needs a device).
         val method = ScheduleWorker::class.java.getDeclaredMethod("getForegroundInfo")
         assertEquals(ScheduleWorker::class.java, method.declaringClass)
+    }
+
+    // --- Ticket #107 (T2, fix 4): mic-stop / dismiss-cancel guards. ---
+    // SpeechRecognizer needs a device, so these pin the wiring: the sheet
+    // mic button stops (not restarts) while listening, dismissing the
+    // sheet cancels recognition, and the sheet always notifies on dismiss.
+
+    @Test
+    fun micTapStopsWhileListeningAndDismissCancels() {
+        val activity = File(moduleDir(), "src/main/java/com/aurviz/agent/MainActivity.kt").readText()
+        assertTrue(activity.contains("if (vm.state.value.voice.listening)"))
+        assertTrue(activity.contains("recognizer?.stopListening()"))
+        assertTrue(activity.contains("fun stopVoiceRecognition"))
+        assertTrue(activity.contains("recognizer?.cancel()"))
+        assertTrue(activity.contains("onVoiceDismiss = ::stopVoiceRecognition"))
+        val nav = File(moduleDir(), "src/main/java/com/aurviz/agent/ui/AgentNav.kt").readText()
+        assertTrue(nav.contains("onVoiceDismiss: () -> Unit = {}"))
+        // Both dismiss paths (X + use-transcript) cancel first so the
+        // microphone never stays hot after the sheet closes.
+        assertTrue(nav.contains("onVoiceDismiss()"))
     }
 }

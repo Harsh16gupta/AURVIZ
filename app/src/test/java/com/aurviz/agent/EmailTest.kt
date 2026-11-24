@@ -1,8 +1,16 @@
 package com.aurviz.agent
 
+import java.io.File
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Protocol
+import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 
 // Session 2 slice 1 (red): compose + confirm gate.
@@ -268,6 +276,182 @@ class EmailTest {
         assertEquals("R", form["refresh_token"])
         assertEquals("SECRET", form["client_secret"])
         assertEquals("refresh_token", form["grant_type"])
+    }
+
+    // --- Ticket #107 (T2, fix 2): refresh persistence + null-access
+    // bootstrap, over an interceptor-faked OkHttpClient (no network). ---
+
+    private data class FakeHttpReply(val code: Int, val body: String)
+
+    private fun fakeGmailClient(handler: (String) -> FakeHttpReply): OkHttpClient =
+        OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                val request = chain.request()
+                val reply = handler(request.url.toString())
+                Response.Builder()
+                    .request(request)
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(reply.code)
+                    .message("test")
+                    .body(reply.body.toResponseBody("application/json".toMediaType()))
+                    .build()
+            }
+            .build()
+
+    private fun tokenHandler(tokenReply: FakeHttpReply, gmailReply: FakeHttpReply): (String) -> FakeHttpReply =
+        { url ->
+            if (url.startsWith("https://oauth2.googleapis.com/token")) tokenReply else gmailReply
+        }
+
+    @Test
+    fun exchangeCodePersistsTokensViaCallback() {
+        val tokens = TokenStore()
+        var savedAccess: String? = null
+        var savedRefresh: String? = null
+        var calls = 0
+        val api =
+            GmailHttpApi(
+                tokens,
+                "ID",
+                "SECRET",
+                onTokensUpdated = {
+                    calls++
+                    savedAccess = it.gmailAccessToken
+                    savedRefresh = it.gmailRefreshToken
+                },
+                client = fakeGmailClient(tokenHandler(
+                    FakeHttpReply(200, """{"access_token":"AT","refresh_token":"RT"}"""),
+                    FakeHttpReply(404, "{}"),
+                )),
+            )
+        api.exchangeCode("CODE", "VERIFIER")
+        assertEquals("AT", tokens.gmailAccessToken)
+        assertEquals("RT", tokens.gmailRefreshToken)
+        assertEquals(1, calls)
+        assertEquals("AT", savedAccess)
+        assertEquals("RT", savedRefresh)
+    }
+
+    @Test
+    fun blankAccessTokenBootstrapsRefreshBeforeFirstCall() {
+        // Cold start from the vault with only the refresh token persisted.
+        val tokens = TokenStore()
+        tokens.gmailRefreshToken = "RT"
+        var calls = 0
+        val api =
+            GmailHttpApi(
+                tokens,
+                "ID",
+                "SECRET",
+                onTokensUpdated = { calls++ },
+                client = fakeGmailClient(tokenHandler(
+                    FakeHttpReply(200, """{"access_token":"FRESH"}"""),
+                    FakeHttpReply(200, """{"messages":[]}"""),
+                )),
+            )
+        assertEquals(0, api.listInbox().size)
+        assertEquals("FRESH", tokens.gmailAccessToken)
+        assertTrue("rotated access token must persist", calls >= 1)
+    }
+
+    @Test
+    fun invalidGrantRefreshClearsStaleAccessToken() {
+        val tokens = TokenStore()
+        tokens.gmailAccessToken = "STALE"
+        tokens.gmailRefreshToken = "RT"
+        var savedAccess: String? = "sentinel"
+        var calls = 0
+        val api =
+            GmailHttpApi(
+                tokens,
+                "ID",
+                "SECRET",
+                onTokensUpdated = {
+                    calls++
+                    savedAccess = it.gmailAccessToken
+                },
+                client = fakeGmailClient(tokenHandler(
+                    FakeHttpReply(400, """{"error":"invalid_grant"}"""),
+                    FakeHttpReply(401, """{"error":"invalid credentials"}"""),
+                )),
+            )
+        try {
+            api.listInbox()
+            fail("invalid_grant refresh must throw")
+        } catch (e: GmailException) {
+            assertEquals(400, e.httpCode)
+        }
+        assertNull("dead grant must drop the stale access token", tokens.gmailAccessToken)
+        assertTrue("vault must persist the cleared token", calls >= 1)
+        assertNull(savedAccess)
+    }
+
+    @Test
+    fun disconnectedApiStillFailsFastWithoutRefreshToken() {
+        val tokens = TokenStore()
+        val api =
+            GmailHttpApi(
+                tokens,
+                "ID",
+                "SECRET",
+                client = fakeGmailClient(tokenHandler(
+                    FakeHttpReply(200, """{"access_token":"AT"}"""),
+                    FakeHttpReply(200, """{"messages":[]}"""),
+                )),
+            )
+        try {
+            api.listInbox()
+            fail("must throw when not connected")
+        } catch (e: GmailException) {
+            assertEquals(401, e.httpCode)
+        }
+    }
+
+    // --- Ticket #107 (T2, fix 3): LoopbackReceiver socket lifecycle. ---
+    // Real loopback sockets (host JVM) — the sign-in socket must close on
+    // paste/dismiss/re-entry/clear instead of leaking, and a blocked
+    // waitForCode must wake promptly when closed. Debug logs stay gated.
+
+    @Test
+    fun loopbackCloseIsIdempotent() {
+        val receiver = LoopbackReceiver()
+        receiver.close()
+        receiver.close()
+    }
+
+    @Test
+    fun loopbackWaitAbortsWhenClosedWhileWaiting() {
+        // waitForCode itself needs a real phone (android.util.Log is a
+        // unit-test stub), so this pins the abort path in source: a
+        // SocketException from accept() — what close() triggers in a
+        // blocked waiter — returns null instead of crashing the coroutine.
+        var dir = File(System.getProperty("user.dir"))
+        while (true) {
+            if (File(dir, "src/main/AndroidManifest.xml").exists()) break
+            dir = dir.parentFile ?: throw AssertionError("Could not locate app module dir from user.dir")
+        }
+        val auth = File(dir, "src/main/java/com/aurviz/agent/LoopbackAuth.kt").readText()
+        assertTrue(auth.contains("catch (e: java.net.SocketException)"))
+        assertTrue(auth.contains("return null"))
+    }
+
+    @Test
+    fun loopbackCloseWiredOnPasteDismissClearAndLogsGated() {
+        var dir = File(System.getProperty("user.dir"))
+        while (true) {
+            if (File(dir, "src/main/AndroidManifest.xml").exists()) break
+            dir = dir.parentFile ?: throw AssertionError("Could not locate app module dir from user.dir")
+        }
+        val auth = File(dir, "src/main/java/com/aurviz/agent/LoopbackAuth.kt").readText()
+        assertTrue(auth.contains("fun close()"))
+        // Exactly one raw Log.d — inside the BuildConfig.DEBUG-gated helper.
+        assertEquals(1, "android.util.Log.d".toRegex().findAll(auth).count())
+        assertTrue(auth.contains("BuildConfig.DEBUG"))
+        val vm = File(dir, "src/main/java/com/aurviz/agent/ui/AgentViewModel.kt").readText()
+        assertTrue(vm.contains("private var activeLoopback: LoopbackReceiver? = null"))
+        assertTrue(vm.contains("activeLoopback = receiver"))
+        assertTrue(vm.contains("activeLoopback = null"))
+        assertTrue(vm.contains("activeLoopback?.close()"))
     }
 }
 

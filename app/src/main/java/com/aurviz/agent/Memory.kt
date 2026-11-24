@@ -2,7 +2,7 @@ package com.aurviz.agent
 
 // Session 1: memory = what the app remembers across restarts.
 // Pure decision logic, JVM-testable. The on-phone database (Room)
-// and the cloud (Supermemory) plug in through MemoryStore later.
+// Room-only persistence plugs in through RoomMemoryStore (ADR-0001).
 
 // One remembered thing + where it came from ("you told me" vs "auto-saved").
 // Ticket #31: category groups facts ("work"), importance (0-9) marks what

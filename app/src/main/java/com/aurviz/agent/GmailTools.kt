@@ -82,19 +82,26 @@ fun readEmailTool(gmailApi: GmailApi?): ToolDefinition =
                     "from" to detail.from,
                     "subject" to detail.subject,
                     "snippet" to detail.snippet,
-                    "body" to detail.body,
+                    "body" to truncateToolText(detail.body),
                     "source" to detail.source,
                 )
             )
         },
     )
 
+// Ticket #106 (T1): multi-recipient split. The LLM passes "to" as one
+// comma-separated string; DefaultSendPolicy counts List entries, so the
+// draft must split before the policy check or multi-recipient sends
+// never reach the transport.
+fun parseRecipientList(rawTo: String): List<String> =
+    rawTo.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+
 fun sendEmailTool(gmailApi: GmailApi?, policy: SendPolicy = AllowAllSendPolicy): ToolDefinition {
     fun draftFrom(args: Map<String, Any?>): EmailDraft =
         EmailDraft(
-            to = listOf(args["to"] as String),
-            subject = args["subject"] as String,
-            body = args["body"] as String,
+            to = parseRecipientList((args["to"] as? String).orEmpty()),
+            subject = (args["subject"] as? String).orEmpty(),
+            body = (args["body"] as? String).orEmpty(),
         )
     return ToolDefinition(
         name = "send_email",

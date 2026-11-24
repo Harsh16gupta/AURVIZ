@@ -3,6 +3,7 @@ package com.aurviz.agent.ui
 import android.app.AlarmManager
 import android.app.Application
 import android.content.Context
+import android.content.Intent
 import android.os.Build
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -69,6 +70,7 @@ import com.aurviz.agent.forgetPreview
 import com.aurviz.agent.knownAddressesFromInbox
 import com.aurviz.agent.listSchedules
 import com.aurviz.agent.normalizeScheduleId
+import com.aurviz.agent.OkHttpBackgroundPageLoader
 import com.aurviz.agent.onApprovedWrite
 import com.aurviz.agent.ScheduleSideEffect
 import com.aurviz.agent.newCodeVerifier
@@ -82,6 +84,7 @@ import com.aurviz.agent.settingsFromBuildConfig
 import com.aurviz.agent.recallFor
 import com.aurviz.agent.receiptForGated
 import com.aurviz.agent.registerRoutineAlarm
+import com.aurviz.agent.rescheduleAll
 import com.aurviz.agent.rejectPendingApproval
 import com.aurviz.agent.rememberFact
 import com.aurviz.agent.retryDisclosure
@@ -150,6 +153,30 @@ fun approvalWaitMs(
 // agent package (ADR-0005): one renderer, not two.
 fun renderLoopPrompt(messages: List<ChatMessage>): String = flattenChatMessages(messages)
 
+// Ticket #106 (T1): fast-path guard. "open <arg>" only bypasses the
+// AgentLoop Task Execution for a single URL/host token (no whitespace,
+// e.g. "open https://example.com" or "open news.ycombinator.com").
+// Multi-word natural commands ("open my latest email from Priya") go to
+// the AgentLoop Task Execution.
+fun isDirectOpenWebCommand(command: String): Boolean {
+    if (!command.lowercase().startsWith("open ")) return false
+    val arg = command.substring(5).trim()
+    if (arg.isEmpty() || arg.any { it.isWhitespace() }) return false
+    return arg.contains("://") || arg.contains(".")
+}
+
+// Ticket #106 (T1): fast-path guard. "email <arg>" only bypasses the
+// AgentLoop Task Execution when the first token after "email " is an
+// email address containing '@', or uses the pipe "addr | subj | body"
+// syntax. Natural summaries ("email summary of unread messages") go to
+// the AgentLoop Task Execution.
+fun isDirectEmailCommand(command: String): Boolean {
+    if (!command.lowercase().startsWith("email ")) return false
+    val rest = command.substring(6).trim()
+    val firstToken = rest.split("|").firstOrNull()?.trim()?.split(Regex("\\s+"))?.firstOrNull().orEmpty()
+    return firstToken.contains("@")
+}
+
 class AgentViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _state = MutableStateFlow(AgentUiState())
@@ -167,6 +194,9 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         tokens,
         BuildConfig.GOOGLE_OAUTH_CLIENT_ID,
         BuildConfig.GOOGLE_OAUTH_CLIENT_SECRET,
+        // Ticket #107 (T2): refreshed tokens persist to the vault on every
+        // rotation so a cold start never reuses a stale access token.
+        onTokensUpdated = { updated -> tokenVault.saveFrom(updated) },
     )
 
     // Set by BrowserScreen once its retained WebView exists (see WebViewHolder).
@@ -174,6 +204,9 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
 
     private var lastCommand: String? = null
     private var signingIn = false
+    // Ticket #107 (T2): the live loopback socket. Closed on paste/dismiss/
+    // re-entry/clear so a stale receiver never leaks its ServerSocket.
+    private var activeLoopback: LoopbackReceiver? = null
     private var pendingLinkVerifier: String? = null
     private var lastExchangedCode: String? = null
     private var signInDone = false
@@ -399,27 +432,39 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
 
     // Ticket #92: hydrate the feed from Room on launch (newest 50,
     // chronological) so Past Interactions outlive the process.
+    // Ticket #106 (T1): cold-start active Session hydration — restore the
+    // most recent Session (id, turns, feed, transcript) instead of leaving
+    // the transcript empty for follow-up commands.
     private fun refreshInteractions() {
         viewModelScope.launch(Dispatchers.IO) {
             val rows =
                 try {
-                    db.interactions().listRecent(50)
+                    db.interactions().listRecent(200)
                 } catch (_: Exception) {
                     return@launch
                 }
-            val summaries =
-                try {
-                    buildSessionSummaries(db.interactions().listRecent(200))
-                } catch (_: Exception) {
-                    buildSessionSummaries(rows)
-                }
+            val hydrated = hydrateLatestSession(rows, activeSessionId)
             if (rows.isEmpty()) {
-                _state.update { s -> s.copy(sessions = summaries) }
+                _state.update { s -> s.copy(sessions = hydrated.sessions) }
                 return@launch
             }
-            _state.update { s ->
-                if (s.interactions.isNotEmpty()) s.copy(sessions = summaries)
-                else s.copy(interactions = rows.reversed().map { it.toRecord() }, sessions = summaries)
+            val current = _state.value
+            if (current.interactions.isNotEmpty() || current.agentRunning) {
+                _state.update { s -> s.copy(sessions = hydrated.sessions) }
+            } else {
+                activeSessionId = hydrated.sessionId
+                synchronized(sessionTranscript) {
+                    sessionTranscript.clear()
+                    sessionTranscript.addAll(hydrated.transcript)
+                }
+                _state.update { s ->
+                    s.copy(
+                        sessionId = hydrated.sessionId,
+                        sessionTurns = hydrated.sessionTurns,
+                        interactions = hydrated.interactions,
+                        sessions = hydrated.sessions,
+                    )
+                }
             }
         }
     }
@@ -522,9 +567,9 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         when {
             lower.startsWith("remember ") -> handleRemember(command.substring(9).trim())
             lower.startsWith("forget ") -> handleForgetPreview(command.substring(7).trim())
-            lower.startsWith("email ") -> handleEmailSend(command.substring(6).trim())
+            isDirectEmailCommand(command) -> handleEmailSend(command.substring(6).trim())
             lower == "disconnect gmail" -> revokeGmail()
-            lower.startsWith("open ") -> openWeb(command.substring(5).trim())
+            isDirectOpenWebCommand(command) -> openWeb(command.substring(5).trim())
             lower.startsWith("schedule ") -> handleScheduleCreate(command.substring(9).trim())
             lower == "schedules" -> refreshSchedules(showLine = true)
             lower.startsWith("unschedule ") -> handleUnschedule(command.substring(11).trim())
@@ -683,7 +728,13 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         var emailJob: Job? = null
         emailJob = viewModelScope.launch(Dispatchers.IO) {
             val t0 = System.currentTimeMillis()
-            val registry = defaultToolRegistry(gmailApi = gmail, scheduleStore = scheduleStore, memoryStore = roomStore)
+            val registry = defaultToolRegistry(
+                gmailApi = gmail,
+                scheduleStore = scheduleStore,
+                memoryStore = roomStore,
+                webBridge = webBridge,
+                backgroundWebLoader = OkHttpBackgroundPageLoader(),
+            )
             val gated = registry.executeGated(call) { ApprovalDecision.Approved }
             val ms = System.currentTimeMillis() - t0
             val sent = gated.result is com.aurviz.agent.ToolResult.Success
@@ -735,7 +786,11 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun startSignIn() {
-        if (signingIn) return
+        // Ticket #107 (T2): a stuck signingIn flag must not brick sign-in —
+        // close any previous receiver and start fresh instead of returning.
+        activeLoopback?.close()
+        activeLoopback = null
+        signingIn = false
         signingIn = true
         signInDone = false
         _state.update { it.copy(statusLine = "Opening Google sign-in…") }
@@ -747,6 +802,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                 _state.update { it.copy(statusLine = "Sign-in failed: ${e.message}") }
                 return@launch
             }
+            activeLoopback = receiver
             val verifier = newCodeVerifier()
             pendingLinkVerifier = verifier
             gmail.redirectUri = receiver.redirectUri
@@ -765,6 +821,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
             val code = receiver.waitForCode()
+            activeLoopback = null
             signingIn = false
             if (signInDone) return@launch
             if (code == null) {
@@ -790,6 +847,11 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
             _state.update { it.copy(statusLine = "That link is from an older attempt — copy the newest tab's link.") }
             return
         }
+        // Ticket #107 (T2): the pasted code supersedes the socket wait —
+        // close it so the waiter wakes instead of holding the port.
+        activeLoopback?.close()
+        activeLoopback = null
+        signingIn = false
         pendingLinkVerifier = null
         signInDone = true
         _state.update { it.copy(pasteFallbackVisible = false) }
@@ -797,6 +859,10 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun dismissPasteFallback() {
+        // Ticket #107 (T2): dismissing the fallback abandons the socket wait.
+        activeLoopback?.close()
+        activeLoopback = null
+        signingIn = false
         _state.update { it.copy(pasteFallbackVisible = false) }
     }
 
@@ -1112,7 +1178,13 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
     fun approveHeldWrite(id: String) {
         _state.update { it.copy(statusLine = "Running confirmed write…") }
         viewModelScope.launch(Dispatchers.IO) {
-            val registry = defaultToolRegistry(gmailApi = gmail, scheduleStore = scheduleStore, memoryStore = roomStore)
+            val registry = defaultToolRegistry(
+                gmailApi = gmail,
+                scheduleStore = scheduleStore,
+                memoryStore = roomStore,
+                webBridge = webBridge,
+                backgroundWebLoader = OkHttpBackgroundPageLoader(),
+            )
             when (val outcome = approvePendingApproval(RoomPendingApprovalStore(db.approvals()), id, registry)) {
                 is PendingApprovalOutcome.Executed -> {
                     if (outcome.result is ToolResult.Success) {
@@ -1297,7 +1369,10 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val app = getApplication<Application>()
-                for (schedule in listSchedules(scheduleStore)) {
+                // Ticket #107 (T2): a disabled Schedule stays off across
+                // resume — the toggle is durable, never re-armed.
+                val disabledIds = state.value.disabledScheduleIds
+                rescheduleAll(scheduleStore, disabledIds) { schedule ->
                     try {
                         registerRoutineAlarm(app, schedule)
                     } catch (_: Exception) {
@@ -1321,6 +1396,82 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
             false
         }
         _state.update { it.copy(batteryOptimizationNeeded = needsAsk) }
+    }
+
+    // Ticket #108 (T3): 1-tap Agent diagnostics for the Settings
+    // "System Diagnostics" card. Refreshes the key flags, exact-alarm and
+    // battery flags, probes live Gmail token health when connected, then
+    // publishes a 5-item AgentDiagnosticsReport. Never auto-fixes.
+    fun runDiagnostics() {
+        _state.update { it.copy(diagnostics = it.diagnostics.copy(running = true)) }
+        viewModelScope.launch(Dispatchers.IO) {
+            refreshLlmKeyFlags()
+            refreshExactAlarmFlag()
+            refreshBatteryFlag()
+            val reachable: Boolean? = if (tokens.isConnected()) {
+                try {
+                    val email = gmail.fetchProfileEmail()
+                    tokens.gmailAccount = email
+                    tokenVault.saveFrom(tokens)
+                    true
+                } catch (_: Exception) {
+                    false
+                }
+            } else {
+                null
+            }
+            val snapshot = _state.value
+            val provider = effectiveProvider()
+            val report = buildAgentDiagnostics(
+                effectiveProvider = provider,
+                geminiKeySet = snapshot.geminiKeySet,
+                deepseekKeySet = snapshot.deepseekKeySet,
+                metaKeySet = snapshot.metaKeySet,
+                gmailConnected = tokens.isConnected(),
+                gmailAccount = tokens.gmailAccount,
+                gmailReachable = reachable,
+                exactAlarmNeeded = snapshot.exactAlarmNeeded,
+                batteryOptimizationNeeded = snapshot.batteryOptimizationNeeded,
+                memoriesCount = snapshot.memories.size,
+                schedulesCount = snapshot.schedules.size,
+                sessionsCount = snapshot.sessions.size,
+            )
+            _state.update {
+                it.copy(
+                    diagnostics = report,
+                    gmailAccount = tokens.gmailAccount,
+                    gmailConnected = tokens.isConnected(),
+                )
+            }
+        }
+    }
+
+    // Ticket #108 (T3): Share Sheet (ACTION_SEND) + launcher shortcut
+    // routing. Shared text becomes a ready-to-review Composer draft —
+    // never auto-executed. Shortcuts navigate without running anything.
+    fun handleIncomingIntent(action: String?, type: String?, sharedText: String?, sharedSubject: String?) {
+        when {
+            action == Intent.ACTION_SEND && type == "text/plain" -> {
+                val draft = formatSharedCommandDraft(sharedText, sharedSubject)
+                if (draft != null) {
+                    _state.update { it.copy(inputText = draft, pendingNavRoute = Dests.COMMAND) }
+                }
+            }
+            action == SHORTCUT_ACTION_VOICE -> {
+                _state.update { it.copy(pendingNavRoute = Dests.COMMAND, pendingOpenVoiceSheet = true) }
+            }
+            action == SHORTCUT_ACTION_NEW_SESSION -> {
+                startNewSession()
+                _state.update { it.copy(pendingNavRoute = Dests.COMMAND) }
+            }
+            action == SHORTCUT_ACTION_SCHEDULES -> {
+                _state.update { it.copy(pendingNavRoute = Dests.SCHEDULES) }
+            }
+        }
+    }
+
+    fun consumePendingNavigation() {
+        _state.update { it.copy(pendingNavRoute = null, pendingOpenVoiceSheet = false) }
     }
 
     // --- Loop (AgentLoop for reads; ADR-0005 §3A) ---
@@ -1405,7 +1556,13 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         var runJob: Job? = null
         runJob = viewModelScope.launch(Dispatchers.IO) {
             val runT0 = System.currentTimeMillis()
-            val registry = defaultToolRegistry(gmailApi = gmail, scheduleStore = scheduleStore, memoryStore = roomStore)
+            val registry = defaultToolRegistry(
+                gmailApi = gmail,
+                scheduleStore = scheduleStore,
+                memoryStore = roomStore,
+                webBridge = webBridge,
+                backgroundWebLoader = OkHttpBackgroundPageLoader(),
+            )
             val chat =
                 PinnedFallbackChatLlm(
                     defaultCandidates(effectiveProvider(), tokenVault.loadLlmKeys()),
@@ -1463,6 +1620,25 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                     onEvent = { event ->
                         if (event is AgentEvent.StepDone) {
                             syncLoopScheduleSideEffect(event)
+                            // Ticket #106 (T1): sync the Browser tab when a
+                            // Web Tool returns page data in the AgentLoop
+                            // Task Execution.
+                            if (event.result is ToolResult.Success &&
+                                event.call.name in setOf("open_url", "get_page_text", "click", "scroll")
+                            ) {
+                                val data = event.result.data as? Map<*, *>
+                                if (data != null) {
+                                    val url = (data["url"] as? String).orEmpty().ifBlank {
+                                        (data["source"] as? String)?.removePrefix("page:").orEmpty()
+                                    }
+                                    val title = (data["title"] as? String).orEmpty()
+                                    val text = (data["text"] as? String).orEmpty()
+                                    val links = (data["links"] as? List<*>)?.mapNotNull { it as? String }.orEmpty()
+                                    if (url.isNotBlank() && url != "current") {
+                                        _state.update { it.copy(webPage = WebPage(url = url, title = title, text = text, links = links)) }
+                                    }
+                                }
+                            }
                         }
                         progress = progress.withEvent(event)
                         val snapshot = progress.timeline()
@@ -1497,7 +1673,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                 _state.update { it.copy(activeRecalledMemories = memories.map { m -> m.text }) }
                 val history = synchronized(sessionTranscript) { sessionTranscript.toList() }
                 val accountEmail = tokens.gmailAccount ?: state.value.gmailAccount
-                when (val result = loop.run(cmd, memories, accountEmail, history)) {
+                when (val result = loop.run(cmd, memories, accountEmail, history, currentTimeText = ZonedDateTime.now().toString())) {
                     is AgentLoopResult.Answered -> {
                         synchronized(sessionTranscript) { appendSessionTurn(sessionTranscript, cmd, result) }
                         val tried = chat.tried.toList()
@@ -1617,6 +1793,9 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
+        // Ticket #107 (T2): never leak the loopback socket past the ViewModel.
+        activeLoopback?.close()
+        activeLoopback = null
         try {
             db.close()
         } catch (_: Exception) {

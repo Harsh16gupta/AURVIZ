@@ -31,7 +31,7 @@ flowchart TB
         SCH[Schedule store]
     end
     SCHED[Scheduler: exact alarm -> Worker -> loop<br/>read-only allowlist]
-    MEMDB[(Room: memories<br/>schedules, schedule_runs<br/>pending_approvals)]
+    MEMDB[(Room v6: memories, memoriesFts<br/>schedules, schedule_runs<br/>pending_approvals, interactions)]
     VAULT[[TokenVault<br/>EncryptedSharedPreferences]]
     LLM[(DeepSeek default + fallbacks<br/>OpenAI-shape HTTP)]
 
@@ -46,7 +46,6 @@ flowchart TB
     CARD -.->|approve / edit / reject| REG
     SCHED -->|headless loop, 5 read tools| REG
     SCHED -.->|send / writes| MEMDB
-    GMAIL <--> LLM
     MEM <--> MEMDB
     SCH <--> MEMDB
     VM <--> VAULT
@@ -114,7 +113,14 @@ refuses gated tools outright, so the model has no path around the gate; a
 deterministic `SendPolicy` re-checks before `send_email`. Email/page text
 travels only inside source-tagged, JSON-encoded tool results; the system
 prompt declares tool content data, never instructions; memories sit in the
-delimited section, never concatenated into the user message. Scheduled runs
+delimited section, never concatenated into the user message. Per-recipient
+`AllowAlways` `Preference` rows let the user pre-approve a recipient once;
+the bounded creation-time `ScheduledSendConsent` amendment (ADR-0002/0003)
+lets an exact-match templated send run headless, with any drift held as a
+`PendingApproval`. `save_memory` calls made after an untrusted external
+read are source-sanitized (`UNTRUSTED_EXTERNAL_READ_TOOLS`,
+`sanitizeMemoryCallForUntrustedRun` in `MemoryTools.kt`), so
+attacker-influenced runs cannot plant trusted memories. Scheduled runs
 hold only the 5 read tools — a send or write becomes a `PendingApproval`
 row + notification, approved in-app. Red-team tests (evil-forward +
 memory-poisoning, foreground card vs scheduled hold) are the acceptance
@@ -122,15 +128,23 @@ criterion.
 
 ## 6. UI, state, and secrets
 
-Compose screens (Command, Browser, Schedules, Memory, Settings) render
-`AgentUiState` and forward events; they never execute tools or hold keys
-(key fields show set/not-set flags and clear after save). The Command
-screen additionally keeps a scrollable in-memory `Interaction` feed
-(latest 50) with settled Confirmation receipts. `AgentViewModel` owns
+Compose screens (Onboarding, Command, Browser, Schedules, Memory,
+Settings) plus the `SideDrawer` (`Sessions` with search and `New Session`)
+render `AgentUiState` and forward events; they never execute tools or hold
+keys (key fields show set/not-set flags and clear after save). The Command
+screen additionally keeps a scrollable Room v6 persisted `Interaction` feed
+with settled Confirmation receipts; `Sessions` hydrate their transcripts on
+cold start. `AgentViewModel` owns
 state, including live `PerfTimings` (`planMs`/`toolMs`/`recallMs`) shown
-in Settings. Gmail tokens and
+in Settings alongside 1-tap System Diagnostics. Shared text arriving via
+the `ACTION_SEND` Share Sheet target routes into the Command composer;
+launcher shortcuts (`shortcuts.xml`) deep-link voice, new Session, and
+Schedules; the current Session exports as Markdown via share/copy. Gmail
+tokens and
 user-entered LLM keys live in `TokenVault` (EncryptedSharedPreferences,
 Keystore-backed; `security-crypto:1.1.0` deprecated-but-working — see
 `SECURITY.md`). `allowBackup="false"` + `data_extraction_rules` deny all
-backup/transfer domains. Debug keys come from git-ignored
+backup/transfer domains. Release ships `app/proguard-rules.pro` (Tink,
+Room, WorkManager, OkHttp/Jsoup keeps) wired into the `release` build
+type. Debug keys come from git-ignored
 `local.properties`; release `BuildConfig` key fields are empty.

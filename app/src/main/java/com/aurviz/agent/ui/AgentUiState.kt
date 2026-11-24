@@ -2,6 +2,7 @@ package com.aurviz.agent.ui
 
 import com.aurviz.agent.EmailDraft
 import com.aurviz.agent.EmailSummary
+import com.aurviz.agent.ChatMessage
 import com.aurviz.agent.FallbackResult
 import com.aurviz.agent.InteractionRow
 import com.aurviz.agent.LlmResult
@@ -144,6 +145,100 @@ fun buildSessionSummaries(rows: List<InteractionRow>): List<SessionSummary> =
         }
         .sortedByDescending { it.lastTimestampMs }
 
+// Ticket #109 (T4): pure Session search filter for the SideDrawer.
+// Case-insensitive title match; blank query returns everything.
+fun filterSessionSummaries(
+    sessions: List<SessionSummary>,
+    query: String,
+): List<SessionSummary> {
+    val trimmed = query.trim()
+    if (trimmed.isEmpty()) return sessions
+    return sessions.filter { it.title.contains(trimmed, ignoreCase = true) }
+}
+
+// Ticket #109 (T4): pure Markdown Session transcript exporter. Renders
+// the Session's Interactions (user command, recalled Memories, Plan
+// steps via stepDisplayTitle, settled Confirmation receipts, Agent
+// provider, response text) as clean Markdown for share/copy.
+fun formatSessionTranscriptMarkdown(
+    sessionId: String,
+    interactions: List<InteractionRecord>,
+): String {
+    if (interactions.isEmpty()) return "# Aurviz Session ($sessionId)\n\nNo Interactions recorded in this Session."
+    return buildString {
+        appendLine("# Aurviz Session")
+        appendLine()
+        interactions.forEachIndexed { index, record ->
+            if (index > 0) {
+                appendLine()
+                appendLine("---")
+                appendLine()
+            }
+            appendLine("## Interaction ${index + 1}: ${record.command}")
+            if (record.recalledMemories.isNotEmpty()) {
+                appendLine("- **Recalled Memory:** ${record.recalledMemories.joinToString("; ")}")
+            }
+            val planSteps = com.aurviz.agent.visiblePlanSteps(record.steps)
+            if (planSteps.isNotEmpty()) {
+                appendLine("- **Plan:**")
+                for (step in planSteps) {
+                    val title = com.aurviz.agent.stepDisplayTitle(step)
+                    val args = step.argsSummary?.let { " ($it)" }.orEmpty()
+                    appendLine("  - [${step.state.name}] $title$args")
+                }
+            }
+            if (record.confirmationStatus != null) {
+                val title = record.confirmationTitle ?: "Confirmation"
+                appendLine("- **Confirmation (${record.confirmationStatus.name}):** $title")
+            }
+            if (!record.providerUsed.isNullOrBlank()) {
+                appendLine("- **Agent Provider:** ${com.aurviz.agent.providerDisplayName(record.providerUsed)}")
+            }
+            if (record.responseText.isNotBlank()) {
+                appendLine()
+                appendLine(record.responseText.trim())
+            }
+        }
+    }.trimEnd()
+}
+
+// Ticket #106 (T1): cold-start active Session hydration. After process
+// death activeSessionId resets to a fresh id while Room still holds the
+// last Session's rows; restoring the most recent Session keeps the
+// Session transcript continuous for follow-up commands.
+data class HydratedSessionState(
+    val sessionId: String,
+    val sessionTurns: Int,
+    val interactions: List<InteractionRecord>,
+    val transcript: List<ChatMessage>,
+    val sessions: List<SessionSummary>,
+)
+
+fun hydrateLatestSession(
+    recentRowsDesc: List<InteractionRow>,
+    fallbackSessionId: String,
+): HydratedSessionState {
+    val summaries = buildSessionSummaries(recentRowsDesc)
+    val latestSessionId = summaries.firstOrNull()?.sessionId ?: fallbackSessionId
+    val sessionRowsChronological =
+        recentRowsDesc
+            .filter { it.sessionId == latestSessionId }
+            .sortedBy { it.timestampMs }
+    val records = sessionRowsChronological.map { it.toRecord() }
+    val transcript = mutableListOf<ChatMessage>()
+    for (row in sessionRowsChronological) {
+        transcript += ChatMessage(role = "user", content = row.command)
+        transcript += ChatMessage(role = "assistant", content = row.responseText)
+    }
+    return HydratedSessionState(
+        sessionId = latestSessionId,
+        sessionTurns = sessionRowsChronological.size,
+        interactions = records,
+        transcript = transcript,
+        sessions = summaries,
+    )
+}
+
 // Ticket #92: drawer groups, newest first. Today = same calendar day as
 // now; Previous 7 Days = the 7 days before today; older rows stay in
 // Room but out of the drawer.
@@ -204,6 +299,112 @@ fun rememberAddressFor(record: InteractionRecord): String? {
     val summary = record.steps.firstOrNull { it.toolName == "send_email" }?.argsSummary ?: return null
     return summary.split(",").map { it.trim() }.firstOrNull { it.startsWith("to:") }
         ?.substringAfter("to:")?.trim()?.split(Regex("\\s+"))?.firstOrNull()?.trim()?.takeIf { it.contains("@") }
+}
+
+// Ticket #108 (T3): 1-tap Agent diagnostics + Share Sheet draft +
+// launcher shortcuts. Pure JVM-testable models and helpers; the
+// ViewModel only folds them into state, screens only render them.
+
+// Launcher shortcut actions handled by MainActivity →
+// AgentViewModel.handleIncomingIntent → AgentNav.
+const val SHORTCUT_ACTION_VOICE = "com.aurviz.agent.action.VOICE_COMMAND"
+const val SHORTCUT_ACTION_NEW_SESSION = "com.aurviz.agent.action.NEW_SESSION"
+const val SHORTCUT_ACTION_SCHEDULES = "com.aurviz.agent.action.SCHEDULES"
+
+// Formats shared text/URL from the Android Share Sheet
+// (Intent.ACTION_SEND) into a ready-to-review Composer draft.
+// Never auto-sends — the user still taps Send on CommandScreen.
+fun formatSharedCommandDraft(sharedText: String?, sharedSubject: String? = null): String? {
+    val body = sharedText?.trim().orEmpty()
+    if (body.isEmpty()) return null
+    val subjectPrefix = sharedSubject?.trim()?.takeIf { it.isNotEmpty() && !body.startsWith(it) }
+    return if (com.aurviz.agent.isAllowedWebUrl(body) && !body.any { it.isWhitespace() }) {
+        "Open $body and summarize the key points"
+    } else if (subjectPrefix != null) {
+        "Summarize this ($subjectPrefix): $body"
+    } else {
+        "Summarize this: $body"
+    }
+}
+
+// One readiness row for the Settings System Diagnostics card.
+data class DiagnosticItem(
+    val label: String,
+    val status: String,
+    val healthy: Boolean,
+    val detail: String,
+)
+
+data class AgentDiagnosticsReport(
+    val running: Boolean = false,
+    val timestampMs: Long = 0L,
+    val items: List<DiagnosticItem> = emptyList(),
+) {
+    val passedCount: Int get() = items.count { it.healthy }
+}
+
+fun buildAgentDiagnostics(
+    effectiveProvider: String,
+    geminiKeySet: Boolean,
+    deepseekKeySet: Boolean,
+    metaKeySet: Boolean,
+    gmailConnected: Boolean,
+    gmailAccount: String?,
+    gmailReachable: Boolean?,
+    exactAlarmNeeded: Boolean,
+    batteryOptimizationNeeded: Boolean,
+    memoriesCount: Int,
+    schedulesCount: Int,
+    sessionsCount: Int,
+    nowMs: Long = System.currentTimeMillis(),
+): AgentDiagnosticsReport {
+    val anyKey = geminiKeySet || deepseekKeySet || metaKeySet
+    val activeKeySet = when (effectiveProvider.lowercase()) {
+        "deepseek" -> deepseekKeySet
+        "meta" -> metaKeySet
+        else -> geminiKeySet
+    }
+    val providerDisplay = com.aurviz.agent.providerDisplayName(effectiveProvider)
+    val gmailHealthy = gmailConnected && (gmailReachable != false)
+    val gmailStatus = when {
+        !gmailConnected -> "Not connected"
+        gmailReachable == true -> "Connected · Verified"
+        gmailReachable == false -> "Token expired · Reconnect"
+        else -> "Connected"
+    }
+    val items = listOf(
+        DiagnosticItem(
+            label = "AI Provider ($providerDisplay)",
+            status = if (activeKeySet) "Ready" else if (anyKey) "Fallback ready" else "No key set",
+            healthy = anyKey,
+            detail = if (anyKey) "Active model: $providerDisplay" else "Add a Gemini, DeepSeek, or Meta key in Connections.",
+        ),
+        DiagnosticItem(
+            label = "Gmail OAuth",
+            status = gmailStatus,
+            healthy = gmailHealthy,
+            detail = if (gmailConnected) "Signed in as ${gmailAccount ?: "connected"}" else "Optional — connect in Connections to search, read, or send email.",
+        ),
+        DiagnosticItem(
+            label = "On-time Schedules",
+            status = if (!exactAlarmNeeded) "Granted" else "Inexact fallback",
+            healthy = !exactAlarmNeeded,
+            detail = com.aurviz.agent.scheduleTimingNote(!exactAlarmNeeded),
+        ),
+        DiagnosticItem(
+            label = "Background running",
+            status = if (!batteryOptimizationNeeded) "Exempted" else "Restricted",
+            healthy = !batteryOptimizationNeeded,
+            detail = if (!batteryOptimizationNeeded) "Doze will not delay Schedules." else "Allow background running so Doze does not delay Schedules.",
+        ),
+        DiagnosticItem(
+            label = "On-device Storage (Room v6)",
+            status = "Healthy",
+            healthy = true,
+            detail = "$memoriesCount Memories · $schedulesCount Schedules · $sessionsCount Sessions",
+        ),
+    )
+    return AgentDiagnosticsReport(running = false, timestampMs = nowMs, items = items)
 }
 
 data class AgentUiState(
@@ -287,6 +488,12 @@ data class AgentUiState(
     val scheduleRuns: List<ScheduleRunSummary> = emptyList(),
     val sessions: List<SessionSummary> = emptyList(),
     val onboardingCompleted: Boolean = true,
+    // Ticket #108 (T3): 1-tap diagnostics report + Share Sheet / shortcut
+    // routing. pendingNavRoute holds a Dests route until AgentNav consumes
+    // it; pendingOpenVoiceSheet opens the Voice Command sheet on arrival.
+    val diagnostics: AgentDiagnosticsReport = AgentDiagnosticsReport(),
+    val pendingNavRoute: String? = null,
+    val pendingOpenVoiceSheet: Boolean = false,
 )
 
 // One recorded scheduled run for the Recent Runs list (GLOSSARY Schedule):

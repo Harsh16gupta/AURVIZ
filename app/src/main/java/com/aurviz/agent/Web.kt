@@ -57,6 +57,10 @@ fun isAllowedWebUrl(raw: String): Boolean {
 // of isAllowedWebUrl — not a second policy — so UI verdicts match the Tool
 // layer (openPage/openBackgroundPage). Web addresses pass through unchanged;
 // anything else refuses with an explanation the Browser tab can show.
+// Ticket #107 (T2): WebView sub-navigation / redirect gate: returns true
+// when WebViewClient should block the navigation (anything outside http/https).
+fun shouldBlockWebNavigation(url: String?): Boolean =
+    url.isNullOrBlank() || !isAllowedWebUrl(url)
 sealed interface BrowserRoute {
     data class Load(val url: String) : BrowserRoute
 
@@ -91,11 +95,22 @@ fun openPage(bridge: WebBridge, url: String): WebPage {
 }
 
 // Pure HTML parsing shared by open/click/scroll results (JVM-testable).
+// Ticket #107 (T2): <script>/<style>/<noscript> blocks are stripped before
+// tag removal so raw JS/CSS never pollutes WebPage.text.
+private val ScriptBlockRegex = Regex("<script\\b[^>]*>[\\s\\S]*?</script>", RegexOption.IGNORE_CASE)
+private val StyleBlockRegex = Regex("<style\\b[^>]*>[\\s\\S]*?</style>", RegexOption.IGNORE_CASE)
+private val NoscriptBlockRegex = Regex("<noscript\\b[^>]*>[\\s\\S]*?</noscript>", RegexOption.IGNORE_CASE)
+
 fun parsePage(url: String, html: String): WebPage {
     val title = Regex("<title>(.*?)</title>", RegexOption.IGNORE_CASE).find(html)?.groupValues?.get(1).orEmpty().trim()
     val links = Regex("href=\"(.*?)\"").findAll(html).map { it.groupValues[1] }.toList()
+    val cleanedHtml =
+        html
+            .replace(ScriptBlockRegex, "\n")
+            .replace(StyleBlockRegex, "\n")
+            .replace(NoscriptBlockRegex, "\n")
     val text =
-        html.replace(Regex("<[^>]*>"), "\n")
+        cleanedHtml.replace(Regex("<[^>]*>"), "\n")
             .split("\n")
             .map { it.trim().replace(Regex("\\s+"), " ") }
             .filter { it.isNotBlank() }

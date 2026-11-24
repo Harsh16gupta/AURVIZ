@@ -125,6 +125,7 @@ class AgentLoop(
         memories: List<Memory> = emptyList(),
         accountEmail: String? = null,
         history: List<ChatMessage> = emptyList(),
+        currentTimeText: String? = null,
     ): AgentLoopResult {
         // Ticket 16/29: the system prompt opens the conversation (tool
         // content is data, never instructions) and memories ride in its
@@ -136,18 +137,28 @@ class AgentLoop(
         val messages =
             if (history.isEmpty()) {
                 mutableListOf(
-                    ChatMessage(role = "system", content = buildSystemPrompt(memories, accountEmail)),
+                    ChatMessage(role = "system", content = buildSystemPrompt(memories, accountEmail, currentTimeText)),
                     ChatMessage(role = "user", content = userText),
                 )
             } else {
                 buildSessionMessages(
-                    buildSystemPrompt(memories, accountEmail),
+                    buildSystemPrompt(memories, accountEmail, currentTimeText),
                     history,
                     userText,
                 ).toMutableList()
             }
         val steps = mutableListOf<ExecutedStep>()
         val startMs = nowMs()
+        // Ticket #107 (T2): prompt-injection source guard. Once an untrusted
+        // external read (email/web) has executed in this run, a later
+        // save_memory is attacker-influenced — its source is forced to
+        // "auto-saved" via sanitizeMemoryCallForUntrustedRun.
+        var untrustedReadOccurred = false
+        // Ticket #106 (T1): consecutive identical failing Tool-call guard.
+        // The last failed (name, effectiveArgs) signature; a repeat on the
+        // next step gets a non-retryable pivot hint instead of burning all
+        // 8 steps on the same failure.
+        var lastFailedSignature: Pair<String, Map<String, Any?>>? = null
         fun failed(error: String): AgentLoopResult.Failed {
             onEvent(AgentEvent.Failed(error))
             return AgentLoopResult.Failed(error, steps.toList(), messages.toList())
@@ -186,13 +197,32 @@ class AgentLoop(
                 if (registry.requiresConfirmation(call.name)) {
                     onEvent(AgentEvent.NeedsApproval(call))
                 }
-                val gated = registry.executeGated(call, confirm)
-                steps += ExecutedStep(call.copy(arguments = gated.effectiveArgs), gated.result, gated.approved)
-                onEvent(AgentEvent.StepDone(call, gated.result, gated.approved, gated.effectiveArgs))
+                // Ticket #107 (T2): sanitize before the gate so the guard
+                // holds even for edited-confirm args downstream.
+                val safeCall = sanitizeMemoryCallForUntrustedRun(call, untrustedReadOccurred)
+                val gated = registry.executeGated(safeCall, confirm)
+                val signature = call.name to gated.effectiveArgs
+                val finalResult =
+                    if (gated.result is ToolResult.Failure) {
+                        if (lastFailedSignature == signature) {
+                            gated.result.copy(
+                                error = "${gated.result.error} (repeated identical failing tool call '${call.name}'; do not repeat with the same arguments — adjust arguments or explain the failure to the user)",
+                                retryable = false,
+                            )
+                        } else {
+                            gated.result
+                        }
+                    } else {
+                        gated.result
+                    }
+                lastFailedSignature = if (gated.result is ToolResult.Failure) signature else null
+                steps += ExecutedStep(call.copy(arguments = gated.effectiveArgs), finalResult, gated.approved)
+                if (call.name in UNTRUSTED_EXTERNAL_READ_TOOLS) untrustedReadOccurred = true
+                onEvent(AgentEvent.StepDone(call, finalResult, gated.approved, gated.effectiveArgs))
                 messages +=
                     ChatMessage(
                         role = "tool",
-                        content = JSONObject(gated.result.toMap()).toString(),
+                        content = JSONObject(finalResult.toMap()).toString(),
                         toolCallId = call.id,
                     )
             }

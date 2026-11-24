@@ -11,6 +11,20 @@ import org.json.JSONObject
 // a null bridge still returns a retryable Failure (never a hang), the
 // bridge still wins over the headless loader when attached, and blocked
 // URLs stay non-retryable.
+// Ticket #106 (T1): deterministic Tool payload budget guard. A single
+// AgentLoop Task Execution serializes every Tool result into the LLM
+// context, so unbounded page text or link lists overflow the window.
+// Text truncates at 12,000 chars and links cap at 40 entries.
+const val MAX_TOOL_TEXT_CHARS = 12_000
+const val MAX_TOOL_LINKS = 40
+const val TRUNCATED_SUFFIX = "\n...[truncated for context budget]"
+
+fun truncateToolText(text: String, maxChars: Int = MAX_TOOL_TEXT_CHARS): String =
+    if (text.length <= maxChars) text else text.take(maxChars) + TRUNCATED_SUFFIX
+
+fun capToolLinks(links: List<String>, maxLinks: Int = MAX_TOOL_LINKS): List<String> =
+    links.take(maxLinks)
+
 fun openUrlTool(webBridge: WebBridge?): ToolDefinition =
     ToolDefinition(
         name = "open_url",
@@ -28,8 +42,8 @@ fun openUrlTool(webBridge: WebBridge?): ToolDefinition =
                     mapOf(
                         "url" to page.url,
                         "title" to page.title,
-                        "text" to page.text,
-                        "links" to page.links,
+                        "text" to truncateToolText(page.text),
+                        "links" to capToolLinks(page.links),
                         "source" to pageSource(page.url),
                     ),
                 )
@@ -63,7 +77,7 @@ fun getPageTextTool(webBridge: WebBridge?, backgroundWebLoader: BackgroundPageLo
                     mapOf(
                         "url" to page.url,
                         "title" to page.title,
-                        "text" to page.text,
+                        "text" to truncateToolText(page.text),
                         "source" to pageSource(page.url),
                     ),
                 )
@@ -89,8 +103,8 @@ fun clickTool(webBridge: WebBridge?): ToolDefinition =
                 ToolResult.Success(
                     mapOf(
                         "title" to page.title,
-                        "text" to page.text,
-                        "links" to page.links,
+                        "text" to truncateToolText(page.text),
+                        "links" to capToolLinks(page.links),
                         "source" to pageSource(bridge.currentUrl()),
                     ),
                 )
@@ -127,8 +141,8 @@ fun scrollTool(webBridge: WebBridge?): ToolDefinition =
                 ToolResult.Success(
                     mapOf(
                         "title" to page.title,
-                        "text" to page.text,
-                        "links" to page.links,
+                        "text" to truncateToolText(page.text),
+                        "links" to capToolLinks(page.links),
                         "source" to pageSource(bridge.currentUrl()),
                     ),
                 )

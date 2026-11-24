@@ -195,4 +195,119 @@ class CommandPlanUiTest {
             )
         assertNull(rememberAddressFor(record))
     }
+
+    // --- Ticket #108 (T3): buildAgentDiagnostics — 5 readiness rows. ---
+
+    @Test
+    fun diagnosticsReportHasFiveCanonicalRows() {
+        val report = com.aurviz.agent.ui.buildAgentDiagnostics(
+            effectiveProvider = "gemini",
+            geminiKeySet = true,
+            deepseekKeySet = false,
+            metaKeySet = false,
+            gmailConnected = true,
+            gmailAccount = "me@example.com",
+            gmailReachable = true,
+            exactAlarmNeeded = false,
+            batteryOptimizationNeeded = false,
+            memoriesCount = 3,
+            schedulesCount = 2,
+            sessionsCount = 1,
+        )
+        assertEquals(5, report.items.size)
+        assertEquals(5, report.passedCount)
+        assertEquals("AI Provider (Gemini)", report.items[0].label)
+        assertEquals("Ready", report.items[0].status)
+        assertEquals("Gmail OAuth", report.items[1].label)
+        assertEquals("Connected · Verified", report.items[1].status)
+        assertEquals("On-time Schedules", report.items[2].label)
+        assertEquals("Granted", report.items[2].status)
+        assertEquals("Background running", report.items[3].label)
+        assertEquals("Exempted", report.items[3].status)
+        assertEquals("On-device Storage (Room v6)", report.items[4].label)
+        assertEquals("Healthy", report.items[4].status)
+        assertEquals("3 Memories · 2 Schedules · 1 Sessions", report.items[4].detail)
+    }
+
+    @Test
+    fun diagnosticsFlagsMissingKeysAndExpiredGmail() {
+        val report = com.aurviz.agent.ui.buildAgentDiagnostics(
+            effectiveProvider = "gemini",
+            geminiKeySet = false,
+            deepseekKeySet = true,
+            metaKeySet = false,
+            gmailConnected = true,
+            gmailAccount = "me@example.com",
+            gmailReachable = false,
+            exactAlarmNeeded = true,
+            batteryOptimizationNeeded = true,
+            memoriesCount = 0,
+            schedulesCount = 0,
+            sessionsCount = 0,
+        )
+        assertEquals("Fallback ready", report.items[0].status)
+        assertTrue(report.items[0].healthy)
+        assertEquals("Token expired · Reconnect", report.items[1].status)
+        assertFalse(report.items[1].healthy)
+        assertEquals("Inexact fallback", report.items[2].status)
+        assertFalse(report.items[2].healthy)
+        assertEquals("Restricted", report.items[3].status)
+        assertFalse(report.items[3].healthy)
+        assertEquals(2, report.passedCount)
+    }
+
+    @Test
+    fun diagnosticsWithNoKeysIsUnhealthyButStorageStaysHealthy() {
+        val report = com.aurviz.agent.ui.buildAgentDiagnostics(
+            effectiveProvider = "deepseek",
+            geminiKeySet = false,
+            deepseekKeySet = false,
+            metaKeySet = false,
+            gmailConnected = false,
+            gmailAccount = null,
+            gmailReachable = null,
+            exactAlarmNeeded = false,
+            batteryOptimizationNeeded = false,
+            memoriesCount = 0,
+            schedulesCount = 0,
+            sessionsCount = 0,
+        )
+        assertEquals("No key set", report.items[0].status)
+        assertFalse(report.items[0].healthy)
+        assertEquals("Not connected", report.items[1].status)
+        assertFalse(report.items[1].healthy)
+        assertTrue(report.items[4].healthy)
+    }
+
+    // --- Ticket #108 (T3): formatSharedCommandDraft — draft, never send. ---
+
+    @Test
+    fun sharedUrlDraftsOpenAndSummarize() {
+        assertEquals(
+            "Open https://example.com/a and summarize the key points",
+            com.aurviz.agent.ui.formatSharedCommandDraft("https://example.com/a"),
+        )
+    }
+
+    @Test
+    fun sharedTextDraftsSummarize() {
+        assertEquals(
+            "Summarize this: hello world",
+            com.aurviz.agent.ui.formatSharedCommandDraft("  hello world  "),
+        )
+    }
+
+    @Test
+    fun sharedTextWithSubjectDraftsSubjectLine() {
+        assertEquals(
+            "Summarize this (Big news): hello world",
+            com.aurviz.agent.ui.formatSharedCommandDraft("hello world", "Big news"),
+        )
+    }
+
+    @Test
+    fun blankSharedTextYieldsNull() {
+        assertNull(com.aurviz.agent.ui.formatSharedCommandDraft(null))
+        assertNull(com.aurviz.agent.ui.formatSharedCommandDraft("   "))
+    }
 }

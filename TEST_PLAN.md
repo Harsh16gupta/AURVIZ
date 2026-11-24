@@ -3,8 +3,8 @@
 ## How to run
 
 - `export ANDROID_HOME=$HOME/Library/Android/sdk`
-- `./gradlew :app:testDebugUnitTest` — NG-4: **337 tests, 0 failures**
-  (30 classes incl. `BrowserPolicyTest`; 334 at NG-7 plus EchoLeak cases).
+- `./gradlew :app:testDebugUnitTest` — NG-4: **626 tests, 0 failures**
+  (52 classes incl. `BrowserPolicyTest`; 334 at NG-7 plus EchoLeak cases).
 - Reports: `app/build/test-results/testDebugUnitTest/*.xml`.
 
 ## Coverage by area (representative, not exhaustive)
@@ -24,7 +24,9 @@
 | Scheduled worker | `ScheduledRunTest` | 5-tool read-only allowlist, writes → PendingApproval, idempotency (same key once, new fireTime reruns), auth-error Reconnect path |
 | Scheduler hardening | `SchedulerHardeningTest` | boot/timezone re-arm, days intact, no periodic work, no receiver-thread DB, exact-alarm grant logic |
 | Backup / battery / keys | `BackupRulesTest`, `BatteryDozeTest`, `LlmKeysTest`, `ProviderPickerTest` | no-backup rules, exemption prompt, vault-backed keys, fallback ordering |
-| ViewModel wiring | `ViewModelLoopWiringTest`, `PlannerTest`, `ChatTimelineTest`, `VoiceInputTest`, `PendingApprovalTest` | loop→timeline, retry disclosure, notifications, voice/approval seams |
+| ViewModel wiring | `ViewModelLoopWiringTest`, `ChatTimelineTest`, `VoiceInputTest`, `VoiceSheetStateTest`, `PendingApprovalTest`, `ScheduledConsentTest`, `ConfirmationReceiptTest`, `AllowAlwaysTest` | loop→timeline, retry disclosure, notifications, voice/approval seams, consent + receipt + allow-always seams |
+| Compose UI craft | `CommandPlanUiTest`, `BrowserChromeUiTest`, `FlagshipUiCraftTest`, `FlagshipT2CraftTest`, `FlagshipT3SheetsTest`, `FlagshipT4CraftTest`, `V2ShellPartATest` | glossary copy, contrast, tap targets, IME insets, sheets, Session search + transcript export pins |
+| Tool adapters | `GmailToolsTest`, `ScheduleToolsTest`, `MemoryToolsTest`, `WebAdapterTest`, `ScheduleRuntimeTest`, `InteractionDbTest` | per-tool executors, runtime routing, Room persistence (Session search/filter, transcript hydration) |
 | Submission benchmark | `PerfTimingsTest` | 10-run medians for recall / prompt / registry + top-k optimization comparison |
 
 ## Device pass (human, not run ticket 37)

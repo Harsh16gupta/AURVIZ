@@ -3,6 +3,8 @@ package com.aurviz.agent
 import com.aurviz.agent.ui.AgentUiState
 import com.aurviz.agent.ui.LoopUiProgress
 import com.aurviz.agent.ui.approvalWaitMs
+import com.aurviz.agent.ui.isDirectEmailCommand
+import com.aurviz.agent.ui.isDirectOpenWebCommand
 import com.aurviz.agent.ui.retryLine
 import com.aurviz.agent.ui.withEvent
 import org.json.JSONArray
@@ -192,5 +194,37 @@ class ViewModelLoopWiringTest {
         assertEquals(progress.timeline(), rows)
         assertEquals("gemini", chat.lastProvider)
         assertEquals(listOf("gemini"), chat.tried)
+    }
+
+    // Ticket #106 (T1): "open "/"email " fast-path guards — single tokens
+    // stay on the fast path, natural language goes to the AgentLoop.
+
+    @Test
+    fun directOpenWebCommandAcceptsSingleTokenUrls() {
+        assertTrue(isDirectOpenWebCommand("open https://example.com"))
+        assertTrue(isDirectOpenWebCommand("open news.ycombinator.com"))
+        assertTrue(isDirectOpenWebCommand("OPEN https://example.com"))
+    }
+
+    @Test
+    fun directOpenWebCommandRejectsNaturalLanguage() {
+        assertTrue(!isDirectOpenWebCommand("open my latest email from Priya"))
+        assertTrue(!isDirectOpenWebCommand("open my latest email from Priya and summarize it"))
+        assertTrue(!isDirectOpenWebCommand("open "))
+        assertTrue(!isDirectOpenWebCommand("check mail"))
+    }
+
+    @Test
+    fun directEmailCommandAcceptsAddressFirstToken() {
+        assertTrue(isDirectEmailCommand("email priya@work.com hi"))
+        assertTrue(isDirectEmailCommand("email priya@work.com | Hello | Body here"))
+        assertTrue(isDirectEmailCommand("Email PRIYA@x.com hello"))
+    }
+
+    @Test
+    fun directEmailCommandRejectsNaturalLanguage() {
+        assertTrue(!isDirectEmailCommand("email summary of unread messages"))
+        assertTrue(!isDirectEmailCommand("email "))
+        assertTrue(!isDirectEmailCommand("check mail"))
     }
 }

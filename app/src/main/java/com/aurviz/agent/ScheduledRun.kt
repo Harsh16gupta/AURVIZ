@@ -99,9 +99,11 @@ fun rejectPendingApproval(
 // Ticket #67 carves the single bounded exception: a send_email whose
 // arguments exactly match a creation-time ScheduledSendConsent for the
 // owning schedule (plus SendPolicy) runs headless; everything else holds.
-// This contradicts the letter of ADR-0002/0003 ("never executes"); the ADR
-// amendment lands in #70, flagged here per AGENTS.md instead of silently
-// overriding.
+// This contradicts the letter of ADR-0002/0003 ("never executes"); the
+// bounded creation-time consent amendment is recorded in
+// docs/adr/0002-workmanager-alarm-scheduling.md and
+// docs/adr/0003-gmail-oauth-confirmation.md, flagged here per AGENTS.md
+// instead of silently overriding.
 val SCHEDULED_SENSITIVE_TOOLS = setOf("send_email", "create_schedule", "cancel_schedule")
 
 // --- Ticket #67: bounded creation-time consent for scheduled sends. ---

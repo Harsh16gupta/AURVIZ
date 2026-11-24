@@ -405,4 +405,66 @@ class AgentLoopTest {
         assertEquals(1, result.steps.size)
         assertEquals("c1", result.steps[0].call.id)
     }
+
+    // Ticket #106 (T1): consecutive identical failing Tool-call guard.
+
+    @Test
+    fun repeatedIdenticalFailureGetsPivotHintAndIsNotRetryable() {
+        val badArgs = mapOf<String, Any?>("task" to "", "when" to "at 9am")
+        val llm =
+            FakeLlmProvider(
+                listOf(
+                    call("call_1", "create_schedule", badArgs),
+                    call("call_2", "create_schedule", badArgs),
+                    answer("I cannot schedule that"),
+                ),
+            )
+        val result = AgentLoop(llm, registry(), confirm = { ApprovalDecision.Approved }).run("schedule it")
+        assertTrue(result is AgentLoopResult.Answered)
+        assertEquals(2, result.steps.size)
+        val first = result.steps[0].result
+        val second = result.steps[1].result
+        assertTrue(first is ToolResult.Failure)
+        assertTrue(second is ToolResult.Failure)
+        second as ToolResult.Failure
+        assertTrue(second.error.contains("repeated identical failing tool call 'create_schedule'"))
+        assertEquals(false, second.retryable)
+    }
+
+    @Test
+    fun distinctFailuresDoNotTriggerPivotHint() {
+        val llm =
+            FakeLlmProvider(
+                listOf(
+                    call("call_1", "create_schedule", mapOf("task" to "", "when" to "at 9am")),
+                    call("call_2", "create_schedule", mapOf("task" to "x", "when" to "")),
+                    answer("done"),
+                ),
+            )
+        val result = AgentLoop(llm, registry(), confirm = { ApprovalDecision.Approved }).run("schedule it")
+        assertTrue(result is AgentLoopResult.Answered)
+        val second = result.steps[1].result
+        assertTrue(second is ToolResult.Failure)
+        assertTrue(!(second as ToolResult.Failure).error.contains("repeated identical"))
+    }
+
+    @Test
+    fun successResetsConsecutiveFailureTracker() {
+        val badArgs = mapOf<String, Any?>("task" to "", "when" to "at 9am")
+        val llm =
+            FakeLlmProvider(
+                listOf(
+                    call("call_1", "create_schedule", badArgs),
+                    call("call_2", "search_emails", mapOf("query" to "is:important is:unread", "max" to 5)),
+                    call("call_3", "create_schedule", badArgs),
+                    answer("done"),
+                ),
+            )
+        val result = AgentLoop(llm, registry(), confirm = { ApprovalDecision.Approved }).run("mixed")
+        assertTrue(result is AgentLoopResult.Answered)
+        assertEquals(3, result.steps.size)
+        val third = result.steps[2].result
+        assertTrue(third is ToolResult.Failure)
+        assertTrue(!(third as ToolResult.Failure).error.contains("repeated identical"))
+    }
 }

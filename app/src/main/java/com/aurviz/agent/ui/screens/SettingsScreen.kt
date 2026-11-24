@@ -77,6 +77,7 @@ fun SettingsScreen(
     onAllowAlwaysAdd: (String) -> Unit = {},
     onAllowAlwaysRevoke: (String) -> Unit = {},
     onOpenMemory: () -> Unit = {},
+    onRunDiagnostics: () -> Unit = {},
     onBack: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -302,6 +303,36 @@ fun SettingsScreen(
                     state.selectedProvider ?: state.providerUsed ?: BuildConfig.LLM_DEFAULT_PROVIDER,
                 ),
             )
+        }
+        Section("System Diagnostics") {
+            state.diagnostics.items.forEachIndexed { index, item ->
+                if (index > 0) CardDivider()
+                OptionRow(
+                    title = item.label,
+                    description = item.detail,
+                    value = item.status,
+                    valueColor = if (item.healthy) Theme.colors.success else Theme.colors.warning,
+                )
+            }
+            if (state.diagnostics.items.isNotEmpty()) CardDivider()
+            Box(Modifier.fillMaxWidth().padding(16.dp)) {
+                Button(
+                    onClick = onRunDiagnostics,
+                    enabled = !state.diagnostics.running,
+                    variant = ButtonVariant.Secondary,
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                ) {
+                    Text(
+                        if (state.diagnostics.running) {
+                            "Checking…"
+                        } else if (state.diagnostics.items.isEmpty()) {
+                            "Run Diagnostics"
+                        } else {
+                            "Re-run Diagnostics (${state.diagnostics.passedCount}/${state.diagnostics.items.size} ready)"
+                        },
+                    )
+                }
+            }
         }
         Section("Confirmation Rules") {
             // send_email is always gated by ToolRegistry.executeGated: the

@@ -96,3 +96,15 @@ fun memoryTools(memoryStore: MemoryStore?): List<ToolDefinition> =
         saveMemoryTool(memoryStore),
         searchMemoryTool(memoryStore),
     )
+
+// Ticket #107 (T2): untrusted external reads. When the current AgentLoop
+// run has already executed one of these Tools, a save_memory call is
+// treated as attacker-influenced: its source is forced to "auto-saved" so
+// injected "you told me" claims can never pass as user-stated facts.
+val UNTRUSTED_EXTERNAL_READ_TOOLS: Set<String> =
+    setOf("search_emails", "read_email", "open_url", "get_page_text", "click", "scroll", "extract")
+
+fun sanitizeMemoryCallForUntrustedRun(call: ToolCall, untrustedReadOccurred: Boolean): ToolCall {
+    if (call.name != "save_memory" || !untrustedReadOccurred) return call
+    return call.copy(arguments = call.arguments + ("source" to "auto-saved"))
+}

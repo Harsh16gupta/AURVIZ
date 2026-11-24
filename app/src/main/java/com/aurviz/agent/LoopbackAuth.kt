@@ -11,18 +11,24 @@ class LoopbackReceiver {
 
     val redirectUri: String get() = "http://127.0.0.1:${server.localPort}/callback"
 
+    // Ticket #107 (T2): debug-only logging — release builds never log the
+    // loopback flow (which carries the OAuth code in the request line).
+    private fun logDebug(msg: String) {
+        if (BuildConfig.DEBUG) android.util.Log.d("AURVIZ", msg)
+    }
+
     // Blocks until Google's redirect arrives (or timeout). Returns the code.
     // 10 minutes: consent screens are worth reading slowly.
     // Loops past dead probes (our own self-test, Chrome's speculative
     // connections): only a request line carrying ?code= counts.
     fun waitForCode(timeoutMs: Int = 600_000): String? {
-        android.util.Log.d("AURVIZ", "loopback: listening on $redirectUri")
+        logDebug("loopback: listening on $redirectUri")
         val deadline = System.currentTimeMillis() + timeoutMs
         while (true) {
             val remaining = deadline - System.currentTimeMillis()
             if (remaining <= 0) {
-                android.util.Log.d("AURVIZ", "loopback: timed out waiting")
-                closeQuietly()
+                logDebug("loopback: timed out waiting")
+                close()
                 return null
             }
             server.soTimeout = remaining.coerceAtMost(600_000).toInt()
@@ -30,8 +36,13 @@ class LoopbackReceiver {
                 try {
                     server.accept()
                 } catch (e: java.net.SocketTimeoutException) {
-                    android.util.Log.d("AURVIZ", "loopback: timed out waiting")
-                    closeQuietly()
+                    logDebug("loopback: timed out waiting")
+                    close()
+                    return null
+                } catch (e: java.net.SocketException) {
+                    // Ticket #107 (T2): closed via close() from
+                    // onPastedLink/dismiss/re-entry/clear while waiting.
+                    logDebug("loopback: closed while waiting")
                     return null
                 }
             socket.soTimeout = 15_000
@@ -39,7 +50,7 @@ class LoopbackReceiver {
                 val reader = socket.getInputStream().bufferedReader()
                 val requestLine = reader.readLine()
                 if (requestLine == null) {
-                    android.util.Log.d("AURVIZ", "loopback: dead probe, still waiting")
+                    logDebug("loopback: dead probe, still waiting")
                     try {
                         socket.close()
                     } catch (_: Exception) {
@@ -64,11 +75,11 @@ class LoopbackReceiver {
                 } catch (_: Exception) {
                 }
                 if (code == null) {
-                    android.util.Log.d("AURVIZ", "loopback: request without code, still waiting")
+                    logDebug("loopback: request without code, still waiting")
                     continue
                 }
-                android.util.Log.d("AURVIZ", "loopback: got code")
-                closeQuietly()
+                logDebug("loopback: got code")
+                close()
                 return java.net.URLDecoder.decode(code, "UTF-8")
             } catch (_: Exception) {
                 try {
@@ -80,7 +91,9 @@ class LoopbackReceiver {
         }
     }
 
-    private fun closeQuietly() {
+    // Ticket #107 (T2): public so AgentViewModel can close a stale receiver
+    // on paste/dismiss/re-entry/clear instead of leaking the ServerSocket.
+    fun close() {
         try {
             server.close()
         } catch (_: Exception) {

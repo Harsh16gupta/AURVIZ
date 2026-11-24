@@ -102,6 +102,54 @@ class WebTest {
         val js = buildScrollJs(250)
         assertTrue(js.contains("scrollBy(0,250)"))
     }
+
+    // --- Ticket #107 (T2, fix 6): parsePage strips script/style/noscript
+    // blocks before tag removal so raw JS/CSS never pollutes WebPage.text. ---
+
+    @Test
+    fun parsePageStripsScriptStyleAndNoscriptBlocks() {
+        val html =
+            """
+            <html><head><title>Shop</title>
+            <style>.price { color: red; font-weight: bold; }</style>
+            <script>var price = 60; alert("sale");</script>
+            </head><body>
+            <noscript>Enable JavaScript for prices.</noscript>
+            <p>Milk price: 60</p>
+            </body></html>
+            """.trimIndent()
+        val page = parsePage("https://example.com", html)
+        assertEquals("Shop", page.title)
+        assertTrue(page.text.contains("Milk price: 60"))
+        assertFalse(page.text.contains("color: red"))
+        assertFalse(page.text.contains("var price"))
+        assertFalse(page.text.contains("alert"))
+        assertFalse(page.text.contains("Enable JavaScript"))
+    }
+
+    @Test
+    fun parsePageStripsMultilineBlocksCaseInsensitively() {
+        val html =
+            "<HTML><HEAD><TITLE>Up</TITLE>" +
+                "<SCRIPT type=\"text/javascript\">\nlineOne();\nlineTwo();\n</SCRIPT>" +
+                "<STYLE media=\"screen\">\n BODY { margin: 0; } \n</STYLE>" +
+                "</HEAD><BODY><P>Visible text</P></BODY></HTML>"
+        val page = parsePage("https://example.com", html)
+        assertFalse(page.text.contains("lineOne"))
+        assertFalse(page.text.contains("margin"))
+        assertTrue(page.text.contains("Visible text"))
+    }
+
+    @Test
+    fun parsePageKeepsLinksAndTitleWithScriptedPages() {
+        val html =
+            """<html><head><title>Shop</title><script>var a = 1;</script></head>""" +
+                """<body><a href="https://example.com/milk">milk</a><p>Buy milk</p></body></html>"""
+        val page = parsePage("https://example.com", html)
+        assertEquals("Shop", page.title)
+        assertEquals(listOf("https://example.com/milk"), page.links)
+        assertTrue(page.text.contains("Buy milk"))
+    }
 }
 
 class FakeWebBridge(

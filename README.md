@@ -6,26 +6,47 @@ sends as in-app approvals. Room-only memory; no cloud memory provider.
 
 ## Compose UI (Midnight Dark / Daylight Light)
 
-5 screens, no new Gradle dependencies:
+6 screens plus a `SideDrawer`, no new Gradle dependencies:
 
+- **Onboarding** — first-run intro with large touch targets and hairline
+  cards, then into the app.
 - **Command** — scrollable `Interaction` feed (one record per past
   command: prompt, recalled-Memory chips, Plan steps, response, emails,
   web preview, retry notice, settled Confirmation receipts), live
   ticking `ThinkingIndicator`, working Stop/Cancel, unified
   `ConfirmationCard` with inline editable email fields, AI provider
-  sheet (Auto/Default, deepseek, gemini, meta), suggestion cards.
+  sheet (Auto/Default, deepseek, gemini, meta), suggestion cards,
+  1-tap Markdown `Session` transcript export/share.
 - **Browser** — Back/Forward/Reload, 2dp load progress, full-height
-  WebView, inspector tray (Page · Extracted · Links) with Save to Memory.
+  WebView, inspector tray (Page · Text · Links) with Save to Memory.
 - **Schedules** — natural-language creator with preview card, grouped
-  Schedule cards (human time + monospace cron + next fire time),
+  Schedule cards (human cadence + live `"Fires in Xh Ym"` countdown,
+  never raw monospace cron),
   Enable/Disable toggles, Run Now, 2-tap armed delete, held-write
   approvals, Recent Runs history.
 - **Memory** — search + category/source filter pills, edit sheet, delete
   with 4 s Tap-to-Undo.
 - **Settings** — System/Dark/Light theme, haptics toggle, Gmail OAuth
   (least-privilege scopes) + LLM keys, Confirmation rules
-  (`send_email`: Enforced, no bypass), permissions, `Plan`/`Tool`/`Recall`
+  (`send_email`: Enforced, no bypass), 1-tap System Diagnostics,
+  permissions, `Plan`/`Tool`/`Recall`
   telemetry + provider/Interaction summary.
+- **SideDrawer** — `Sessions` list with search and `New Session`,
+  per-Session transcript hydration on cold start, plus voice-entry and
+  Schedules launcher shortcuts.
+
+### Native capabilities
+
+- **System Diagnostics** — 1-tap report in Settings (key flags,
+  exact-alarm state, scheduler state).
+- **Share Sheet target** — the app accepts `ACTION_SEND` text/plain and
+  routes the shared text into the Command composer.
+- **App Shortcuts** (`shortcuts.xml`) — launcher shortcuts for voice
+  command, new Session, and Schedules.
+- **Markdown `Session` export** — 1-tap share/copy of the current
+  Session transcript as Markdown.
+- **Release hardening** — `app/proguard-rules.pro` (Tink, Room v6,
+  WorkManager, OkHttp/Jsoup) wired into the `release` build type.
 
 ## Setup
 
@@ -76,8 +97,8 @@ Settings, stored encrypted in `TokenVault` on-device (ticket 36).
 ## Test
 
 - `export ANDROID_HOME=$HOME/Library/Android/sdk`
-- `./gradlew :app:testDebugUnitTest` — 337 tests, green
-  (30 test classes + `PerfTimingsTest` benchmark).
+- `./gradlew :app:testDebugUnitTest` — 626 tests, green
+  (52 test classes incl. `PerfTimingsTest` benchmark).
 - Device proof that still needs a human pass: `docs/SCHEDULING_TEST.md`;
   timing medians + optimization: `docs/PERF_TIMINGS.md`.
 

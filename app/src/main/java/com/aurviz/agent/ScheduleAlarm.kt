@@ -95,9 +95,17 @@ fun cancelRoutineAlarm(context: Context, scheduleId: String) {
 // row without days, so weekly routines came back daily). Returns how many
 // were registered. JVM-testable; the re-arm Worker supplies the Room
 // store and the AlarmManager registration on the device.
-fun rescheduleAll(store: ScheduleStore, register: (Schedule) -> Unit): Int {
+// Ticket #107 (T2): disabled Schedule ids are never re-armed — the
+// resume/boot/re-arm paths pass UiPrefs.disabledScheduleIds. Defaulted so
+// existing callers/tests compile unchanged.
+fun rescheduleAll(
+    store: ScheduleStore,
+    disabledIds: Set<String> = emptySet(),
+    register: (Schedule) -> Unit,
+): Int {
     var count = 0
     for (schedule in store.list()) {
+        if (schedule.id in disabledIds) continue
         register(schedule)
         count += 1
     }

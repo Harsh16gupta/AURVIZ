@@ -108,12 +108,41 @@ class MainActivity : ComponentActivity() {
                     AgentNav(
                         vm = vm,
                         onMicTap = ::onMicTapped,
+                        onVoiceDismiss = ::stopVoiceRecognition,
                         onOpenExactAlarmSettings = ::openExactAlarmSettings,
                         onOpenBatterySettings = ::openBatteryExemption,
                     )
                 }
             }
         }
+        handleIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIntent(intent)
+    }
+
+    // Ticket #108 (T3): Share Sheet (ACTION_SEND text/plain) + launcher
+    // shortcut routing. The intent action is cleared after consuming so a
+    // configuration change never re-triggers the navigation or draft.
+    private fun handleIntent(intent: Intent?) {
+        if (!::vm.isInitialized || intent == null) return
+        val action = intent.action ?: return
+        val isSend = action == Intent.ACTION_SEND
+        val isShortcut = action == com.aurviz.agent.ui.SHORTCUT_ACTION_VOICE ||
+            action == com.aurviz.agent.ui.SHORTCUT_ACTION_NEW_SESSION ||
+            action == com.aurviz.agent.ui.SHORTCUT_ACTION_SCHEDULES
+        if (!isSend && !isShortcut) return
+        val sharedText = if (isSend) {
+            intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()
+        } else {
+            null
+        }
+        val sharedSubject = if (isSend) intent.getStringExtra(Intent.EXTRA_SUBJECT) else null
+        vm.handleIncomingIntent(action, intent.type, sharedText, sharedSubject)
+        intent.action = null
     }
 
     override fun onResume() {
@@ -161,6 +190,16 @@ class MainActivity : ComponentActivity() {
             PackageManager.PERMISSION_GRANTED
 
     private fun onMicTapped() {
+        // Ticket #107 (T2): the sheet's mic button doubles as Stop while
+        // listening — stop instead of starting a second recognition.
+        if (vm.state.value.voice.listening) {
+            try {
+                recognizer?.stopListening()
+            } catch (_: Exception) {
+            }
+            vm.setVoiceListening(false)
+            return
+        }
         val availability =
             voiceAvailability(SpeechRecognizer.isRecognitionAvailable(this), hasMicPermission())
         when (availability.state) {
@@ -178,6 +217,18 @@ class MainActivity : ComponentActivity() {
             VoiceState.FALLBACK_TEXT -> {
                 vm.onVoiceError("No voice recognition on this device. Please type.")
             }
+        }
+    }
+
+    // Ticket #107 (T2): dismissing the Voice Command sheet must never
+    // leave the microphone hot — cancel recognition and clear listening.
+    private fun stopVoiceRecognition() {
+        if (vm.state.value.voice.listening) {
+            try {
+                recognizer?.cancel()
+            } catch (_: Exception) {
+            }
+            vm.setVoiceListening(false)
         }
     }
 
