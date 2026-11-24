@@ -56,19 +56,24 @@ class ScheduleWorker(context: Context, params: WorkerParameters) : Worker(contex
     override fun doWork(): Result {
         val scheduleId = inputData.getString(SCHEDULE_ID_KEY) ?: return Result.failure()
         val fireTime = inputData.getLong(FIRE_TIME_KEY, 0L).takeIf { it > 0 } ?: System.currentTimeMillis()
-        val db =
-            Room.databaseBuilder(applicationContext, AppDb::class.java, "aurviz.db")
-                .addMigrations(*AppMigrations)
-                .configureEncryptedRoom(applicationContext, TokenVault(applicationContext))
-                .build()
+        // The encrypted-Room open (keystore read + one-time plaintext
+        // migration) lives INSIDE the try: an open failure must come back
+        // as retry(), never as an uncaught worker-thread crash.
+        var db: AppDb? = null
         try {
-            val scheduleStore = RoomScheduleStore(db.schedules())
+            db =
+                Room.databaseBuilder(applicationContext, AppDb::class.java, "aurviz.db")
+                    .addMigrations(*AppMigrations)
+                    .configureEncryptedRoom(applicationContext, TokenVault(applicationContext))
+                    .build()
+            val open = db ?: return Result.retry()
+            val scheduleStore = RoomScheduleStore(open.schedules())
             val schedule = scheduleStore.list().find { it.id == scheduleId } ?: return Result.failure()
-            val full = buildRoutineRegistry(scheduleStore, db)
+            val full = buildRoutineRegistry(scheduleStore, open)
             val chat = buildRoutineChat(full)
             val outcome =
                 fireSchedule(scheduleId, fireTime, scheduleStore) { sched ->
-                    runScheduledRoutine(sched, fireTime, chat, full, RoomScheduleRunStore(db.runs()), RoomPendingApprovalStore(db.approvals()))
+                    runScheduledRoutine(sched, fireTime, chat, full, RoomScheduleRunStore(open.runs()), RoomPendingApprovalStore(open.approvals()))
                 }
             // Ticket #107 (T2): a disabled Schedule is never re-armed after
             // it fires — the toggle is a durable off, not a skip-once.
@@ -100,7 +105,7 @@ class ScheduleWorker(context: Context, params: WorkerParameters) : Worker(contex
             return Result.retry()
         } finally {
             try {
-                db.close()
+                db?.close()
             } catch (_: Exception) {
             }
         }
@@ -181,21 +186,26 @@ const val RESCHEDULE_WORK_NAME = "reschedule_all"
 
 class RescheduleWorker(context: Context, params: WorkerParameters) : Worker(context, params) {
     override fun doWork(): Result {
-        val db =
-            Room.databaseBuilder(applicationContext, AppDb::class.java, "aurviz.db")
-                .addMigrations(*AppMigrations)
-                .configureEncryptedRoom(applicationContext, TokenVault(applicationContext))
-                .build()
+        // Same rule as ScheduleWorker: the encrypted-Room open stays inside
+        // the try so keystore/migration trouble returns failure() instead of
+        // crashing the worker thread.
+        var db: AppDb? = null
         try {
+            db =
+                Room.databaseBuilder(applicationContext, AppDb::class.java, "aurviz.db")
+                    .addMigrations(*AppMigrations)
+                    .configureEncryptedRoom(applicationContext, TokenVault(applicationContext))
+                    .build()
             // Ticket #107 (T2): boot/timezone re-arm skips disabled Schedules.
             val disabledIds = com.aurviz.agent.ui.components.UiPrefs.disabledScheduleIds(applicationContext)
-            rescheduleAll(RoomScheduleStore(db.schedules()), disabledIds) { registerRoutineAlarm(applicationContext, it) }
+            val open = db ?: return Result.failure()
+            rescheduleAll(RoomScheduleStore(open.schedules()), disabledIds) { registerRoutineAlarm(applicationContext, it) }
             return Result.success()
         } catch (_: Exception) {
             return Result.failure()
         } finally {
             try {
-                db.close()
+                db?.close()
             } catch (_: Exception) {
             }
         }
