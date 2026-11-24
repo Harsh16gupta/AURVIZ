@@ -21,3 +21,7 @@
 -dontwarn okio.**
 -dontwarn org.jsoup.**
 -dontwarn org.codehaus.mojo.animal_sniffer.**
+
+# 5. SQLCipher for Android JNI bridges
+-keep class net.zetetic.database.** { *; }
+-dontwarn net.zetetic.database.**

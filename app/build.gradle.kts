@@ -77,6 +77,8 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.9.0")
     implementation("androidx.core:core:1.13.1")
     implementation("androidx.security:security-crypto:1.1.0")
+    implementation("net.zetetic:sqlcipher-android:4.6.1")
+    implementation("androidx.sqlite:sqlite-ktx:2.4.0")
     kapt("androidx.room:room-compiler:2.6.1")
 
     // Compose (BOM) + lifecycle/navigation for ComponentActivity + setContent.

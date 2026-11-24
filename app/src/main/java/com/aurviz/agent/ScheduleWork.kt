@@ -59,6 +59,7 @@ class ScheduleWorker(context: Context, params: WorkerParameters) : Worker(contex
         val db =
             Room.databaseBuilder(applicationContext, AppDb::class.java, "aurviz.db")
                 .addMigrations(*AppMigrations)
+                .configureEncryptedRoom(applicationContext, TokenVault(applicationContext))
                 .build()
         try {
             val scheduleStore = RoomScheduleStore(db.schedules())
@@ -183,6 +184,7 @@ class RescheduleWorker(context: Context, params: WorkerParameters) : Worker(cont
         val db =
             Room.databaseBuilder(applicationContext, AppDb::class.java, "aurviz.db")
                 .addMigrations(*AppMigrations)
+                .configureEncryptedRoom(applicationContext, TokenVault(applicationContext))
                 .build()
         try {
             // Ticket #107 (T2): boot/timezone re-arm skips disabled Schedules.

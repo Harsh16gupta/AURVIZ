@@ -41,6 +41,7 @@ import com.aurviz.agent.RoomMemoryStore
 import com.aurviz.agent.RoomScheduleStore
 import com.aurviz.agent.TokenStore
 import com.aurviz.agent.TokenVault
+import com.aurviz.agent.configureEncryptedRoom
 import com.aurviz.agent.ToolCall
 import com.aurviz.agent.ToolResult
 import com.aurviz.agent.WebBridge
@@ -182,14 +183,15 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
     private val _state = MutableStateFlow(AgentUiState())
     val state: StateFlow<AgentUiState> = _state.asStateFlow()
 
+    private val tokens = TokenStore()
+    private val tokenVault = TokenVault(application)
     private val db: AppDb =
         Room.databaseBuilder(application, AppDb::class.java, "aurviz.db")
             .addMigrations(*AppMigrations)
+            .configureEncryptedRoom(application, tokenVault)
             .build()
     private val roomStore = RoomMemoryStore(db.memories())
     private val scheduleStore = RoomScheduleStore(db.schedules())
-    private val tokens = TokenStore()
-    private val tokenVault = TokenVault(application)
     private val gmail = GmailHttpApi(
         tokens,
         BuildConfig.GOOGLE_OAUTH_CLIENT_ID,

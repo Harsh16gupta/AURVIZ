@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import java.security.SecureRandom
 
 // H4: Gmail tokens live in encrypted storage, not plain memory.
 // The phone encrypts them with its own key (AES256) — a reboot keeps
@@ -20,6 +21,14 @@ data class LlmKeys(
     val deepseekKey: String = "",
     val metaKey: String = "",
 )
+
+// ADR-0006: 256-bit (32-byte) SQLCipher database passphrase persisted in
+// EncryptedSharedPreferences under DB_PASSPHRASE_PREF_KEY.
+internal const val DB_PASSPHRASE_PREF_KEY = "db_passphrase_b64"
+internal const val DB_PASSPHRASE_BYTES = 32
+
+internal fun defaultSecureRandomBytes(size: Int): ByteArray =
+    ByteArray(size).also { SecureRandom().nextBytes(it) }
 
 class TokenVault(private val prefs: SharedPreferences) {
     constructor(context: Context) : this(
@@ -84,5 +93,30 @@ class TokenVault(private val prefs: SharedPreferences) {
             // Drop the legacy Groq entry for users upgrading from older builds.
             .remove("llm_groq_key")
             .apply()
+    }
+
+    // ADR-0006: 256-bit (32-byte) SQLCipher database passphrase persisted in
+    // EncryptedSharedPreferences. Generated once via SecureRandom and reused
+    // on every launch; never wiped by clearGmail() or clearLlmKeys().
+    @Synchronized
+    fun getOrCreateDbPassphrase(
+        randomBytes: (Int) -> ByteArray = ::defaultSecureRandomBytes,
+    ): ByteArray {
+        val existing = prefs.getString(DB_PASSPHRASE_PREF_KEY, null)
+        if (!existing.isNullOrBlank()) {
+            val decoded = try {
+                java.util.Base64.getUrlDecoder().decode(existing)
+            } catch (_: IllegalArgumentException) {
+                null
+            }
+            if (decoded != null && decoded.size == DB_PASSPHRASE_BYTES) {
+                return decoded
+            }
+        }
+        val fresh = randomBytes(DB_PASSPHRASE_BYTES)
+        require(fresh.size == DB_PASSPHRASE_BYTES) { "DB passphrase must be $DB_PASSPHRASE_BYTES bytes" }
+        val encoded = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(fresh)
+        prefs.edit().putString(DB_PASSPHRASE_PREF_KEY, encoded).apply()
+        return fresh.copyOf()
     }
 }
