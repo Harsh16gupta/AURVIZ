@@ -22,23 +22,26 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.aurviz.agent.ui.theme.ArrowUp
 import com.aurviz.agent.ui.theme.Icons
+import com.aurviz.agent.ui.theme.Microphone
 import com.aurviz.agent.ui.theme.Plus
 import com.aurviz.agent.ui.theme.Space
 import com.aurviz.agent.ui.theme.Stop
 import com.aurviz.agent.ui.theme.Theme
 import com.aurviz.agent.ui.theme.Waveform
 
-// Single-row Composer pill (48–56dp): [+] | Ask Aurviz field | one
-// state-driven right action. Waveform opens the Voice Command sheet when
-// blank, Electric Blue ArrowUp sends when non-blank, Stop while running.
-// No duplicate ModelPill here — the provider lives in the Command header.
-// No dual mic + waveform: one action, three states.
+// Single-row capsule Composer pill: [+] | Ask AIRA field (expands
+// vertically only when multi-line wraps) | mic icon | state-driven main
+// action (Stop while running, Electric Blue ArrowUp send when non-blank,
+// #1E78FF Voice Command pill when blank). The provider selector lives in
+// Settings only — never in the Composer.
+// GLOSSARY: Voice Command, Task Execution.
 @Composable
 fun Composer(
     value: String,
@@ -50,7 +53,9 @@ fun Composer(
     onAddClick: () -> Unit,
     onVoiceClick: () -> Unit,
     modifier: Modifier = Modifier,
-    placeholder: String = "Ask Aurviz",
+    placeholder: String = "Ask AIRA",
+    model: String = "Auto",
+    onModelClick: () -> Unit = {},
 ) {
     val haptics = LocalHaptics.current
     Row(
@@ -62,7 +67,7 @@ fun Composer(
             .border(1.dp, Theme.colors.composerRing, RoundedCornerShape(26.dp))
             .padding(horizontal = 6.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Space),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         IconButton(
             onClick = onAddClick,
@@ -78,7 +83,7 @@ fun Composer(
             modifier = Modifier.weight(1f).semantics { contentDescription = placeholder },
             textStyle = Theme.typography.body.copy(color = Theme.colors.onSurface),
             cursorBrush = SolidColor(Theme.colors.primary),
-            maxLines = 3,
+            maxLines = 4,
             decorationBox = { field ->
                 Box(Modifier.padding(horizontal = Space, vertical = Space)) {
                     if (value.isEmpty()) Text(placeholder, color = Theme.colors.onBackgroundMuted)
@@ -86,6 +91,14 @@ fun Composer(
                 }
             },
         )
+        IconButton(
+            onClick = onVoiceClick,
+            contentDescription = "Mic",
+            variant = IconButtonVariant.Ghost,
+            size = IconButtonSize.Small,
+        ) {
+            Icon(Icons.Microphone, contentDescription = null, modifier = Modifier.size(18.dp))
+        }
         AnimatedContent(
             targetState =
                 when {
@@ -137,15 +150,23 @@ fun Composer(
                         )
                     }
                 MainAction.Voice ->
-                    IconButton(
-                        onClick = onVoiceClick,
-                        contentDescription = "Voice Command",
-                        variant = IconButtonVariant.Filled,
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(Theme.shapes.fullyRounded)
+                            .background(Color(0xFF1E78FF))
+                            .clickable {
+                                haptics?.play(HapticKind.Light)
+                                onVoiceClick()
+                            }
+                            .semantics { contentDescription = "Voice Command" },
+                        contentAlignment = Alignment.Center,
                     ) {
                         Icon(
                             Icons.Waveform,
                             contentDescription = null,
                             modifier = Modifier.size(20.dp),
+                            tint = Color(0xFFFFFFFF),
                         )
                     }
             }

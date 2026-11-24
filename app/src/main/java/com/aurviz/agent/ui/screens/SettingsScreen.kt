@@ -1,5 +1,6 @@
 package com.aurviz.agent.ui.screens
 
+import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -78,9 +79,11 @@ fun SettingsScreen(
     onAllowAlwaysRevoke: (String) -> Unit = {},
     onOpenMemory: () -> Unit = {},
     onRunDiagnostics: () -> Unit = {},
-    onBack: () -> Unit = {},
+    onClearInteractions: () -> Unit = {},
+    onBack: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
+    // Settings is a root tab: onBack stays null so Page shows no chevron.
     // P2: drafts and the pasted OAuth link are memory-only (remember,
     // never rememberSaveable) so they are never serialized into
     // saved-instance state. Fields start empty, clear on save, and clear
@@ -94,7 +97,12 @@ fun SettingsScreen(
     // (null = closed), plus its memory-only paste draft.
     var keyEditor by remember { mutableStateOf<String?>(null) }
     var keyDraft by remember { mutableStateOf("") }
-    var guideExpanded by remember { mutableStateOf(false) }
+    var showAllGuides by remember { mutableStateOf(false) }
+    // Provider lives here only (never in the Composer). Auto = system
+    // default; otherwise the explicit override.
+    var showProviderSheet by remember { mutableStateOf(false) }
+    // Only this phone's vendor steps show inline; the sheet holds every brand.
+    val vendorGuide = remember { oemGuideForManufacturer(Build.MANUFACTURER) }
     val haptics = LocalHaptics.current
 
     DisposableEffect(Unit) {
@@ -182,6 +190,15 @@ fun SettingsScreen(
                 onClick = onOpenMemory,
                 navigates = true,
             )
+            CardDivider()
+            // Spec clear-interactions row: user-visible copy uses the
+            // glossary-safe Past Interactions wording (GLOSSARY Interaction).
+            OptionRow(
+                title = "Clear Past Interactions",
+                description = "Removes Past Interactions from this phone. Cannot be undone.",
+                onClick = onClearInteractions,
+                destructive = true,
+            )
         }
         Section(
             "Connections",
@@ -219,7 +236,7 @@ fun SettingsScreen(
                 onClick = {
                     if (state.pasteFallbackVisible) onDismissPasteFallback() else onConnectGmail()
                 },
-                description = "Use when the browser never returns to Aurviz.",
+                description = "Use when the browser never returns to AIRA.",
                 navigates = true,
             )
             if (state.pasteFallbackVisible) {
@@ -302,6 +319,8 @@ fun SettingsScreen(
                 value = providerDisplayName(
                     state.selectedProvider ?: state.providerUsed ?: BuildConfig.LLM_DEFAULT_PROVIDER,
                 ),
+                onClick = { showProviderSheet = true },
+                navigates = true,
             )
         }
         Section("System Diagnostics") {
@@ -431,7 +450,7 @@ fun SettingsScreen(
                 OptionRow(
                     title = "Background running",
                     onClick = onOpenBatterySettings,
-                    description = "Battery optimization is restricting Aurviz — exempt it so Schedules fire on time.",
+                    description = "Battery optimization is restricting AIRA — exempt it so Schedules fire on time.",
                     icon = Icons.DeviceMobile,
                     value = "Action needed",
                     valueColor = Theme.colors.warning,
@@ -440,7 +459,7 @@ fun SettingsScreen(
             } else {
                 OptionRow(
                     title = "Background running",
-                    description = "Battery optimization is not restricting Aurviz.",
+                    description = "Battery optimization is not restricting AIRA.",
                     icon = Icons.DeviceMobile,
                     value = "Granted",
                     valueColor = Theme.colors.success,
@@ -455,21 +474,20 @@ fun SettingsScreen(
                 navigates = true,
             )
             CardDivider()
+            // Matched-vendor 2-line guide inline; every brand lives in the sheet.
             OptionRow(
-                title = "Device battery & autostart guide",
-                onClick = { guideExpanded = !guideExpanded },
-                description = "Vendor steps for Xiaomi, Oppo, Vivo, Huawei, Samsung.",
+                title = "View all device guides",
+                onClick = { showAllGuides = true },
+                description = "${vendorGuide.title} steps for this phone below.",
                 navigates = true,
             )
-            if (guideExpanded) {
-                CardDivider()
-                Box(Modifier.fillMaxWidth().padding(16.dp)) {
-                    Text(
-                        OEM_AUTOSTART_GUIDANCE,
-                        style = Theme.typography.caption,
-                        color = Theme.colors.onBackgroundMuted,
-                    )
-                }
+            CardDivider()
+            Box(Modifier.fillMaxWidth().padding(16.dp)) {
+                Text(
+                    vendorGuide.steps.joinToString("\n"),
+                    style = Theme.typography.caption,
+                    color = Theme.colors.onBackgroundMuted,
+                )
             }
         }
     }
@@ -538,6 +556,55 @@ fun SettingsScreen(
             )
         }
     }
+
+    // Provider lives here only (never in the Composer): Auto follows the
+    // first Set key, or pick an explicit override.
+    ModalBottomSheet(
+        visible = showProviderSheet,
+        onDismiss = { showProviderSheet = false },
+        title = "AI Provider",
+    ) {
+        listOf(null to "Auto", "gemini" to "Gemini", "deepseek" to "DeepSeek", "meta" to "Meta").forEach { (choice, label) ->
+            val keySet = when (choice) {
+                "gemini" -> state.geminiKeySet
+                "deepseek" -> state.deepseekKeySet
+                "meta" -> state.metaKeySet
+                else -> state.geminiKeySet || state.deepseekKeySet || state.metaKeySet
+            }
+            OptionRow(
+                title = if (choice == null) "Auto (recommended)" else label,
+                onClick = {
+                    onSetSelectedProvider(choice)
+                    showProviderSheet = false
+                },
+                description = if (choice == null) "System default" else if (keySet) "Set" else "Not set",
+                value = if (state.selectedProvider == choice) "Selected" else null,
+                navigates = true,
+            )
+        }
+    }
+
+    // Ticket #90 follow-up: the full multi-brand list lives here; inline
+    // Settings shows only the matched vendor's two lines.
+    ModalBottomSheet(
+        visible = showAllGuides,
+        onDismiss = { showAllGuides = false },
+        title = "Device guides",
+    ) {
+        OEM_GUIDES.forEach { guide ->
+            Text(guide.title, style = Theme.typography.label)
+            Text(
+                guide.steps.joinToString("\n"),
+                style = Theme.typography.caption,
+                color = Theme.colors.onBackgroundMuted,
+            )
+        }
+        Text(
+            OEM_AUTOSTART_GUIDANCE,
+            style = Theme.typography.caption,
+            color = Theme.colors.onBackgroundMuted,
+        )
+    }
 }
 
 // Ticket #90: one ChatGPT-Usage-style labeled progress bar per stage —
@@ -587,4 +654,77 @@ private fun TelemetryBar(
             }
         }
     }
+}
+
+// Per-vendor battery + autostart steps split from OEM_AUTOSTART_GUIDANCE so
+// Settings can show only the rows matching Build.MANUFACTURER inline. Pure
+// and JVM-testable; the full verbatim const still renders in the sheet.
+private data class OemGuide(
+    val keys: List<String>,
+    val title: String,
+    val steps: List<String>,
+)
+
+private val OEM_GUIDES =
+    listOf(
+        OemGuide(
+            keys = listOf("xiaomi", "redmi", "poco"),
+            title = "Xiaomi (MIUI)",
+            steps =
+                listOf(
+                    "Settings > Battery > App battery saver > AIRA > No restrictions.",
+                    "Security > Autostart > allow AIRA.",
+                ),
+        ),
+        OemGuide(
+            keys = listOf("oppo", "oneplus", "realme"),
+            title = "Oppo / OnePlus (ColorOS / OxygenOS)",
+            steps =
+                listOf(
+                    "Settings > Battery > App battery management > AIRA.",
+                    "Allow background activity + Allow auto-launch.",
+                ),
+        ),
+        OemGuide(
+            keys = listOf("vivo", "iqoo"),
+            title = "Vivo (Funtouch OS)",
+            steps =
+                listOf(
+                    "Settings > Battery > Background power consumption > allow AIRA.",
+                    "Settings > Apps > Autostart > allow AIRA.",
+                ),
+        ),
+        OemGuide(
+            keys = listOf("huawei", "honor"),
+            title = "Huawei (EMUI)",
+            steps =
+                listOf(
+                    "Settings > Battery > App launch > AIRA > Manage manually.",
+                    "Allow Auto-launch, Secondary launch, Run in background.",
+                ),
+        ),
+        OemGuide(
+            keys = listOf("samsung"),
+            title = "Samsung (One UI)",
+            steps =
+                listOf(
+                    "Settings > Battery > Background usage limits.",
+                    "Add AIRA to Never sleeping apps.",
+                ),
+        ),
+    )
+
+private fun oemGuideForManufacturer(manufacturer: String): OemGuide {
+    val normalized = manufacturer.lowercase()
+    return OEM_GUIDES.firstOrNull { guide ->
+        guide.keys.any { normalized.contains(it) }
+    } ?: OemGuide(
+        keys = emptyList(),
+        title = "This device",
+        steps =
+            listOf(
+                "Settings > Battery > Battery optimization > exempt AIRA.",
+                "Allow background activity so Schedules fire on time.",
+            ),
+    )
 }

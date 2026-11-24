@@ -114,14 +114,15 @@ class AgentLoopTest {
 
     @Test
     fun maxStepsAbortEmitsFailedWithPartialTimeline() {
-        val script = (0 until 10).map { call("call_$it", "search_emails", mapOf("query" to "is:important is:unread", "max" to 1)) }
+        val n = AgentLoop.MAX_STEPS
+        val script = (0 until n).map { call("call_$it", "search_emails", mapOf("query" to "is:important is:unread", "max" to 1)) }
         val llm = FakeLlmProvider(script)
         val events = mutableListOf<AgentEvent>()
         val result = AgentLoop(llm, registry(), onEvent = events::add).run("never ends")
         assertTrue(result is AgentLoopResult.Failed)
         result as AgentLoopResult.Failed
         assertEquals(AgentLoop.MAX_STEPS, result.steps.size)
-        assertTrue(result.error.contains("8"))
+        assertTrue(result.error.contains("$n"))
 
         // The loop stops asking: exactly MAX_STEPS LLM turns, then Failed.
         assertEquals(AgentLoop.MAX_STEPS, llm.seenMessages.size)
@@ -130,7 +131,7 @@ class AgentLoopTest {
 
         // Partial timeline: executed Tools stay DONE, tail row is the Error.
         val rows = result.toTimeline()
-        assertTrue(rows.any { it.title.startsWith("Tool 8 of 8: search_emails") })
+        assertTrue(rows.any { it.title.startsWith("Tool $n of $n: search_emails") })
         assertEquals(StepState.FAILED, rows.last().state)
         assertTrue(rows.last().title.startsWith("Error:"))
     }

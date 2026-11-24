@@ -40,6 +40,7 @@ import androidx.navigation.compose.rememberNavController
 import com.aurviz.agent.knownAddressesFromInbox
 import com.aurviz.agent.unseenRecipients
 import com.aurviz.agent.ui.filterSessionSummaries
+import com.aurviz.agent.ui.components.AiraLogoMark
 import com.aurviz.agent.ui.components.ScreenScaffold
 import com.aurviz.agent.ui.components.SearchField
 import com.aurviz.agent.ui.components.SideDrawer
@@ -64,7 +65,6 @@ import com.aurviz.agent.ui.theme.SlidersHorizontal
 import com.aurviz.agent.ui.theme.Theme
 import com.aurviz.agent.ui.theme.Trash
 import com.aurviz.agent.ui.theme.User
-import com.aurviz.agent.ui.theme.VelaMark
 
 object Dests {
     const val COMMAND = "command"
@@ -177,7 +177,6 @@ fun AgentNav(
                             navController.navigate(Dests.COMMAND)
                         },
                         onRefreshRuns = vm::refreshScheduleRuns,
-                        onBack = { navController.popBackStack() },
                     )
                 }
                 composable(Dests.MEMORY) {
@@ -187,7 +186,6 @@ fun AgentNav(
                         onForget = vm::deleteMemory,
                         onUpdateMemory = vm::updateMemory,
                         onRestoreMemory = vm::restoreMemory,
-                        onBack = { navController.popBackStack() },
                     )
                 }
                 composable(Dests.SETTINGS) {
@@ -211,7 +209,7 @@ fun AgentNav(
                         onAllowAlwaysRevoke = vm::allowAlwaysRevoke,
                         onOpenMemory = { navController.navigate(Dests.MEMORY) },
                         onRunDiagnostics = vm::runDiagnostics,
-                        onBack = { navController.popBackStack() },
+                        onClearInteractions = vm::clearInteractions,
                     )
                 }
             }
@@ -223,14 +221,12 @@ fun AgentNav(
                 Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(
-                    Icons.VelaMark,
-                    contentDescription = null,
-                    modifier = Modifier.size(20.dp),
-                    tint = Theme.colors.primary,
+                AiraLogoMark(
+                    size = 20.dp,
+                    archColor = Theme.colors.onSurface,
                 )
                 Spacer(Modifier.width(8.dp))
-                Text("AURVIZ", style = Theme.typography.title, color = Theme.colors.onSurface)
+                Text("AIRA", style = Theme.typography.title, color = Theme.colors.onSurface)
                 Spacer(Modifier.weight(1f))
                 Box(
                     Modifier.size(48.dp).clip(Theme.shapes.fullyRounded).clickable(
@@ -353,7 +349,7 @@ fun AgentNav(
                     )
                     Spacer(Modifier.width(12.dp))
                     Text(
-                        "Memory",
+                        "Memories",
                         style = Theme.typography.label,
                         color = Theme.colors.onSurface,
                         modifier = Modifier.weight(1f),
@@ -544,6 +540,7 @@ fun AgentNav(
                 showVoice = false
                 if (text.isNotBlank()) vm.sendCommand(text)
             },
+            onTranscriptChange = vm::editVoiceTranscript,
         )
         EmailConfirmationSheet(
             draft = state.pendingEmail,

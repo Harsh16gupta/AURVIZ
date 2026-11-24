@@ -62,7 +62,7 @@ class LoopbackReceiver {
                     if (header.isEmpty()) break
                 }
                 val code = Regex("[?&]code=([^& ]+)").find(requestLine)?.groupValues?.get(1)
-                val body = "<html><body>Signed in — return to AURVIZ.</body></html>"
+                val body = "<html><body>Signed in — return to AIRA.</body></html>"
                 val head =
                     "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n" +
                         "Content-Length: ${body.toByteArray().size}\r\nConnection: close\r\n\r\n"

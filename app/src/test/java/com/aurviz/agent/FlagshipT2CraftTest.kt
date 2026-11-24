@@ -56,9 +56,9 @@ class FlagshipT2CraftTest {
         val text = mainText("com/aurviz/agent/ui/screens/CommandScreen.kt")
         assertTrue(text.contains("visiblePlanSteps(record.steps)"))
         assertTrue(text.contains("visiblePlanSteps(state.timeline)"))
-        assertTrue(text.contains("RoundedCornerShape(14.dp)"))
+        assertTrue(text.contains("RoundedCornerShape(12.dp)"))
         assertTrue(text.contains(".background(Theme.colors.surface)"))
-        assertTrue(text.contains(".border(0.5.dp, Theme.colors.edge"))
+        assertTrue(text.contains(".border(1.dp, Theme.colors.edge"))
         assertTrue(text.contains("Modifier.size(18.dp)"))
         assertTrue(text.contains("Modifier.size(12.dp)"))
         assertTrue(text.contains("Modifier.size(6.dp)"))
@@ -81,7 +81,7 @@ class FlagshipT2CraftTest {
     @Test
     fun drawerHasMemoryRowAndBorderlessSessionPill() {
         val text = mainText("com/aurviz/agent/ui/AgentNav.kt")
-        assertTrue(text.contains("\"Memory\""))
+        assertTrue(text.contains("\"Memories\""))
         assertTrue(text.contains("Dests.MEMORY"))
         assertTrue(text.contains("Modifier.size(48.dp)"))
         assertTrue(text.contains("heightIn(min = 64.dp)"))

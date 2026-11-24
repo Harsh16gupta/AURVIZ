@@ -25,7 +25,7 @@ fun truncateToolText(text: String, maxChars: Int = MAX_TOOL_TEXT_CHARS): String 
 fun capToolLinks(links: List<String>, maxLinks: Int = MAX_TOOL_LINKS): List<String> =
     links.take(maxLinks)
 
-fun openUrlTool(webBridge: WebBridge?): ToolDefinition =
+fun openUrlTool(webBridge: WebBridge?, backgroundWebLoader: BackgroundPageLoader? = null): ToolDefinition =
     ToolDefinition(
         name = "open_url",
         description = "Open a page in the foreground browser tab. Returns its title, readable text, and links.",
@@ -34,10 +34,27 @@ fun openUrlTool(webBridge: WebBridge?): ToolDefinition =
         requiresConfirmation = false,
         resultType = "page",
         execute = { args ->
-            val bridge = webBridge ?: return@ToolDefinition noWebBridge()
             val url = args["url"] as String
             try {
-                val page = openPage(bridge, url)
+                // Foreground tab wins when attached; headless loader covers
+                // Command runs before the Browser tab mounts and WebView
+                // crashes/timeouts (the device WebView sandbox can die).
+                val page =
+                    if (webBridge != null) {
+                        try {
+                            openPage(webBridge, url)
+                        } catch (e: WebException) {
+                            val loader = backgroundWebLoader
+                            if (loader != null && (e.failure.reason == "timeout" || e.failure.reason == "load-failed")) {
+                                openBackgroundPage(loader, url)
+                            } else {
+                                throw e
+                            }
+                        }
+                    } else {
+                        val loader = backgroundWebLoader ?: return@ToolDefinition noWebBridge()
+                        openBackgroundPage(loader, url)
+                    }
                 ToolResult.Success(
                     mapOf(
                         "url" to page.url,
@@ -184,7 +201,7 @@ fun extractTool(webBridge: WebBridge?): ToolDefinition =
  *  builder registers every entry into the kernel. */
 fun webTools(webBridge: WebBridge?, backgroundWebLoader: BackgroundPageLoader? = null): List<ToolDefinition> =
     listOf(
-        openUrlTool(webBridge),
+        openUrlTool(webBridge, backgroundWebLoader),
         getPageTextTool(webBridge, backgroundWebLoader),
         clickTool(webBridge),
         scrollTool(webBridge),

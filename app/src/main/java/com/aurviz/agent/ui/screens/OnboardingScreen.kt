@@ -167,7 +167,7 @@ fun OnboardingScreen(
                         } else {
                             "Skip for now"
                         }
-                    else -> "Start using Aurviz"
+                    else -> "Start using AIRA"
                 }
             Button(
                 onClick = {
@@ -204,7 +204,7 @@ private fun OnboardingWelcome() {
     }
     Spacer(Modifier.height(20.dp))
     Text(
-        "Welcome to Aurviz",
+        "Welcome to AIRA",
         style = Theme.typography.display.copy(textAlign = TextAlign.Center),
         color = Theme.colors.onBackground,
         modifier = Modifier.fillMaxWidth(),

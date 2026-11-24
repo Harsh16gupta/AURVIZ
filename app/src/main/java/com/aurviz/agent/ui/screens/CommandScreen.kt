@@ -39,13 +39,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.aurviz.agent.BuildConfig
 import com.aurviz.agent.StepState
 import com.aurviz.agent.TimelineStep
 import com.aurviz.agent.approvalCardFor
@@ -53,29 +54,23 @@ import com.aurviz.agent.confirmationDetailFor
 import com.aurviz.agent.confirmationTitleFor
 import com.aurviz.agent.knownAddressesFromInbox
 import com.aurviz.agent.planFailure
-import com.aurviz.agent.providerDisplayName
 import com.aurviz.agent.stepDisplayTitle
 import com.aurviz.agent.visiblePlanSteps
 import com.aurviz.agent.ui.AgentUiState
 import com.aurviz.agent.ui.InteractionRecord
 import com.aurviz.agent.ui.formatSessionTranscriptMarkdown
+import com.aurviz.agent.ui.components.AiraLogoMark
 import com.aurviz.agent.ui.components.AppBar
 import com.aurviz.agent.ui.rememberAddressFor
 import com.aurviz.agent.ui.components.Button
 import com.aurviz.agent.ui.components.ButtonVariant
 import com.aurviz.agent.ui.components.Composer
 import com.aurviz.agent.ui.components.ConfirmationCard
-import com.aurviz.agent.ui.components.EmptyState
 import com.aurviz.agent.ui.components.FeedCard
-import com.aurviz.agent.ui.components.HapticKind
-import com.aurviz.agent.ui.components.LocalHaptics
 import com.aurviz.agent.ui.components.Markdown
 import com.aurviz.agent.ui.components.ModalBottomSheet
-import com.aurviz.agent.ui.components.ModelPill
-import com.aurviz.agent.ui.components.OptionRow
 import com.aurviz.agent.ui.components.ScreenScaffold
 import com.aurviz.agent.ui.components.ScrollToLatestButton
-import com.aurviz.agent.ui.components.StarterRow
 import com.aurviz.agent.ui.components.StatusBanner
 import com.aurviz.agent.ui.components.Text
 import com.aurviz.agent.ui.components.TextField
@@ -90,19 +85,18 @@ import com.aurviz.agent.ui.theme.SlidersHorizontal
 import com.aurviz.agent.ui.theme.CaretDown
 import com.aurviz.agent.ui.theme.Check
 import com.aurviz.agent.ui.theme.Copy
-import com.aurviz.agent.ui.theme.EnvelopeSimple
 import com.aurviz.agent.ui.theme.Export
 import com.aurviz.agent.ui.theme.Globe
 import com.aurviz.agent.ui.theme.Icons
 import com.aurviz.agent.ui.theme.Menu
+import com.aurviz.agent.ui.theme.Microphone
 import com.aurviz.agent.ui.theme.Space
-import com.aurviz.agent.ui.theme.Sparkle
 import com.aurviz.agent.ui.theme.Theme
+import com.aurviz.agent.ui.theme.Waveform
 import com.aurviz.agent.ui.theme.X
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-private val ProviderChoices: List<String?> = listOf(null, "deepseek", "gemini", "meta")
 
 // The Agent's home: a scrollable Interaction feed, its Plans as Task
 // Execution rows, and the Composer. Sensitive Tools never run here
@@ -130,15 +124,12 @@ fun CommandScreen(
     onAllowAlways: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    val haptics = LocalHaptics.current
     val focusManager = LocalFocusManager.current
     val context = LocalContext.current
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    var showProviderSheet by rememberSaveable { mutableStateOf(false) }
     var showMenuSheet by rememberSaveable { mutableStateOf(false) }
     var showComposerActions by rememberSaveable { mutableStateOf(false) }
-    val effectiveModel = state.selectedProvider ?: state.providerUsed ?: BuildConfig.LLM_DEFAULT_PROVIDER
     fun copyReceipt(text: String) {
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clipboard.setPrimaryClip(ClipData.newPlainText("confirmation", text))
@@ -172,36 +163,51 @@ fun CommandScreen(
         ) {
             AppBar(
                 navigation = {
-                    Box(
-                        Modifier.size(48.dp).clickable(
-                            onClick = onOpenDrawer,
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = androidx.compose.foundation.LocalIndication.current,
-                        ),
-                        contentAlignment = Alignment.Center,
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
                     ) {
-                        Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
-                            Icon(
-                                Icons.Menu,
-                                contentDescription = "Open menu",
-                                modifier = Modifier.size(22.dp),
-                                tint = Theme.colors.onBackground,
-                            )
-                            if (state.pendingApprovals.isNotEmpty()) {
-                                Box(
-                                    Modifier.align(Alignment.TopEnd).size(7.dp)
-                                        .clip(androidx.compose.foundation.shape.CircleShape)
-                                        .background(Theme.colors.primary),
+                        Box(
+                            Modifier.size(48.dp).clickable(
+                                onClick = onOpenDrawer,
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = androidx.compose.foundation.LocalIndication.current,
+                            ),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Menu,
+                                    contentDescription = "Open menu",
+                                    modifier = Modifier.size(22.dp),
+                                    tint = Theme.colors.onBackground,
                                 )
+                                if (state.pendingApprovals.isNotEmpty()) {
+                                    Box(
+                                        Modifier.align(Alignment.TopEnd).size(7.dp)
+                                            .clip(androidx.compose.foundation.shape.CircleShape)
+                                            .background(Theme.colors.primary),
+                                    )
+                                }
                             }
+                        }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            AiraLogoMark(
+                                size = 20.dp,
+                                archColor = Theme.colors.onBackground,
+                            )
+                            Text(
+                                "aira",
+                                style = Theme.typography.title,
+                                color = Theme.colors.onBackground,
+                            )
                         }
                     }
                 },
                 title = {
-                    ModelPill(
-                        model = providerDisplayName(effectiveModel),
-                        onClick = { showProviderSheet = true },
-                    )
                 },
                 actions = {
                     Box(
@@ -249,32 +255,15 @@ fun CommandScreen(
                         ) { focusManager.clearFocus() },
                     verticalArrangement = Arrangement.spacedBy(Space * 2),
                 ) {
-                    if (state.interactions.isEmpty() && !state.agentRunning && !state.sending) {
+                    if (state.interactions.size < 2 && !state.agentRunning && !state.sending) {
                         item {
-                            EmptyState(
-                                Icons.Sparkle,
-                                "Aurviz Agent",
-                                "Give a Voice Command or type a task to execute.",
-                            )
+                            HeroBlock()
                         }
                         item {
-                            Column(verticalArrangement = Arrangement.spacedBy(Space * 2)) {
-                                StarterRow(
-                                    icon = Icons.EnvelopeSimple,
-                                    text = "Check my important emails",
-                                    onClick = { onSend("Check my important emails") },
-                                )
-                                StarterRow(
-                                    icon = Icons.Bell,
-                                    text = "Schedule a daily 9 AM email summary",
-                                    onClick = { onSend("Schedule a daily 9 AM email summary") },
-                                )
-                                StarterRow(
-                                    icon = Icons.Globe,
-                                    text = "Open news.ycombinator.com",
-                                    onClick = { onSend("Open news.ycombinator.com") },
-                                )
-                            }
+                            VoiceWakeCard(onClick = onVoiceClick)
+                        }
+                        item {
+                            StarterCommands(onSend = onSend)
                         }
                     }
 
@@ -284,6 +273,8 @@ fun CommandScreen(
                             onOpenBrowser = onOpenBrowser,
                             onAllowAlways = onAllowAlways,
                             onCopyReceipt = ::copyReceipt,
+                            onRetry = onRetry,
+                            onOpenSettings = onOpenSettings,
                         )
                     }
 
@@ -295,6 +286,7 @@ fun CommandScreen(
                                 onApprovePending = onApprovePending,
                                 onApproveEdited = onApproveEdited,
                                 onRejectPending = onRejectPending,
+                                onOpenSettings = onOpenSettings,
                             )
                         }
                     }
@@ -329,33 +321,7 @@ fun CommandScreen(
                     onStop = onCancelRun,
                     onAddClick = { showComposerActions = true },
                     onVoiceClick = onVoiceClick,
-                    placeholder = "Ask Aurviz",
-                )
-            }
-        }
-
-        ModalBottomSheet(
-            visible = showProviderSheet,
-            onDismiss = { showProviderSheet = false },
-            title = "AI Provider",
-        ) {
-            ProviderChoices.forEach { choice ->
-                val keySet =
-                    when (choice) {
-                        "gemini" -> state.geminiKeySet
-                        "deepseek" -> state.deepseekKeySet
-                        "meta" -> state.metaKeySet
-                        else -> state.geminiKeySet || state.deepseekKeySet || state.metaKeySet
-                    }
-                OptionRow(
-                    title = providerDisplayName(choice),
-                    description = if (choice == null) "System default" else if (keySet) "Set" else "Not set",
-                    selected = state.selectedProvider == choice,
-                    onClick = {
-                        onSelectProvider(choice)
-                        haptics?.play(HapticKind.Selection)
-                        showProviderSheet = false
-                    },
+                    placeholder = "Ask AIRA",
                 )
             }
         }
@@ -514,11 +480,219 @@ private fun ComposerActionRow(
 }
 
 @Composable
+private fun HeroBlock() {
+    Column(
+        Modifier.fillMaxWidth().padding(vertical = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        AiraLogoMark(size = 44.dp)
+        Text(
+            "Meet AIRA.",
+            style = Theme.typography.display.copy(textAlign = TextAlign.Center),
+            color = Theme.colors.onBackground,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Text(
+            "Your personal assistant that knows you.",
+            style = Theme.typography.title.copy(
+                textAlign = TextAlign.Center,
+                fontWeight = FontWeight.Normal,
+            ),
+            color = Theme.colors.onBackground,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Text(
+            "Just speak. Get things done.",
+            style = Theme.typography.caption.copy(textAlign = TextAlign.Center),
+            color = Theme.colors.onBackgroundMuted,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+@Composable
+private fun VoiceWakeCard(onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(Theme.colors.surface)
+            .border(1.dp, Theme.colors.edge, RoundedCornerShape(12.dp))
+            .clickable(
+                onClick = onClick,
+                interactionSource = remember { MutableInteractionSource() },
+                indication = androidx.compose.foundation.LocalIndication.current,
+            )
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Box(
+            Modifier.size(40.dp)
+                .clip(RoundedCornerShape(50))
+                .background(Color(0xFF1E78FF)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Waveform,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = Color(0xFFFFFFFF),
+            )
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                "Hey AIRA",
+                style = Theme.typography.label.copy(fontWeight = FontWeight.SemiBold),
+                color = Theme.colors.onBackground,
+            )
+            Text(
+                "Say it. Your glasses start listening.",
+                style = Theme.typography.caption,
+                color = Theme.colors.onBackgroundMuted,
+            )
+        }
+        Icon(
+            Icons.Microphone,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp),
+            tint = Color(0xFF1E78FF),
+        )
+    }
+}
+
+@Composable
+private fun StarterCommands(onSend: (String) -> Unit) {
+    // Honest starters: every card maps to a Tool AIRA has today.
+    // Memory save, web open + summarize, and recurring Schedule create.
+    // No calendar moves, no LinkedIn posts, no address-less email replies —
+    // none of those Tools exist, so they never appear here.
+    val commands = listOf(
+        "Remember my boss is Priya.",
+        "Open https://example.com and summarize it.",
+        "Remind me every weekday at 8:30 AM to check emails.",
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        commands.forEach { command ->
+            Box(
+                Modifier.fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Theme.colors.surface)
+                    .border(1.dp, Theme.colors.edge, RoundedCornerShape(12.dp))
+                    .clickable(
+                        onClick = { onSend(command) },
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = androidx.compose.foundation.LocalIndication.current,
+                    )
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                Text(
+                    command,
+                    style = Theme.typography.label,
+                    color = Theme.colors.onBackground,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+// The Plan card already shows the terminal failure once with Retry
+// Tool. A settled "Failed: <same error>" response restates it verbatim,
+// so the feed hides the response in that case instead of doubling it.
+private fun responseDuplicatesFailure(responseText: String, failure: TimelineStep): Boolean {
+    val body = responseText.removePrefix("Failed:").removePrefix("Error:").trim()
+    if (body.isBlank()) return true
+    val err = failure.error.orEmpty()
+    val title = failure.title.orEmpty()
+    return (err.isNotBlank() && (body == err || body.contains(err))) ||
+        (title.isNotBlank() && (body == title || body.contains(title)))
+}
+
+@Composable
+private fun PlanTraceCard(
+    steps: List<TimelineStep>,
+    failure: TimelineStep?,
+    onRetry: () -> Unit,
+    onOpenSettings: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(Theme.colors.surface)
+            .border(1.dp, Theme.colors.edge, RoundedCornerShape(12.dp))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        steps.forEach { step -> StepRow(step = step) }
+        if (failure != null) {
+            val message = failure.error ?: failure.title
+            Text(
+                message,
+                style = Theme.typography.caption,
+                color = Theme.colors.destructive,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(top = 4.dp),
+            ) {
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(Theme.colors.surfaceVariant)
+                        .clickable(
+                            onClick = onRetry,
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = androidx.compose.foundation.LocalIndication.current,
+                        )
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        "Retry Tool",
+                        style = Theme.typography.label.copy(fontWeight = FontWeight.SemiBold),
+                        color = Theme.colors.onSurfaceVariant,
+                    )
+                }
+                val authError = message.contains("401") || message.contains("403")
+                if (authError) {
+                    Box(
+                        Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(Theme.colors.surfaceVariant)
+                            .clickable(
+                                onClick = onOpenSettings,
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = androidx.compose.foundation.LocalIndication.current,
+                            )
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            "Open Settings",
+                            style = Theme.typography.label.copy(fontWeight = FontWeight.SemiBold),
+                            color = Theme.colors.accentText,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun InteractionItem(
     record: InteractionRecord,
     onOpenBrowser: () -> Unit,
     onAllowAlways: (String) -> Unit = {},
     onCopyReceipt: (String) -> Unit = {},
+    onRetry: () -> Unit = {},
+    onOpenSettings: () -> Unit = {},
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(Space * 2)) {
         UserMessage(record.command)
@@ -544,17 +718,16 @@ private fun InteractionItem(
         }
 
         val planSteps = visiblePlanSteps(record.steps)
+        val settledFailure = if (record.failed) planFailure(record.steps) else null
         if (planSteps.isNotEmpty()) {
-            Column(
-                Modifier.fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(Theme.colors.surface)
-                    .border(0.5.dp, Theme.colors.edge, RoundedCornerShape(14.dp))
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                planSteps.forEach { step -> StepRow(step = step) }
-            }
+            PlanTraceCard(
+                steps = planSteps,
+                failure = settledFailure,
+                onRetry = onRetry,
+                onOpenSettings = onOpenSettings,
+            )
+        } else if (settledFailure != null) {
+            StatusBanner(message = settledFailure.error ?: settledFailure.title)
         }
 
         if (record.confirmationStatus != null) {
@@ -574,14 +747,16 @@ private fun InteractionItem(
             )
         }
 
-        if (record.failed) {
-            planFailure(record.steps)?.let { failure ->
-                StatusBanner(message = failure.error ?: failure.title)
-            }
-        }
-
         if (record.responseText.isNotBlank()) {
-            Markdown(record.responseText)
+            // Deduplicate: the Plan card already renders the terminal
+            // failure once with Retry Tool. A settled "Failed: <same error>"
+            // response would repeat it verbatim below the card, so hide the
+            // response when it only restates the card's failure.
+            val duplicatesFailure = record.failed && settledFailure != null &&
+                responseDuplicatesFailure(record.responseText, settledFailure)
+            if (!duplicatesFailure) {
+                Markdown(record.responseText)
+            }
         }
 
         if (record.emails.isNotEmpty()) {
@@ -658,6 +833,7 @@ private fun ActiveRunSection(
     onApprovePending: (String) -> Unit,
     onApproveEdited: (String, Map<String, Any?>) -> Unit,
     onRejectPending: (String) -> Unit,
+    onOpenSettings: () -> Unit = {},
 ) {
     var elapsed by remember { mutableIntStateOf(0) }
     LaunchedEffect(state.agentRunning, state.sending) {
@@ -681,17 +857,16 @@ private fun ActiveRunSection(
         }
 
         val activePlanSteps = visiblePlanSteps(state.timeline)
+        val activeFailure = if (!state.agentRunning) planFailure(state.timeline) else null
         if (activePlanSteps.isNotEmpty()) {
-            Column(
-                Modifier.fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(Theme.colors.surface)
-                    .border(0.5.dp, Theme.colors.edge, RoundedCornerShape(14.dp))
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                activePlanSteps.forEach { step -> StepRow(step = step) }
-            }
+            PlanTraceCard(
+                steps = activePlanSteps,
+                failure = activeFailure,
+                onRetry = onRetry,
+                onOpenSettings = onOpenSettings,
+            )
+        } else if (activeFailure != null) {
+            StatusBanner(message = activeFailure.error ?: activeFailure.title)
         }
 
         val pendingCall = state.pendingApproval
@@ -766,16 +941,6 @@ private fun ActiveRunSection(
                     onApprove = { onApprovePending(proposalId) },
                     onDeny = { onRejectPending(proposalId) },
                 )
-            }
-        }
-
-        // Active-run only, exactly once: one error row plus a single retry.
-        if (!state.agentRunning) {
-            planFailure(state.timeline)?.let { failure ->
-                StatusBanner(message = failure.error ?: failure.title)
-                Button(onClick = onRetry, variant = ButtonVariant.Secondary) {
-                    Text("Retry failed Tool")
-                }
             }
         }
     }

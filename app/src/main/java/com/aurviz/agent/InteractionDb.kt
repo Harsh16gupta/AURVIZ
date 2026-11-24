@@ -38,6 +38,12 @@ interface InteractionDao {
     @Query("DELETE FROM interactions WHERE pid NOT IN (SELECT pid FROM interactions ORDER BY timestampMs DESC LIMIT :keep)")
     fun prune(keep: Int)
 
+    // Clear-all for the Settings "Clear Interaction History" row (spec
+    // copy lives in a comment there; user-visible copy stays glossary-safe
+    // "Clear Past Interactions"). No schema change — Room stays version 6.
+    @Query("DELETE FROM interactions")
+    fun clearAll()
+
     @Query("SELECT * FROM interactions WHERE sessionId = :sessionId ORDER BY timestampMs ASC")
     suspend fun listBySession(sessionId: String): List<InteractionRow>
 
