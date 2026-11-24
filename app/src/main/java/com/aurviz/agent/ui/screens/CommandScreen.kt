@@ -3,6 +3,7 @@ package com.aurviz.agent.ui.screens
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -57,6 +58,7 @@ import com.aurviz.agent.stepDisplayTitle
 import com.aurviz.agent.visiblePlanSteps
 import com.aurviz.agent.ui.AgentUiState
 import com.aurviz.agent.ui.InteractionRecord
+import com.aurviz.agent.ui.formatSessionTranscriptMarkdown
 import com.aurviz.agent.ui.components.AppBar
 import com.aurviz.agent.ui.rememberAddressFor
 import com.aurviz.agent.ui.components.Button
@@ -87,7 +89,9 @@ import com.aurviz.agent.ui.theme.NotePencil
 import com.aurviz.agent.ui.theme.SlidersHorizontal
 import com.aurviz.agent.ui.theme.CaretDown
 import com.aurviz.agent.ui.theme.Check
+import com.aurviz.agent.ui.theme.Copy
 import com.aurviz.agent.ui.theme.EnvelopeSimple
+import com.aurviz.agent.ui.theme.Export
 import com.aurviz.agent.ui.theme.Globe
 import com.aurviz.agent.ui.theme.Icons
 import com.aurviz.agent.ui.theme.Menu
@@ -138,6 +142,26 @@ fun CommandScreen(
     fun copyReceipt(text: String) {
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clipboard.setPrimaryClip(ClipData.newPlainText("confirmation", text))
+    }
+    // Ticket #109 (T4): 1-tap Markdown Session transcript export/share.
+    // Share opens the Android chooser; copy writes Markdown to clipboard.
+    fun copySessionTranscript() {
+        val md = formatSessionTranscriptMarkdown(state.sessionId, state.interactions)
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("Aurviz Session", md))
+    }
+
+    fun shareSessionTranscript() {
+        val md = formatSessionTranscriptMarkdown(state.sessionId, state.interactions)
+        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "Aurviz Session")
+            putExtra(Intent.EXTRA_TEXT, md)
+        }
+        try {
+            context.startActivity(Intent.createChooser(sendIntent, "Share Session"))
+        } catch (_: Exception) {
+        }
     }
 
     ScreenScaffold(modifier) {
@@ -377,6 +401,27 @@ fun CommandScreen(
                     onOpenSettings()
                 },
             )
+            // Ticket #109 (T4): Markdown Session transcript export/share.
+            if (state.interactions.isNotEmpty()) {
+                MenuSheetRow(
+                    icon = Icons.Export,
+                    title = "Share Session",
+                    trailing = "${state.interactions.size} turns",
+                    onClick = {
+                        showMenuSheet = false
+                        shareSessionTranscript()
+                    },
+                )
+                MenuSheetRow(
+                    icon = Icons.Copy,
+                    title = "Copy Session",
+                    trailing = "Markdown",
+                    onClick = {
+                        showMenuSheet = false
+                        copySessionTranscript()
+                    },
+                )
+            }
         }
 
         ModalBottomSheet(

@@ -145,6 +145,63 @@ fun buildSessionSummaries(rows: List<InteractionRow>): List<SessionSummary> =
         }
         .sortedByDescending { it.lastTimestampMs }
 
+// Ticket #109 (T4): pure Session search filter for the SideDrawer.
+// Case-insensitive title match; blank query returns everything.
+fun filterSessionSummaries(
+    sessions: List<SessionSummary>,
+    query: String,
+): List<SessionSummary> {
+    val trimmed = query.trim()
+    if (trimmed.isEmpty()) return sessions
+    return sessions.filter { it.title.contains(trimmed, ignoreCase = true) }
+}
+
+// Ticket #109 (T4): pure Markdown Session transcript exporter. Renders
+// the Session's Interactions (user command, recalled Memories, Plan
+// steps via stepDisplayTitle, settled Confirmation receipts, Agent
+// provider, response text) as clean Markdown for share/copy.
+fun formatSessionTranscriptMarkdown(
+    sessionId: String,
+    interactions: List<InteractionRecord>,
+): String {
+    if (interactions.isEmpty()) return "# Aurviz Session ($sessionId)\n\nNo Interactions recorded in this Session."
+    return buildString {
+        appendLine("# Aurviz Session")
+        appendLine()
+        interactions.forEachIndexed { index, record ->
+            if (index > 0) {
+                appendLine()
+                appendLine("---")
+                appendLine()
+            }
+            appendLine("## Interaction ${index + 1}: ${record.command}")
+            if (record.recalledMemories.isNotEmpty()) {
+                appendLine("- **Recalled Memory:** ${record.recalledMemories.joinToString("; ")}")
+            }
+            val planSteps = com.aurviz.agent.visiblePlanSteps(record.steps)
+            if (planSteps.isNotEmpty()) {
+                appendLine("- **Plan:**")
+                for (step in planSteps) {
+                    val title = com.aurviz.agent.stepDisplayTitle(step)
+                    val args = step.argsSummary?.let { " ($it)" }.orEmpty()
+                    appendLine("  - [${step.state.name}] $title$args")
+                }
+            }
+            if (record.confirmationStatus != null) {
+                val title = record.confirmationTitle ?: "Confirmation"
+                appendLine("- **Confirmation (${record.confirmationStatus.name}):** $title")
+            }
+            if (!record.providerUsed.isNullOrBlank()) {
+                appendLine("- **Agent Provider:** ${com.aurviz.agent.providerDisplayName(record.providerUsed)}")
+            }
+            if (record.responseText.isNotBlank()) {
+                appendLine()
+                appendLine(record.responseText.trim())
+            }
+        }
+    }.trimEnd()
+}
+
 // Ticket #106 (T1): cold-start active Session hydration. After process
 // death activeSessionId resets to a fresh id while Room still holds the
 // last Session's rows; restoring the most recent Session keeps the

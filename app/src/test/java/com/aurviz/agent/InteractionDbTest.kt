@@ -9,6 +9,10 @@ import com.aurviz.agent.ui.NEW_SESSION_LABEL
 import com.aurviz.agent.ui.NO_PAST_SESSIONS_LINE
 import com.aurviz.agent.ui.OPEN_SESSIONS_DESCRIPTION
 import com.aurviz.agent.ui.PAST_INTERACTIONS_TITLE
+import com.aurviz.agent.ui.SessionSummary
+import com.aurviz.agent.ui.components.ConfirmationStatus
+import com.aurviz.agent.ui.filterSessionSummaries
+import com.aurviz.agent.ui.formatSessionTranscriptMarkdown
 import com.aurviz.agent.ui.groupPastInteractions
 import com.aurviz.agent.ui.hydrateLatestSession
 import com.aurviz.agent.ui.toRecord
@@ -254,5 +258,102 @@ class InteractionDbTest {
         assertTrue(hydrated.interactions.isEmpty())
         assertTrue(hydrated.transcript.isEmpty())
         assertTrue(hydrated.sessions.isEmpty())
+    }
+
+    // Ticket #109 (T4): SideDrawer Session search filter.
+
+    private fun summary(id: String, title: String) =
+        SessionSummary(sessionId = id, title = title, lastTimestampMs = 1000L, interactionCount = 1)
+
+    @Test
+    fun filterBlankQueryReturnsAllSummaries() {
+        val sessions = listOf(summary("s1", "Check mail"), summary("s2", "Plan trip"))
+        assertEquals(sessions, filterSessionSummaries(sessions, ""))
+        assertEquals(sessions, filterSessionSummaries(sessions, "   "))
+    }
+
+    @Test
+    fun filterMatchesTitleCaseInsensitively() {
+        val sessions = listOf(summary("s1", "Check Mail"), summary("s2", "Plan trip"))
+        assertEquals(listOf("s1"), filterSessionSummaries(sessions, "mail").map { it.sessionId })
+        assertEquals(listOf("s1"), filterSessionSummaries(sessions, "CHECK").map { it.sessionId })
+        assertEquals(listOf("s2"), filterSessionSummaries(sessions, "  trip  ").map { it.sessionId })
+    }
+
+    @Test
+    fun filterNoMatchReturnsEmpty() {
+        val sessions = listOf(summary("s1", "Check mail"))
+        assertTrue(filterSessionSummaries(sessions, "zzz").isEmpty())
+    }
+
+    // Ticket #109 (T4): Markdown Session transcript exporter.
+
+    @Test
+    fun transcriptEmptyInteractionsShowsFallbackLine() {
+        assertEquals(
+            "# Aurviz Session (s_1)\n\nNo Interactions recorded in this Session.",
+            formatSessionTranscriptMarkdown("s_1", emptyList()),
+        )
+    }
+
+    @Test
+    fun transcriptFormatsCommandAndResponse() {
+        val record = record("check mail", 1000L)
+        val md = formatSessionTranscriptMarkdown("s_1", listOf(record))
+        assertTrue(md.startsWith("# Aurviz Session"))
+        assertTrue(md.contains("## Interaction 1: check mail"))
+        assertTrue(md.contains("done"))
+    }
+
+    @Test
+    fun transcriptFormatsMemoryPlanConfirmationAndProvider() {
+        val record =
+            InteractionRecord(
+                id = "in_1",
+                command = "send update",
+                timestampMs = 1000L,
+                recalledMemories = listOf("boss is Priya"),
+                steps = listOf(TimelineStep("Tool 1 of 1: send_email", StepState.DONE, toolName = "send_email", argsSummary = "to: a@b.c")),
+                responseText = "sent",
+                providerUsed = "gemini",
+                confirmationTitle = "Send email to a@b.c",
+                confirmationStatus = ConfirmationStatus.Approved,
+            )
+        val md = formatSessionTranscriptMarkdown("s_1", listOf(record))
+        assertTrue(md.contains("- **Recalled Memory:** boss is Priya"))
+        assertTrue(md.contains("- **Plan:**"))
+        assertTrue(md.contains("[DONE]"))
+        assertTrue(md.contains("- **Confirmation (Approved):** Send email to a@b.c"))
+        assertTrue(md.contains("- **Agent Provider:** Gemini"))
+        assertTrue(md.contains("sent"))
+    }
+
+    @Test
+    fun transcriptSeparatesMultipleInteractions() {
+        val md = formatSessionTranscriptMarkdown("s_1", listOf(record("one", 1000L), record("two", 2000L)))
+        assertTrue(md.contains("## Interaction 1: one"))
+        assertTrue(md.contains("## Interaction 2: two"))
+        assertTrue(md.contains("---"))
+    }
+
+    @Test
+    fun transcriptCopyHasNoBannedWords() {
+        val record =
+            InteractionRecord(
+                id = "in_1",
+                command = "check mail",
+                timestampMs = 1000L,
+                recalledMemories = listOf("boss is Priya"),
+                steps = listOf(TimelineStep("Tool 1 of 1: send_email", StepState.DONE, toolName = "send_email")),
+                responseText = "sent",
+                providerUsed = "gemini",
+                confirmationTitle = "Send email to a@b.c",
+                confirmationStatus = ConfirmationStatus.Approved,
+            )
+        val md = formatSessionTranscriptMarkdown("s_1", listOf(record))
+        val banned = listOf("history", "chatbot", "workflow", "alarm", "timer", "cron", "dictation", "job run")
+        banned.forEach { word ->
+            assertFalse("banned copy '$word' in transcript", md.contains(word, ignoreCase = true))
+        }
     }
 }

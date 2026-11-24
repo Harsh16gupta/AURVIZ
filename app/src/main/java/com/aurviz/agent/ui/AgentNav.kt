@@ -39,7 +39,9 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.aurviz.agent.knownAddressesFromInbox
 import com.aurviz.agent.unseenRecipients
+import com.aurviz.agent.ui.filterSessionSummaries
 import com.aurviz.agent.ui.components.ScreenScaffold
+import com.aurviz.agent.ui.components.SearchField
 import com.aurviz.agent.ui.components.SideDrawer
 import com.aurviz.agent.ui.components.Text
 import com.aurviz.agent.ui.components.Icon
@@ -87,6 +89,7 @@ fun AgentNav(
     val context = LocalContext.current
     var showVoice by rememberSaveable { mutableStateOf(false) }
     var drawerOpen by remember { mutableStateOf(false) }
+    var sessionQuery by rememberSaveable { mutableStateOf("") }
 
     LaunchedEffect(state.authUrl) {
         val url = state.authUrl ?: return@LaunchedEffect
@@ -398,11 +401,31 @@ fun AgentNav(
                         cal.set(java.util.Calendar.MILLISECOND, 0)
                         cal.timeInMillis
                     }
-                val today = summaries.filter { it.lastTimestampMs >= startOfToday }
-                val previous = summaries.filter { it.lastTimestampMs < startOfToday }
-                LazyColumn(
-                    Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp),
-                ) {
+                // Ticket #109 (T4): compact Session search above the list.
+                SearchField(
+                    value = sessionQuery,
+                    onValueChange = { sessionQuery = it },
+                    placeholder = "Search Sessions",
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                )
+                val filteredSummaries = filterSessionSummaries(summaries, sessionQuery)
+                if (filteredSummaries.isEmpty()) {
+                    Box(
+                        Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            "No matching Sessions",
+                            style = Theme.typography.caption,
+                            color = Theme.colors.onBackgroundMuted,
+                        )
+                    }
+                } else {
+                    val today = filteredSummaries.filter { it.lastTimestampMs >= startOfToday }
+                    val previous = filteredSummaries.filter { it.lastTimestampMs < startOfToday }
+                    LazyColumn(
+                        Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp),
+                    ) {
                     item {
                         Text(
                             "Sessions",
@@ -453,6 +476,7 @@ fun AgentNav(
                             )
                         }
                     }
+                }
                 }
             }
             // Bottom Pinned Profile / Settings Footer: 1.dp top divider, 64.dp height, 16.dp padding.

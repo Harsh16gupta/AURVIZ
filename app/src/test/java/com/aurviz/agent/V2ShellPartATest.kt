@@ -212,4 +212,33 @@ class V2ShellPartATest {
         }
         assertTrue(banned.isNotEmpty())
     }
+
+    // Ticket #109 (T4): SideDrawer Session search filter seam.
+    @Test
+    fun drawerRendersSessionSearchFilter() {
+        val nav = mainText("com/aurviz/agent/ui/AgentNav.kt")
+        assertTrue(nav.contains("sessionQuery"))
+        assertTrue(nav.contains("rememberSaveable"))
+        assertTrue(nav.contains("SearchField("))
+        assertTrue(nav.contains("\"Search Sessions\""))
+        assertTrue(nav.contains("filterSessionSummaries(summaries, sessionQuery)"))
+        assertTrue(nav.contains("\"No matching Sessions\""))
+        val ui = mainText("com/aurviz/agent/ui/AgentUiState.kt")
+        assertTrue(ui.contains("fun filterSessionSummaries("))
+    }
+
+    // Ticket #109 (T4): Markdown Session transcript export/share seam.
+    @Test
+    fun workspaceSheetOffersSessionExportShare() {
+        val cmd = mainText("com/aurviz/agent/ui/screens/CommandScreen.kt")
+        assertTrue(cmd.contains("formatSessionTranscriptMarkdown(state.sessionId, state.interactions)"))
+        assertTrue(cmd.contains("\"Share Session\""))
+        assertTrue(cmd.contains("\"Copy Session\""))
+        assertTrue(cmd.contains("Icons.Export"))
+        assertTrue(cmd.contains("Icons.Copy"))
+        assertTrue(cmd.contains("Intent.ACTION_SEND"))
+        assertTrue(cmd.contains("Intent.createChooser(sendIntent, \"Share Session\")"))
+        val ui = mainText("com/aurviz/agent/ui/AgentUiState.kt")
+        assertTrue(ui.contains("fun formatSessionTranscriptMarkdown("))
+    }
 }
