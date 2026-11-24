@@ -72,6 +72,7 @@ fun MemoryScreen(
     onForget: (String) -> Unit,
     onUpdateMemory: (Memory, String) -> Unit = { _, _ -> },
     onRestoreMemory: (Memory) -> Unit = {},
+    onBack: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -106,6 +107,7 @@ fun MemoryScreen(
     Page(
         title = "Memory",
         modifier = modifier,
+        onBack = onBack,
         actions = {
             IconButton(
                 onClick = { showAdd = true },

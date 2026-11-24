@@ -56,6 +56,7 @@ object UiPrefs {
     private const val KEY_DISABLED_SCHEDULES = "disabled_schedule_ids"
     private const val KEY_ALLOW_ALWAYS = "allow_always_recipients"
     private const val KEY_MEMORY_FACET = "memory_facet"
+    private const val KEY_ONBOARDING_COMPLETED = "onboarding_completed"
 
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -92,6 +93,11 @@ object UiPrefs {
         prefs(context).getString(KEY_MEMORY_FACET, "All") ?: "All"
     fun setMemoryFacet(context: Context, facet: String) =
         prefs(context).edit().putString(KEY_MEMORY_FACET, facet).apply()
+
+    fun onboardingCompleted(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_ONBOARDING_COMPLETED, false)
+    fun setOnboardingCompleted(context: Context, done: Boolean) =
+        prefs(context).edit().putBoolean(KEY_ONBOARDING_COMPLETED, done).apply()
 }
 
 val LocalHaptics = staticCompositionLocalOf<AurvizHaptics?> { null }

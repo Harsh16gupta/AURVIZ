@@ -73,6 +73,7 @@ fun SettingsScreen(
     onSetHapticsEnabled: (Boolean) -> Unit = {},
     onAllowAlwaysAdd: (String) -> Unit = {},
     onAllowAlwaysRevoke: (String) -> Unit = {},
+    onBack: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     // P2: drafts and the pasted OAuth link are memory-only (remember,
@@ -135,7 +136,7 @@ fun SettingsScreen(
             else -> "Gemini"
         }
 
-    Page(title = "Settings", modifier = modifier) {
+    Page(title = "Settings", modifier = modifier, onBack = onBack) {
         Section("Appearance & Feedback") {
             Row(horizontalArrangement = Arrangement.spacedBy(Space * 2)) {
                 listOf(

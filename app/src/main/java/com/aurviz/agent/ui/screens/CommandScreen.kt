@@ -11,11 +11,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -34,6 +34,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -50,12 +51,10 @@ import com.aurviz.agent.confirmationTitleFor
 import com.aurviz.agent.knownAddressesFromInbox
 import com.aurviz.agent.planFailure
 import com.aurviz.agent.providerDisplayName
-import com.aurviz.agent.sessionTurnsLine
 import com.aurviz.agent.stepDisplayTitle
 import com.aurviz.agent.visiblePlanSteps
 import com.aurviz.agent.ui.AgentUiState
 import com.aurviz.agent.ui.InteractionRecord
-import com.aurviz.agent.ui.OPEN_SESSIONS_DESCRIPTION
 import com.aurviz.agent.ui.components.Button
 import com.aurviz.agent.ui.components.ButtonVariant
 import com.aurviz.agent.ui.components.Composer
@@ -70,16 +69,18 @@ import com.aurviz.agent.ui.components.ModelPill
 import com.aurviz.agent.ui.components.OptionRow
 import com.aurviz.agent.ui.components.ScreenScaffold
 import com.aurviz.agent.ui.components.ScrollToLatestButton
-import com.aurviz.agent.ui.components.SessionsDrawer
 import com.aurviz.agent.ui.components.StarterRow
 import com.aurviz.agent.ui.components.StatusBanner
 import com.aurviz.agent.ui.components.Text
 import com.aurviz.agent.ui.components.TextField
 import com.aurviz.agent.ui.components.Icon
-import com.aurviz.agent.ui.components.IconButton
 import com.aurviz.agent.ui.components.ThinkingIndicator
 import com.aurviz.agent.ui.components.UserMessage
 import com.aurviz.agent.ui.theme.Bell
+import com.aurviz.agent.ui.theme.Brain
+import com.aurviz.agent.ui.theme.DotsThree
+import com.aurviz.agent.ui.theme.NotePencil
+import com.aurviz.agent.ui.theme.SlidersHorizontal
 import com.aurviz.agent.ui.theme.CaretDown
 import com.aurviz.agent.ui.theme.Check
 import com.aurviz.agent.ui.theme.EnvelopeSimple
@@ -107,6 +108,10 @@ fun CommandScreen(
     onRetry: () -> Unit,
     onVoiceClick: () -> Unit,
     onOpenBrowser: () -> Unit,
+    onOpenSchedules: () -> Unit = {},
+    onOpenMemory: () -> Unit = {},
+    onOpenSettings: () -> Unit = {},
+    onOpenDrawer: () -> Unit = {},
     onApprovePending: (String) -> Unit = {},
     onApproveEdited: (String, Map<String, Any?>) -> Unit = { _, _ -> },
     onRejectPending: (String) -> Unit = {},
@@ -123,7 +128,8 @@ fun CommandScreen(
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     var showProviderSheet by rememberSaveable { mutableStateOf(false) }
-    var showSessions by rememberSaveable { mutableStateOf(false) }
+    var showMenuSheet by rememberSaveable { mutableStateOf(false) }
+    var showComposerActions by rememberSaveable { mutableStateOf(false) }
     val effectiveModel = state.selectedProvider ?: state.providerUsed ?: BuildConfig.LLM_DEFAULT_PROVIDER
     val providerKeySet =
         when (effectiveModel.lowercase()) {
@@ -141,36 +147,76 @@ fun CommandScreen(
         Column(Modifier.fillMaxSize()) {
             Row(
                 Modifier
-                    // Top inset comes from ScreenScaffold exactly once.
                     .height(56.dp)
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
+                    .background(Theme.colors.background)
+                    .padding(horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(onClick = { showSessions = true }, contentDescription = OPEN_SESSIONS_DESCRIPTION) {
-                    Icon(
-                        Icons.Menu,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp),
+                Box(
+                    Modifier.size(48.dp).clickable(
+                        onClick = onOpenDrawer,
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = androidx.compose.foundation.LocalIndication.current,
+                    ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Menu,
+                            contentDescription = "Open menu",
+                            modifier = Modifier.size(22.dp),
+                            tint = Theme.colors.onBackground,
+                        )
+                        if (state.pendingApprovals.isNotEmpty()) {
+                            Box(
+                                Modifier.align(Alignment.TopEnd).size(7.dp)
+                                    .clip(androidx.compose.foundation.shape.CircleShape)
+                                    .background(Theme.colors.primary),
+                            )
+                        }
+                    }
+                }
+                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    ModelPill(
+                        model = providerDisplayName(effectiveModel),
+                        badge = if (providerKeySet) "Set" else "Not set",
+                        onClick = { showProviderSheet = true },
                     )
                 }
-                Text("AURVIZ", style = Theme.typography.title)
-                Spacer(Modifier.weight(1f))
-                if (state.sessionTurns > 0) {
-                    Text(
-                        sessionTurnsLine(state.sessionTurns),
-                        style = Theme.typography.caption,
-                        color = Theme.colors.onBackgroundMuted,
-                    )
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Box(
+                        Modifier.size(44.dp).alpha(if (state.agentRunning) 0.38f else 1f).clickable(
+                            enabled = !state.agentRunning,
+                            onClick = onNewSession,
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = androidx.compose.foundation.LocalIndication.current,
+                        ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.NotePencil,
+                            contentDescription = "New Session",
+                            modifier = Modifier.size(20.dp),
+                            tint = Theme.colors.onBackground,
+                        )
+                    }
+                    Box(
+                        Modifier.size(44.dp).clickable(
+                            onClick = { showMenuSheet = true },
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = androidx.compose.foundation.LocalIndication.current,
+                        ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.DotsThree,
+                            contentDescription = "More options",
+                            modifier = Modifier.size(22.dp),
+                            tint = Theme.colors.onBackground,
+                        )
+                    }
                 }
-                Button(onClick = onNewSession, variant = ButtonVariant.Secondary) {
-                    Text("New session")
-                }
-                ModelPill(
-                    model = providerDisplayName(effectiveModel),
-                    badge = if (providerKeySet) "Set" else "Not set",
-                    onClick = { showProviderSheet = true },
-                )
             }
 
             Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -251,6 +297,7 @@ fun CommandScreen(
             Column(
                 Modifier.fillMaxWidth()
                     .imePadding()
+                    .navigationBarsPadding()
                     .padding(horizontal = Space * 4, vertical = Space * 3),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
@@ -261,7 +308,7 @@ fun CommandScreen(
                     canSend = state.inputText.isNotBlank() && !state.sending && !state.agentRunning,
                     onSend = { onSend(state.inputText) },
                     onStop = onCancelRun,
-                    onAddClick = { onOpenBrowser() },
+                    onAddClick = { showComposerActions = true },
                     onVoiceClick = onVoiceClick,
                     placeholder = "Ask Aurviz",
                 )
@@ -294,25 +341,135 @@ fun CommandScreen(
             }
         }
 
-        SessionsDrawer(
-            visible = showSessions,
-            interactions = state.interactions,
-            nowMs = System.currentTimeMillis(),
-            onDismiss = { showSessions = false },
-            onNewSession = {
-                onNewSession()
-                showSessions = false
-            },
-            onSelectPast = {
-                onSelectPastInteraction(it)
-                showSessions = false
-            },
-        )
+        ModalBottomSheet(
+            visible = showMenuSheet,
+            onDismiss = { showMenuSheet = false },
+            title = "More options",
+        ) {
+            MenuSheetRow(
+                icon = Icons.Brain,
+                title = "Memory",
+                trailing = "${state.memories.size} saved",
+                onClick = {
+                    showMenuSheet = false
+                    onOpenMemory()
+                },
+            )
+            MenuSheetRow(
+                icon = Icons.Bell,
+                title = "Schedules",
+                trailing = "${state.schedules.size}",
+                onClick = {
+                    showMenuSheet = false
+                    onOpenSchedules()
+                },
+            )
+            MenuSheetRow(
+                icon = Icons.Globe,
+                title = "Browser",
+                trailing = null,
+                onClick = {
+                    showMenuSheet = false
+                    onOpenBrowser()
+                },
+            )
+            MenuSheetRow(
+                icon = Icons.SlidersHorizontal,
+                title = "Settings",
+                trailing = null,
+                onClick = {
+                    showMenuSheet = false
+                    onOpenSettings()
+                },
+            )
+        }
+
+        ModalBottomSheet(
+            visible = showComposerActions,
+            onDismiss = { showComposerActions = false },
+            title = "Add to command",
+        ) {
+            ComposerActionRow(
+                icon = Icons.Globe,
+                title = "Open Browser",
+                description = "Load or inspect a webpage",
+                onClick = {
+                    showComposerActions = false
+                    onOpenBrowser()
+                },
+            )
+            ComposerActionRow(
+                icon = Icons.Bell,
+                title = "New Schedule",
+                description = "Set up a recurring Task Execution",
+                onClick = {
+                    showComposerActions = false
+                    onOpenSchedules()
+                },
+            )
+            ComposerActionRow(
+                icon = Icons.Brain,
+                title = "Manage Memory",
+                description = "View or add saved Preferences",
+                onClick = {
+                    showComposerActions = false
+                    onOpenMemory()
+                },
+            )
+        }
     }
 
     LaunchedEffect(state.interactions.size, state.timeline.size, state.pendingApproval) {
         val total = listState.layoutInfo.totalItemsCount
         if (total > 0) listState.animateScrollToItem(total - 1)
+    }
+}
+
+@Composable
+private fun MenuSheetRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    trailing: String?,
+    onClick: () -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 16.dp).clickable(
+            onClick = onClick,
+            interactionSource = remember { MutableInteractionSource() },
+            indication = androidx.compose.foundation.LocalIndication.current,
+        ),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp), tint = Theme.colors.onSurface)
+        Text(title, style = Theme.typography.label, color = Theme.colors.onSurface, modifier = Modifier.weight(1f))
+        if (trailing != null) {
+            Text(trailing, style = Theme.typography.caption, color = Theme.colors.onBackgroundMuted)
+        }
+    }
+}
+
+@Composable
+private fun ComposerActionRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    description: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 16.dp).clickable(
+            onClick = onClick,
+            interactionSource = remember { MutableInteractionSource() },
+            indication = androidx.compose.foundation.LocalIndication.current,
+        ),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp), tint = Theme.colors.onSurface)
+        Column(Modifier.weight(1f)) {
+            Text(title, style = Theme.typography.label, color = Theme.colors.onSurface)
+            Text(description, style = Theme.typography.caption, color = Theme.colors.onBackgroundMuted)
+        }
     }
 }
 

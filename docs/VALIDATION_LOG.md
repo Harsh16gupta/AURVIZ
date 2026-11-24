@@ -906,3 +906,9 @@ Per-screen/sheet audit, Midnight + Daylight (code inspection; no PNGs needed):
   comment "recent run history" → "recent Task Execution runs".
 - Full gate: testDebugUnitTest **503/503 green** (47 files, 0 failures) +
   assembleDebug green. Secret scan clean. One commit.
+
+## 2026-11-24 — V2 flagship shell Part A (feat/ui-v2-shell)
+
+- **Suspend DAO needs room-ktx.** Task spec asked for `suspend fun listBySession/deleteSession` in `InteractionDb.kt:36-43`, but the module only depended on `room-runtime` — `kaptDebugKotlin` failed with "To use Coroutine features, you must add `ktx` artifact" (`InteractionDao.java:20,26`). Caught by running `./gradlew testDebugUnitTest`. Fixed by adding `implementation("androidx.room:room-ktx:2.6.1")` (`app/build.gradle.kts`); Room DB stays at version 6, no migration.
+- **CommandScreen Alpha import.** Replaced the `40.dp` hit-target `IconButton` top bar with `Box(...).alpha(...)` for the disabled `agentRunning` dim (`CommandScreen.kt`) — needed explicit `import androidx.compose.ui.draw.alpha`; verified via `compileDebugKotlin` green.
+- Tests: `:app:testDebugUnitTest --rerun-tasks` green (516 tests, 0 failures incl. new `V2ShellPartATest` 13 tests) + `assembleDebug` green (EXIT:0). Secret scan clean (no keys in diff). Glossary check: Session/Schedule/Confirmation/Task Execution/Preference/Memory/Interaction used; no History/Chat/Alarm/Cron/raw `send_email` in new UI strings.

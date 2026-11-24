@@ -77,6 +77,7 @@ fun SchedulesScreen(
     onToggleScheduleEnabled: (String, Boolean) -> Unit = { _, _ -> },
     onRunScheduleNow: (String) -> Unit = {},
     onRefreshRuns: () -> Unit = {},
+    onBack: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var draft by rememberSaveable { mutableStateOf("") }
@@ -100,7 +101,7 @@ fun SchedulesScreen(
         }
     }
 
-    Page(title = "Schedules", modifier = modifier) {
+    Page(title = "Schedules", modifier = modifier, onBack = onBack) {
         Section("New Schedule") {
             TextField(
                 value = draft,
