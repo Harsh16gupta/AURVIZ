@@ -7,6 +7,7 @@ LLM_DEFAULT_PROVIDER=deepseek
 GEMINI_API_KEY=
 GEMINI_MODEL=gemini-2.5-flash
 DEEPSEEK_API_KEY=
+# Note: DeepSeek requires a paid API key (no free tier for the API).
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-flash
 META_API_KEY=
@@ -17,3 +18,6 @@ META_LLAMA_API_KEY=
 # Gmail OAuth (Desktop-app client, PKCE + loopback). Required for sign-in.
 GOOGLE_OAUTH_CLIENT_ID=
 GOOGLE_OAUTH_CLIENT_SECRET=
+# Mem0 cloud sync is optional and OFF by default; Room is the source of truth.
+# Leave unset unless you opt in to best-effort Mem0 mirroring in Settings.
+# MEM0_API_KEY=

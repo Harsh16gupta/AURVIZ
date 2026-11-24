@@ -468,4 +468,40 @@ class AgentLoopTest {
         assertTrue(third is ToolResult.Failure)
         assertTrue(!(third as ToolResult.Failure).error.contains("repeated identical"))
     }
+
+    // Issue #7 US1: one command chains recall -> read -> summarize in a
+    // single run, with execution order and tool_call_id propagation pinned.
+    @Test
+    fun recallReadSummarizeChainRunsInOrderWithMatchingToolCallIds() {
+        val memories = InMemoryStore()
+        rememberFact(memories, "my boss is Priya", source = "you told me")
+        val tools = defaultToolRegistry(gmailApi = FakeGmail(), memoryStore = memories)
+        val llm =
+            FakeLlmProvider(
+                listOf(
+                    call("call_1", "search_memory", mapOf("query" to "who is my boss", "max_results" to 5)),
+                    call("call_2", "search_emails", mapOf("query" to "boss", "max" to 5)),
+                    call("call_3", "read_email", mapOf("id" to "1")),
+                    answer("Summary: your boss Priya sent the Q3 plan."),
+                ),
+            )
+        val events = mutableListOf<AgentEvent>()
+        val result = AgentLoop(llm, tools, onEvent = events::add).run("check important emails and prepare summary")
+        assertTrue(result is AgentLoopResult.Answered)
+        assertEquals("Summary: your boss Priya sent the Q3 plan.", (result as AgentLoopResult.Answered).answer)
+        assertEquals(3, result.steps.size)
+        assertEquals("search_memory", result.steps[0].call.name)
+        assertEquals("search_emails", result.steps[1].call.name)
+        assertEquals("read_email", result.steps[2].call.name)
+
+        // role:"tool" messages carry the assistant tool_call_id (ADR-0005).
+        val toolMessages = result.messages.filter { it.role == "tool" }
+        assertEquals(3, toolMessages.size)
+        assertEquals("call_1", toolMessages[0].toolCallId)
+        assertEquals("call_2", toolMessages[1].toolCallId)
+        assertEquals("call_3", toolMessages[2].toolCallId)
+        assertTrue(payload(toolMessages[0]).getBoolean("ok"))
+        assertTrue(payload(toolMessages[1]).getBoolean("ok"))
+        assertTrue(payload(toolMessages[2]).getBoolean("ok"))
+    }
 }

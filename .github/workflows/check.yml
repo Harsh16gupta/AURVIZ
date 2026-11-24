@@ -17,4 +17,13 @@ jobs:
           cache: gradle
       - uses: gradle/actions/setup-gradle@v4
       - run: chmod +x gradlew
+      - name: Secret scan (lightweight committed-secret guard, #8)
+        run: |
+          echo "Scanning tracked files for committed secrets..."
+          if git grep -n -E "sk-(live|test)-[A-Za-z0-9]{10,}|AIza[0-9A-Za-z_-]{20,}|xox[bpas]-[A-Za-z0-9-]+|ghp_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}" -- . | grep -v "secret-scan\|gitleaks"; then
+            echo "Possible committed secret found above"
+            exit 1
+          else
+            echo "No committed secrets detected"
+          fi
       - run: ./gradlew :app:cleanTestDebugUnitTest :app:testDebugUnitTest :app:assembleDebug :app:lintDebug
