@@ -3,6 +3,7 @@ package com.aurviz.agent.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -23,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aurviz.agent.ToolCall
@@ -32,22 +35,26 @@ import com.aurviz.agent.nextFireTime
 import com.aurviz.agent.toolLabel
 import com.aurviz.agent.ui.AgentUiState
 import com.aurviz.agent.ui.components.Button
+import com.aurviz.agent.ui.components.ButtonVariant
 import com.aurviz.agent.ui.components.ConfirmationCard
 import com.aurviz.agent.ui.components.EmptyState
+import com.aurviz.agent.ui.components.FeedCard
 import com.aurviz.agent.ui.components.HapticKind
 import com.aurviz.agent.ui.components.Icon
 import com.aurviz.agent.ui.components.IconButton
 import com.aurviz.agent.ui.components.LocalHaptics
-import com.aurviz.agent.ui.components.OptionToggle
 import com.aurviz.agent.ui.components.Page
 import com.aurviz.agent.ui.components.Section
+import com.aurviz.agent.ui.components.Switch
 import com.aurviz.agent.ui.components.Text
 import com.aurviz.agent.ui.components.TextField
-import com.aurviz.agent.ui.formatScheduleCron
+import com.aurviz.agent.ui.firesIn
+import com.aurviz.agent.ui.formatRunDuration
 import com.aurviz.agent.ui.formatScheduleTime
 import com.aurviz.agent.ui.theme.Bell
 import com.aurviz.agent.ui.theme.Icons
 import com.aurviz.agent.ui.theme.Space
+import com.aurviz.agent.ui.theme.Sparkle
 import com.aurviz.agent.ui.theme.Theme
 import com.aurviz.agent.ui.theme.Trash
 import java.time.ZoneId
@@ -73,6 +80,11 @@ fun SchedulesScreen(
     modifier: Modifier = Modifier,
 ) {
     var draft by rememberSaveable { mutableStateOf("") }
+    // Inline delete row target (Delete Schedule? Delete/Keep) — explicit
+    // row, never a morphing pill.
+    var confirmDeleteId by rememberSaveable { mutableStateOf<String?>(null) }
+    // Live countdown: re-resolve "Fires in …" every 30s.
+    var nowTick by remember { mutableStateOf(ZonedDateTime.now()) }
     val haptics = LocalHaptics.current
 
     // A Worker can save a new held row + notify while this screen is cached:
@@ -81,22 +93,28 @@ fun SchedulesScreen(
         onRefreshApprovals()
         onRefreshRuns()
     }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(30_000L)
+            nowTick = ZonedDateTime.now()
+        }
+    }
 
     Page(title = "Schedules", modifier = modifier) {
-        Section(
-            "New Schedule",
-            footer = "Example: every morning at 9AM check emails",
-        ) {
+        Section("New Schedule") {
             TextField(
                 value = draft,
                 onValueChange = { draft = it },
                 label = "When and what — e.g. every morning at 9AM check emails",
             )
-            Button(
-                onClick = {
-                    onPreviewSchedule(draft)
-                    draft = ""
+            MorningBriefingChip(
+                onPick = {
+                    draft = MorningBriefingText
+                    onPreviewSchedule(MorningBriefingText)
                 },
+            )
+            Button(
+                onClick = { onPreviewSchedule(draft) },
             ) {
                 Text("Preview Schedule")
             }
@@ -104,11 +122,15 @@ fun SchedulesScreen(
         if (state.pendingSchedule != null) {
             ConfirmationCard(
                 toolLabel = "create_schedule",
-                title = "Save Schedule",
+                title = "Review Schedule",
                 detail = state.schedulePreview,
-                approveLabel = "Save Schedule",
+                approveLabel = "Create schedule",
                 denyLabel = "Discard",
-                onApprove = onApproveSchedule,
+                onApprove = {
+                    onApproveSchedule()
+                    // Draft clears only on save success, never on preview.
+                    draft = ""
+                },
                 onDeny = onRejectSchedule,
             )
         }
@@ -122,57 +144,49 @@ fun SchedulesScreen(
             } else {
                 state.schedules.forEach { schedule ->
                     val enabled = schedule.id !in state.disabledScheduleIds
-                    val next = nextFireTime(schedule, ZoneId.systemDefault(), ZonedDateTime.now())
+                    val next = nextFireTime(schedule, ZoneId.systemDefault(), nowTick)
                     val nextText = next?.format(DateTimeFormatter.ofPattern("EEE MMM d HH:mm")) ?: "—"
-                    var armDelete by remember(schedule.id) { mutableStateOf(false) }
-                    LaunchedEffect(armDelete) {
-                        if (armDelete) {
-                            delay(3000L)
-                            armDelete = false
+                    FeedCard {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(Space * 2),
+                        ) {
+                            Text(
+                                schedule.instruction,
+                                style = Theme.typography.body.copy(fontSize = 16.sp, fontWeight = FontWeight.SemiBold),
+                                color = Theme.colors.onBackground,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Switch(
+                                checked = enabled,
+                                onCheckedChange = {
+                                    haptics?.play(HapticKind.Selection)
+                                    onToggleScheduleEnabled(schedule.id, it)
+                                },
+                                contentDescription = if (enabled) "Disable Schedule" else "Enable Schedule",
+                            )
                         }
-                    }
-                    Column(
-                        Modifier.fillMaxWidth()
-                            .heightIn(min = 84.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Theme.colors.card)
-                            .border(0.5.dp, Theme.colors.edge, RoundedCornerShape(16.dp))
-                            .padding(horizontal = 14.dp, vertical = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Text(
-                            schedule.instruction,
-                            style = Theme.typography.body.copy(fontSize = 16.sp, fontWeight = FontWeight.SemiBold),
-                            color = Theme.colors.onBackground,
-                        )
                         Text(
                             "${formatScheduleTime(schedule)} · Next $nextText",
                             style = Theme.typography.caption,
                             color = Theme.colors.onBackgroundMuted,
                         )
                         Text(
-                            formatScheduleCron(schedule),
-                            style = Theme.typography.code,
-                            color = Theme.colors.onBackgroundMuted,
+                            firesIn(next, nowTick),
+                            style = Theme.typography.caption.copy(fontWeight = FontWeight.SemiBold),
+                            color = Theme.colors.accentText,
                         )
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(Space * 2),
                         ) {
-                            OptionToggle(
-                                title = "Enabled",
-                                checked = enabled,
-                                onCheckedChange = {
-                                    haptics?.play(HapticKind.Selection)
-                                    onToggleScheduleEnabled(schedule.id, it)
-                                },
-                                modifier = Modifier.weight(1f),
-                            )
+                            // Outline Run now: bordered pill, never a filled CTA.
                             Box(
                                 modifier = Modifier
-                                    .heightIn(min = 44.dp)
+                                    .weight(1f)
+                                    .heightIn(min = 48.dp)
                                     .clip(RoundedCornerShape(50))
-                                    .background(Theme.colors.onBackground.copy(alpha = 0.08f))
+                                    .border(1.dp, Theme.colors.border, RoundedCornerShape(50))
                                     .clickable {
                                         haptics?.play(HapticKind.Light)
                                         onRunScheduleNow(schedule.id)
@@ -181,42 +195,49 @@ fun SchedulesScreen(
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Text(
-                                    "Run Now",
+                                    "Run now",
                                     style = Theme.typography.label.copy(fontWeight = FontWeight.SemiBold),
                                     color = Theme.colors.onBackground,
                                 )
                             }
-                            if (!armDelete) {
-                                IconButton(
-                                    onClick = { armDelete = true },
-                                    contentDescription = "Stop Schedule ${schedule.id}",
+                            IconButton(
+                                onClick = { confirmDeleteId = schedule.id },
+                                contentDescription = "Delete Schedule ${schedule.id}",
+                            ) {
+                                Icon(
+                                    Icons.Trash,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp),
+                                    tint = Theme.colors.destructive,
+                                )
+                            }
+                        }
+                        if (confirmDeleteId == schedule.id) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(Space * 2),
+                            ) {
+                                Text(
+                                    "Delete Schedule?",
+                                    style = Theme.typography.body.copy(fontWeight = FontWeight.SemiBold),
+                                    color = Theme.colors.onBackground,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Button(
+                                    onClick = {
+                                        haptics?.play(HapticKind.Error)
+                                        confirmDeleteId = null
+                                        onUnschedule(schedule.id)
+                                    },
+                                    variant = ButtonVariant.Destructive,
                                 ) {
-                                    Icon(
-                                        Icons.Trash,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(20.dp),
-                                        tint = Theme.colors.destructive,
-                                    )
+                                    Text("Delete")
                                 }
-                            } else {
-                                Box(
-                                    modifier = Modifier
-                                        .heightIn(min = 44.dp)
-                                        .clip(RoundedCornerShape(50))
-                                        .background(Theme.colors.destructive)
-                                        .clickable {
-                                            haptics?.play(HapticKind.Error)
-                                            armDelete = false
-                                            onUnschedule(schedule.id)
-                                        }
-                                        .padding(horizontal = 16.dp, vertical = 10.dp),
-                                    contentAlignment = Alignment.Center,
+                                Button(
+                                    onClick = { confirmDeleteId = null },
+                                    variant = ButtonVariant.Secondary,
                                 ) {
-                                    Text(
-                                        "Confirm?",
-                                        style = Theme.typography.label.copy(fontWeight = FontWeight.SemiBold),
-                                        color = Theme.colors.onDestructive,
-                                    )
+                                    Text("Keep")
                                 }
                             }
                         }
@@ -275,39 +296,40 @@ fun SchedulesScreen(
             } else {
                 state.scheduleRuns.take(10).forEach { run ->
                     val ok = run.status == "SUCCESS"
-                    Column(verticalArrangement = Arrangement.spacedBy(Space)) {
+                    FeedCard(modifier = Modifier.heightIn(min = 64.dp)) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(Space * 2),
+                            horizontalArrangement = Arrangement.spacedBy(Space * 3),
                         ) {
                             Box(
                                 Modifier
-                                    .clip(RoundedCornerShape(50))
-                                    .background(if (ok) Theme.colors.success else Theme.colors.destructive)
-                                    .padding(horizontal = 10.dp, vertical = 4.dp),
-                                contentAlignment = Alignment.Center,
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(if (ok) Theme.colors.success else Theme.colors.destructive),
+                            )
+                            Column(
+                                Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(Space),
                             ) {
                                 Text(
-                                    run.status,
-                                    style = Theme.typography.caption.copy(fontWeight = FontWeight.SemiBold),
-                                    color = if (ok) Theme.colors.onSuccess else Theme.colors.onDestructive,
+                                    if (ok) "Task Execution completed" else "Task Execution failed",
+                                    style = Theme.typography.body.copy(fontWeight = FontWeight.Medium),
+                                    color = Theme.colors.onBackground,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                 )
+                                if (!run.summary.isNullOrBlank()) {
+                                    Text(
+                                        run.summary,
+                                        style = Theme.typography.caption,
+                                        color = Theme.colors.onBackgroundMuted,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
                             }
                             Text(
-                                run.scheduleId,
-                                style = Theme.typography.caption,
-                                color = Theme.colors.onBackgroundMuted,
-                                modifier = Modifier.weight(1f),
-                            )
-                            Text(
-                                "${run.durationMs} ms",
-                                style = Theme.typography.code,
-                                color = Theme.colors.onBackgroundMuted,
-                            )
-                        }
-                        if (!run.summary.isNullOrBlank()) {
-                            Text(
-                                run.summary,
+                                formatRunDuration(run.durationMs),
                                 style = Theme.typography.caption,
                                 color = Theme.colors.onBackgroundMuted,
                             )
@@ -316,12 +338,48 @@ fun SchedulesScreen(
                 }
             }
         }
-        // Keep the command path visible: typed "schedules" lists here too.
-        if (state.statusLine.isNotBlank()) {
+    }
+}
+
+private const val MorningBriefingText = "every morning at 9AM summarize unread emails"
+
+// 2-tap preset: first tap fills the draft and opens the unchanged
+// ConfirmationCard gate; second tap creates the Schedule.
+@Composable
+private fun MorningBriefingChip(onPick: () -> Unit) {
+    val haptics = LocalHaptics.current
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(50))
+            .border(1.dp, Theme.colors.border, RoundedCornerShape(50))
+            .clickable(
+                onClick = {
+                    haptics?.play(HapticKind.Light)
+                    onPick()
+                },
+                interactionSource = remember { MutableInteractionSource() },
+                indication = androidx.compose.foundation.LocalIndication.current,
+            )
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Space * 2),
+        ) {
+            Icon(
+                Icons.Sparkle,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = Theme.colors.accentText,
+            )
             Text(
-                state.statusLine,
-                color = Theme.colors.onBackgroundMuted,
-                style = Theme.typography.caption,
+                "Morning Briefing · Daily at 09:00",
+                style = Theme.typography.label.copy(fontWeight = FontWeight.Medium),
+                color = Theme.colors.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }

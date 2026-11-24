@@ -55,6 +55,7 @@ object UiPrefs {
     private const val KEY_CONFIRM_EMAIL = "confirm_send_email"
     private const val KEY_DISABLED_SCHEDULES = "disabled_schedule_ids"
     private const val KEY_ALLOW_ALWAYS = "allow_always_recipients"
+    private const val KEY_MEMORY_FACET = "memory_facet"
 
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -85,6 +86,12 @@ object UiPrefs {
         prefs(context).getStringSet(KEY_ALLOW_ALWAYS, emptySet()).orEmpty().toSet()
     fun setAllowAlways(context: Context, addresses: Set<String>) =
         prefs(context).edit().putStringSet(KEY_ALLOW_ALWAYS, addresses).apply()
+
+    // Ticket #89: persisted Memory facet selection (title-case chip row).
+    fun memoryFacet(context: Context): String =
+        prefs(context).getString(KEY_MEMORY_FACET, "All") ?: "All"
+    fun setMemoryFacet(context: Context, facet: String) =
+        prefs(context).edit().putString(KEY_MEMORY_FACET, facet).apply()
 }
 
 val LocalHaptics = staticCompositionLocalOf<AurvizHaptics?> { null }

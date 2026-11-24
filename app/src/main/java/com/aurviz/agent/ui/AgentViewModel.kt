@@ -81,6 +81,7 @@ import com.aurviz.agent.registerRoutineAlarm
 import com.aurviz.agent.rejectPendingApproval
 import com.aurviz.agent.rememberFact
 import com.aurviz.agent.retryDisclosure
+import com.aurviz.agent.restoreMemoryRow
 import com.aurviz.agent.toTimeline
 import com.aurviz.agent.ui.components.VoiceState as OrbState
 import com.aurviz.agent.ui.components.ConfirmationStatus
@@ -94,6 +95,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.time.Duration
+import java.time.ZonedDateTime
 
 // Thin orchestrator over the tested domain logic (Email, Web,
 // WebViewBridge, MemoryStore, VoiceInput, LoopbackAuth). All decisions stay
@@ -476,21 +479,31 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // Inline edit: replace the Memory's text, keeping its source.
+    // Inline edit: replace the Memory's text, keeping its row (source,
+    // category, importance, useCount) so ranking state survives edits.
     fun updateMemory(memory: Memory, newText: String) {
         val text = newText.trim()
         if (text.isBlank()) return
         viewModelScope.launch(Dispatchers.IO) {
             roomStore.delete(memory.id)
-            roomStore.save(text, memory.source)
+            roomStore.save(
+                text,
+                memory.source,
+                category = memory.category,
+                importance = memory.importance,
+                createdAt = memory.createdAt,
+                lastUsed = memory.lastUsed,
+                useCount = memory.useCount,
+            )
             refreshMemories()
         }
     }
 
-    // Undo delete: save the text back under its original source.
+    // Undo delete: restore the FULL row (category, importance, useCount),
+    // not a lossy text-only re-save.
     fun restoreMemory(memory: Memory) {
         viewModelScope.launch(Dispatchers.IO) {
-            roomStore.save(memory.text, memory.source)
+            restoreMemoryRow(roomStore, memory)
             refreshMemories()
         }
     }
@@ -1392,10 +1405,23 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
 // Pure UI formatting for the grouped Schedule card (Schedule.kt stays
 // untouched). Top level so screens can call them without a ViewModel.
 
-// Cron line, e.g. "9 9 * * *" or "0 9 * * 1,3,5".
-fun formatScheduleCron(schedule: Schedule): String {
-    val daysExpr = schedule.days?.sorted()?.joinToString(",") ?: "*"
-    return "${schedule.minute} ${schedule.hour} * * $daysExpr"
+// Ticket #89: live countdown line. Raw cron strings never reach the UI —
+// every card shows the human cadence plus "Fires in Xh Ym".
+fun firesIn(next: ZonedDateTime?, now: ZonedDateTime): String {
+    if (next == null) return "No upcoming fire time"
+    val seconds = Duration.between(now, next).seconds
+    if (seconds < 60) return "Fires in under a minute"
+    val minutes = seconds / 60
+    if (minutes < 60) return "Fires in ${minutes}m"
+    return "Fires in ${minutes / 60}h ${minutes % 60}m"
+}
+
+// Ticket #89: Reporting-style run durations ("1.2 s", never raw ms dumps).
+fun formatRunDuration(durationMs: Long): String {
+    if (durationMs < 1000) return "$durationMs ms"
+    val totalSeconds = durationMs / 1000
+    if (totalSeconds < 60) return "%.1f s".format(durationMs / 1000.0)
+    return "${totalSeconds / 60}m ${totalSeconds % 60}s"
 }
 
 // Human line, e.g. "Daily at 09:00" or "Mon, Wed, Fri at 09:00".

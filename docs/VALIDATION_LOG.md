@@ -827,3 +827,22 @@ Every case where the AI was wrong and how it was caught. Add an entry with file:
   note stamps the source URL via pure `browserSaveNote()` seam
   (`BrowserChromeUi.kt`), covered by `BrowserChromeUiTest` (6 tests).
   Full gate: 474/474 green + assembleDebug green.
+
+## 2026-11-24 — Ticket #89 (Schedules + Memory polish) self-review catches
+- `Text` primitive takes `String` only (`components/Text.kt:14`): first
+  MemoryScreen draft passed an `AnnotatedString` for bold search-match
+  highlights; fixed to foundation `BasicText` with the merged body style
+  (`MemoryScreen.kt`, `highlightedText()` fed by pure `matchRanges()` in
+  `Memory.kt`, JVM-tested). Same lesson as #88: check primitive signatures
+  before compiling.
+- `semantics { contentDescription = ... }` needs the explicit
+  `androidx.compose.ui.semantics.contentDescription` import — `Role`/`role`
+  imports are not enough (`components/Switch.kt:62`). Caught at compile.
+- Removed the leftover #86 raw-cron seam entirely: `formatScheduleCron()`
+  deleted from `AgentViewModel.kt` (no other callers) and replaced with
+  `firesIn()` + `formatRunDuration()` pure helpers; schedule cards show
+  human cadence + live 30s-tick countdown, never cron strings.
+  Lossy `restoreMemory`/`updateMemory` (delete+re-save dropped category,
+  importance, useCount) now round-trip via `restoreMemoryRow()`
+  (`Memory.kt`), covered by `ScheduleMemoryPolishTest` (11 tests).
+  Full gate: 485/485 green + assembleDebug green.

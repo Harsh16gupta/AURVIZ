@@ -101,6 +101,43 @@ fun rememberFact(
 fun forgetPreview(store: MemoryStore, query: String): List<Memory> =
     recallFor(store, query)
 
+// Ticket #89: lossless Undo. Re-saves the FULL row (text, source,
+// category, importance, createdAt, lastUsed, useCount) so a restored
+// Memory keeps its ranking state instead of resetting to defaults.
+fun restoreMemoryRow(store: MemoryStore, memory: Memory): Memory =
+    store.save(
+        memory.text,
+        memory.source,
+        category = memory.category,
+        importance = memory.importance,
+        createdAt = memory.createdAt,
+        lastUsed = memory.lastUsed,
+        useCount = memory.useCount,
+    )
+
+// Ticket #89: title-case facet labels ("you told me" -> "You Told Me").
+fun titleCaseFacet(raw: String): String =
+    raw.split(Regex("[^A-Za-z0-9]+")).filter { it.isNotEmpty() }
+        .joinToString(" ") { word ->
+            word.lowercase().replaceFirstChar { it.uppercase() }
+        }
+
+// Ticket #89: bold search-match ranges (case-insensitive, non-overlapping).
+// Pure index math so the screen can render an AnnotatedString from it.
+fun matchRanges(text: String, query: String): List<IntRange> {
+    val q = query.trim()
+    if (q.isEmpty() || text.isEmpty()) return emptyList()
+    val ranges = mutableListOf<IntRange>()
+    var from = 0
+    while (true) {
+        val idx = text.indexOf(q, from, ignoreCase = true)
+        if (idx < 0) break
+        ranges += idx until idx + q.length
+        from = idx + q.length
+    }
+    return ranges
+}
+
 // Find memories sharing words with the question: most shared words
 // first (ticket #18 keyword ranking, unchanged); ties break toward higher
 // importance, then toward more recent use (lastUsed, else createdAt),

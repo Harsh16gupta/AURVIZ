@@ -23,6 +23,7 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.vector.ImageVector
 import com.aurviz.agent.ui.theme.CheckCircle
 import com.aurviz.agent.ui.theme.Icons
 import com.aurviz.agent.ui.theme.Space
@@ -33,6 +34,9 @@ fun Toast(
     visible: Boolean,
     message: String,
     modifier: Modifier = Modifier,
+    // Ticket #89: the Memory delete Undo toast passes Icons.Trash so the
+    // affordance reads as restore; success toasts keep the check.
+    icon: ImageVector = Icons.CheckCircle,
 ) {
     var lastMessage by remember { mutableStateOf(message) }
     if (visible && message.isNotEmpty()) lastMessage = message
@@ -52,7 +56,7 @@ fun Toast(
             horizontalArrangement = Arrangement.spacedBy(Space * 2),
         ) {
             Icon(
-                Icons.CheckCircle,
+                icon,
                 contentDescription = null,
                 modifier = Modifier.size(18.dp),
                 tint = Theme.colors.primary,
