@@ -2,6 +2,47 @@
 
 Every case where the AI was wrong and how it was caught. Add an entry with file:line evidence before moving on.
 
+## 2026-11-24 — Issue #68 audit: already-implemented-but-open (`main`)
+
+- Audited #68 (T3 allow-always Preference per recipient) against the tree
+  before writing code: all 4 acceptance bullets already satisfied, no
+  genuine gaps, no code changes. Prior art confirmed by behavior, not
+  assumed: store + eligibility + Settings revoke path all traced end to end.
+- Per-recipient scope, Settings revoke with immediate effect:
+  `AllowAlways.kt:13-24` per-recipient doc, `:26-50`
+  `InMemoryAllowAlwaysStore` (normalized set; allow refuses blank /
+  wildcard / implausible `:36-43`; revoke `:46-48`), `:55-75`
+  normalization + `allowAlwaysEligible` (exactly one plausible recipient).
+  `AgentViewModel.kt:177-181` the confirm hook reads the same live
+  instance, so allow/revoke apply to the next decision with no restart;
+  `:234-246` `allowAlwaysAllow`/`allowAlwaysRevoke` mutate store +
+  persist via `UiPrefs` + update state synchronously. Persistence
+  `Haptics.kt:83-89`; Settings UI `SettingsScreen.kt:315-352` (revoke rows
+  "takes effect immediately" `:328`, add field `:338-351`) wired in
+  `AgentNav.kt:193-194`.
+- Allowed skips card, unknown still asks: `AgentViewModel.kt:1348-1356`
+  (`allowAlwaysEligible` returns `Approved` with no `openGate`; otherwise
+  the card path `:1356-1373`). Grant path from settled receipts:
+  `CommandScreen.kt:508-526` + `ConfirmationCard.kt:146-168` Remember
+  Preference button. Tests: `AllowAlwaysTest.kt:56-77` eligible runs with
+  no card shown, `:89-107` unknown held with card shown, `:205-234` loop
+  auto-approves listed + holds unlisted.
+- Bulk / evil-forward still denied: `AllowAlways.kt:6-8` doc (policy keeps
+  the final word), `AgentViewModel.kt:1349-1351` hook comment;
+  multi-recipient never eligible `AllowAlways.kt:70-71`; the gated path
+  always re-runs `SendPolicy` (`ToolRegistry.kt:228-234` +
+  `Email.kt:385-391`). Tests: `AllowAlwaysTest.kt:131-143`
+  evil-forward denied when allowed, `:145-157` header-injection denied
+  when allowed.
+- Unit-test bullet: allow (`AllowAlwaysTest.kt:41-53`), revoke immediate +
+  case-insensitive (`:111-127`, immediacy via shared live instance
+  `AgentViewModel.kt:177-181`), policy-overrides-allow (`:131-157`), no
+  blanket allow-all (`:159-201` multi-recipient / blank+wildcard /
+  malformed / non-send never eligible).
+- Tests: full `:app:testDebugUnitTest --rerun-tasks` green (516 tests /
+  48 files, 0 failures/errors), secret scan clean. Closed #68 with audit
+  comment, no implementation commit beyond this log entry.
+
 ## 2026-11-24 — Issue #67 audit: already-implemented-but-open (`main`)
 
 - Audited #67 (T2 scheduled hold + bounded creation consent) against the
