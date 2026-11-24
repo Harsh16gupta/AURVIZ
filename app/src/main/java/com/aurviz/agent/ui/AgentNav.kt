@@ -47,6 +47,7 @@ import com.aurviz.agent.ui.components.Icon
 import com.aurviz.agent.ui.screens.BrowserScreen
 import com.aurviz.agent.ui.screens.CommandScreen
 import com.aurviz.agent.ui.screens.MemoryScreen
+import com.aurviz.agent.ui.screens.OnboardingScreen
 import com.aurviz.agent.ui.screens.SchedulesScreen
 import com.aurviz.agent.ui.screens.SettingsScreen
 import com.aurviz.agent.ui.sheets.EmailConfirmationSheet
@@ -69,6 +70,7 @@ object Dests {
     const val SCHEDULES = "schedules"
     const val MEMORY = "memory"
     const val SETTINGS = "settings"
+    const val ONBOARDING = "onboarding"
 }
 
 @Composable
@@ -93,7 +95,25 @@ fun AgentNav(
 
     ScreenScaffold(modifier) {
         Box(Modifier.fillMaxSize()) {
-            NavHost(navController = navController, startDestination = Dests.COMMAND) {
+            val startDest = remember { if (state.onboardingCompleted) Dests.COMMAND else Dests.ONBOARDING }
+            NavHost(navController = navController, startDestination = startDest) {
+                composable(Dests.ONBOARDING) {
+                    OnboardingScreen(
+                        state = state,
+                        onConnectGmail = vm::startSignIn,
+                        onPasteLink = vm::onPastedLink,
+                        onDismissPasteFallback = vm::dismissPasteFallback,
+                        onSaveSingleLlmKey = vm::saveSingleLlmKey,
+                        onOpenExactAlarmSettings = onOpenExactAlarmSettings,
+                        onOpenBatterySettings = onOpenBatterySettings,
+                        onComplete = {
+                            vm.completeOnboarding()
+                            navController.navigate(Dests.COMMAND) {
+                                popUpTo(Dests.ONBOARDING) { inclusive = true }
+                            }
+                        },
+                    )
+                }
                 composable(Dests.COMMAND) {
                     CommandScreen(
                         state = state,
@@ -173,6 +193,7 @@ fun AgentNav(
                         onSetHapticsEnabled = vm::setHapticsEnabled,
                         onAllowAlwaysAdd = vm::allowAlwaysAllow,
                         onAllowAlwaysRevoke = vm::allowAlwaysRevoke,
+                        onOpenMemory = { navController.navigate(Dests.MEMORY) },
                         onBack = { navController.popBackStack() },
                     )
                 }

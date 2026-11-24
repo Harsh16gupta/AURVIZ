@@ -61,6 +61,7 @@ import com.aurviz.agent.ui.theme.Icons
 import com.aurviz.agent.ui.theme.LockSimple
 import com.aurviz.agent.ui.theme.Space
 import com.aurviz.agent.ui.theme.Theme
+import com.aurviz.agent.ui.theme.X
 
 // In-app browser: 52dp synced top chrome over a 2dp Electric Blue progress
 // bar, a theme-aware native empty-state card when no page is open (the
@@ -106,6 +107,24 @@ fun BrowserScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(Space),
             ) {
+                // Far-left 40dp close target: pops the Browser back to Command.
+                Box(
+                    Modifier.size(40.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .clickable(
+                            onClick = onBack,
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = androidx.compose.foundation.LocalIndication.current,
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.X,
+                        contentDescription = "Close Browser",
+                        modifier = Modifier.size(20.dp),
+                        tint = Theme.colors.onBackground,
+                    )
+                }
                 IconButton(
                     onClick = { WebViewHolder.goBack() },
                     contentDescription = "Back",

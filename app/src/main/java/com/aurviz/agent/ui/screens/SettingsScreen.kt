@@ -39,6 +39,7 @@ import com.aurviz.agent.ui.theme.Space
 import com.aurviz.agent.ui.components.Text
 import com.aurviz.agent.ui.components.TextField
 import com.aurviz.agent.ui.theme.Bell
+import com.aurviz.agent.ui.theme.Brain
 import com.aurviz.agent.ui.theme.DeviceMobile
 import com.aurviz.agent.ui.theme.EnvelopeSimple
 import com.aurviz.agent.ui.theme.Icons
@@ -73,6 +74,7 @@ fun SettingsScreen(
     onSetHapticsEnabled: (Boolean) -> Unit = {},
     onAllowAlwaysAdd: (String) -> Unit = {},
     onAllowAlwaysRevoke: (String) -> Unit = {},
+    onOpenMemory: () -> Unit = {},
     onBack: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -161,6 +163,15 @@ fun SettingsScreen(
                 checked = state.hapticsEnabled,
                 onCheckedChange = onSetHapticsEnabled,
                 description = "Gentle buzz on send and confirm.",
+            )
+        }
+        Section("Personalization") {
+            OptionRow(
+                title = "Memory",
+                description = "${state.memories.size} saved facts & Preferences",
+                icon = Icons.Brain,
+                onClick = onOpenMemory,
+                navigates = true,
             )
         }
         Section(
