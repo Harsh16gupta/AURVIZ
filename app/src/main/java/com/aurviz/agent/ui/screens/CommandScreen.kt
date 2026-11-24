@@ -1,7 +1,6 @@
 package com.aurviz.agent.ui.screens
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -16,7 +15,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -44,6 +42,7 @@ import com.aurviz.agent.StepState
 import com.aurviz.agent.TimelineStep
 import com.aurviz.agent.approvalCardFor
 import com.aurviz.agent.knownAddressesFromInbox
+import com.aurviz.agent.toolLabel
 import com.aurviz.agent.ui.AgentUiState
 import com.aurviz.agent.ui.InteractionRecord
 import com.aurviz.agent.ui.components.Button
@@ -51,6 +50,7 @@ import com.aurviz.agent.ui.components.ButtonVariant
 import com.aurviz.agent.ui.components.Composer
 import com.aurviz.agent.ui.components.ConfirmationCard
 import com.aurviz.agent.ui.components.EmptyState
+import com.aurviz.agent.ui.components.FeedCard
 import com.aurviz.agent.ui.components.HapticKind
 import com.aurviz.agent.ui.components.LocalHaptics
 import com.aurviz.agent.ui.components.Markdown
@@ -107,7 +107,8 @@ fun CommandScreen(
     ScreenScaffold(modifier) {
         Column(Modifier.fillMaxSize()) {
             Row(
-                Modifier.statusBarsPadding()
+                Modifier
+                    // Top inset comes from ScreenScaffold exactly once.
                     .height(56.dp)
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp),
@@ -299,14 +300,7 @@ private fun InteractionItem(
         }
 
         if (record.emails.isNotEmpty()) {
-            Column(
-                Modifier.fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Theme.colors.card)
-                    .border(0.5.dp, Theme.colors.edge, RoundedCornerShape(16.dp))
-                    .padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
+            FeedCard {
                 record.emails.forEach { email ->
                     Column {
                         Text(
@@ -336,14 +330,7 @@ private fun InteractionItem(
         }
 
         record.webPage?.let { page ->
-            Column(
-                Modifier.fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Theme.colors.card)
-                    .border(0.5.dp, Theme.colors.edge, RoundedCornerShape(16.dp))
-                    .padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(Space),
-            ) {
+            FeedCard {
                 Text(
                     page.title.ifBlank { page.url },
                     style = Theme.typography.label.copy(fontWeight = FontWeight.SemiBold),
@@ -423,7 +410,7 @@ private fun ActiveRunSection(
                 title = "Send email to $to"
                 detail = "To: $to\nSubject: ${card.subject}\n${card.body}"
             } else {
-                title = "Run ${pendingCall.name}"
+                title = "Run ${toolLabel(pendingCall.name)}"
                 detail = pendingCall.arguments.entries.joinToString("\n") { (k, v) -> "$k: $v" }
             }
             val unseen = state.pendingApprovalUnseen

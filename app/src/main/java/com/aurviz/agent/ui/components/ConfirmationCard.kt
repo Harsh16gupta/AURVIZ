@@ -22,7 +22,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -33,6 +32,7 @@ import com.aurviz.agent.ui.theme.Icons
 import com.aurviz.agent.ui.theme.LockSimple
 import com.aurviz.agent.ui.theme.Theme
 import com.aurviz.agent.ui.theme.X
+import com.aurviz.agent.toolLabel
 
 enum class ConfirmationStatus { Pending, Approved, Denied }
 
@@ -61,7 +61,6 @@ fun ConfirmationCard(
             modifier = modifier
                 .fillMaxWidth()
                 .widthIn(max = 560.dp)
-                .alpha(0.72f)
                 .clip(RoundedCornerShape(18.dp))
                 .background(Theme.colors.card)
                 .border(0.5.dp, Theme.colors.edge, RoundedCornerShape(18.dp))
@@ -123,7 +122,7 @@ fun ConfirmationCard(
         ) {
             Icon(Icons.LockSimple, contentDescription = null, modifier = Modifier.size(15.dp), tint = Theme.colors.onBackgroundMuted)
             Text(
-                text = "Confirmation · $toolLabel",
+                text = "Confirmation · ${toolLabel(toolLabel)}",
                 style = Theme.typography.code.copy(fontSize = 12.sp),
                 color = Theme.colors.onBackgroundMuted,
                 maxLines = 1,

@@ -29,6 +29,7 @@ import com.aurviz.agent.ToolCall
 import com.aurviz.agent.approvalCardFor
 import com.aurviz.agent.knownAddressesFromInbox
 import com.aurviz.agent.nextFireTime
+import com.aurviz.agent.toolLabel
 import com.aurviz.agent.ui.AgentUiState
 import com.aurviz.agent.ui.components.Button
 import com.aurviz.agent.ui.components.ConfirmationCard
@@ -69,7 +70,6 @@ fun SchedulesScreen(
     onToggleScheduleEnabled: (String, Boolean) -> Unit = { _, _ -> },
     onRunScheduleNow: (String) -> Unit = {},
     onRefreshRuns: () -> Unit = {},
-    onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var draft by rememberSaveable { mutableStateOf("") }
@@ -82,7 +82,7 @@ fun SchedulesScreen(
         onRefreshRuns()
     }
 
-    Page(title = "Schedules", onBack = onBack, modifier = modifier) {
+    Page(title = "Schedules", modifier = modifier) {
         Section(
             "New Schedule",
             footer = "Example: every morning at 9AM check emails",
@@ -245,7 +245,7 @@ fun SchedulesScreen(
                         title = "Send email to $to"
                         detail = "To: $to\nSubject: ${card.subject}\n${card.body}"
                     } else {
-                        title = "${held.toolName} (Schedule ${held.scheduleId})"
+                        title = "${toolLabel(held.toolName)} (Schedule ${held.scheduleId})"
                         detail = held.arguments.entries.joinToString("\n") { (k, v) -> "$k: $v" }
                     }
                     ConfirmationCard(

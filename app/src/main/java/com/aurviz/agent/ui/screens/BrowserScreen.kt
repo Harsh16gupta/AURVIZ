@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -43,6 +42,7 @@ import com.aurviz.agent.ui.components.IconButton
 import com.aurviz.agent.ui.components.Markdown
 import com.aurviz.agent.ui.components.ScreenScaffold
 import com.aurviz.agent.ui.components.SearchField
+import com.aurviz.agent.ui.components.StatusBanner
 import com.aurviz.agent.ui.theme.Space
 import com.aurviz.agent.ui.components.Text
 import com.aurviz.agent.ui.theme.ArrowClockwise
@@ -81,7 +81,8 @@ fun BrowserScreen(
     ScreenScaffold(modifier) {
         Column(Modifier.fillMaxSize()) {
             Row(
-                Modifier.statusBarsPadding()
+                Modifier
+                    // Top inset comes from ScreenScaffold exactly once.
                     .padding(horizontal = Space * 2, vertical = Space * 2),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(Space),
@@ -137,9 +138,10 @@ fun BrowserScreen(
             }
 
             if (state.webError != null) {
-                Text(
-                    state.webError,
-                    color = Theme.colors.destructive,
+                StatusBanner(
+                    message = state.webError,
+                    actionLabel = "Retry",
+                    onAction = { WebViewHolder.reload() },
                     modifier = Modifier.padding(horizontal = Space * 4, vertical = Space),
                 )
             }

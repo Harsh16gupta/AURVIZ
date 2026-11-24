@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.aurviz.agent.BuildConfig
 import com.aurviz.agent.OEM_AUTOSTART_GUIDANCE
+import com.aurviz.agent.toolLabel
 import com.aurviz.agent.ui.AgentUiState
 import com.aurviz.agent.ui.components.Button
 import com.aurviz.agent.ui.components.ButtonVariant
@@ -56,7 +57,6 @@ fun SettingsScreen(
     onOpenBatterySettings: () -> Unit,
     onRefreshBattery: () -> Unit,
     onVoiceSettings: () -> Unit,
-    onBack: () -> Unit,
     onSetThemeMode: (ThemeMode) -> Unit = {},
     onSetHapticsEnabled: (Boolean) -> Unit = {},
     onAllowAlwaysAdd: (String) -> Unit = {},
@@ -91,7 +91,7 @@ fun SettingsScreen(
         onRefreshBattery()
     }
 
-    Page(title = "Settings", onBack = onBack, modifier = modifier) {
+    Page(title = "Settings", modifier = modifier) {
         Section("Appearance & Feedback") {
             Row(horizontalArrangement = Arrangement.spacedBy(Space * 2)) {
                 listOf(
@@ -244,7 +244,7 @@ fun SettingsScreen(
             // re-checks before the transport. There is no bypass, so this
             // is a read-only Enforced row — never a toggle.
             OptionRow(
-                title = "send_email",
+                title = toolLabel("send_email"),
                 description = "Always requires explicit Confirmation",
                 value = "Enforced",
             )

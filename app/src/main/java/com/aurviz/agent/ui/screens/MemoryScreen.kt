@@ -1,7 +1,6 @@
 package com.aurviz.agent.ui.screens
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -32,6 +31,7 @@ import com.aurviz.agent.ui.AgentUiState
 import com.aurviz.agent.ui.components.Button
 import com.aurviz.agent.ui.components.ButtonVariant
 import com.aurviz.agent.ui.components.EmptyState
+import com.aurviz.agent.ui.components.FeedCard
 import com.aurviz.agent.ui.components.HapticKind
 import com.aurviz.agent.ui.components.Icon
 import com.aurviz.agent.ui.components.IconButton
@@ -58,7 +58,6 @@ fun MemoryScreen(
     state: AgentUiState,
     onRemember: (String) -> Unit,
     onForget: (String) -> Unit,
-    onBack: () -> Unit,
     onUpdateMemory: (Memory, String) -> Unit = { _, _ -> },
     onRestoreMemory: (Memory) -> Unit = {},
     modifier: Modifier = Modifier,
@@ -91,7 +90,6 @@ fun MemoryScreen(
 
     Page(
         title = "Memory",
-        onBack = onBack,
         modifier = modifier,
         overlay = {
             val deleted = recentlyDeleted
@@ -159,14 +157,7 @@ fun MemoryScreen(
                 )
             } else {
                 shown.forEach { memory ->
-                    Column(
-                        Modifier.fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Theme.colors.card)
-                            .border(0.5.dp, Theme.colors.edge, RoundedCornerShape(16.dp))
-                            .padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(Space),
-                    ) {
+                    FeedCard {
                         Row(verticalAlignment = Alignment.Top) {
                             Column(
                                 Modifier.weight(1f),

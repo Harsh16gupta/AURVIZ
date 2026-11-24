@@ -778,3 +778,17 @@ Every case where the AI was wrong and how it was caught. Add an entry with file:
 - Glossary check: no glossary term for Groq; remaining providers
   (Gemini/DeepSeek/Meta) match ADR-0004 as amended. Full
   `:app:testDebugUnitTest` required after this change.
+
+## 2026-11-24 — Ticket #86 (primitives + nav chrome) self-review catches
+- Wrong assertion drafted in `app/src/test/java/com/aurviz/agent/ToolLabelMapperTest.kt`
+  (`assertEquals("Click", toolLabel("click").let { "Select item" })` tautologically
+  failed); rewrote as `assertEquals("Select item", toolLabel("click"))` before the
+  first test run. Lesson: never wrap the value under test in an identity lambda.
+- Fallback casing drift: first `toolLabel()` fallback title-cased every word
+  ("Unknown Tool Id"), contradicting the spec's sentence-case examples
+  ("Send email", "Create schedule"); fixed to capitalize the first word only in
+  `app/src/main/java/com/aurviz/agent/ToolLabels.kt`. Caught by the new unit test.
+- Accidental import deletion: an edit removing `statusBarsPadding` from
+  `CommandScreen.kt` also dropped the still-used `size` import; restored
+  immediately after re-reading the file. Lesson: verify each import removal
+  against remaining usages (confirmed via failing-compile-risk scan).
