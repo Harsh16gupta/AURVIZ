@@ -43,7 +43,7 @@ class InMemoryPendingApprovalStore : PendingApprovalStore {
     @Synchronized
     override fun save(approval: PendingApproval): PendingApproval {
         nextId += 1
-        val saved = approval.copy(id = "approval_$nextId")
+        val saved = approval.copy(id = ScheduleIds.approvalId(nextId))
         items[saved.id] = saved
         return saved
     }
@@ -52,7 +52,10 @@ class InMemoryPendingApprovalStore : PendingApprovalStore {
     override fun list(): List<PendingApproval> = items.values.toList()
 
     @Synchronized
-    override fun take(id: String): PendingApproval? = items.remove(id)
+    override fun take(id: String): PendingApproval? {
+        ScheduleIds.approvalPid(id) ?: return null
+        return items.remove(id)
+    }
 }
 
 // One in-app decision on a held write: Executed carries the held call

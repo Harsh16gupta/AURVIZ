@@ -529,3 +529,46 @@ Every case where the AI was wrong and how it was caught. Add an entry with file:
   consent record, fire-time revalidation, drift defers); ADR-0002 given a
   one-line pointer to it. Both replace the absolute "never executes"
   wording instead of silently overriding it.
+
+## 2026-11-24 — Issue #78 T1 unify Schedule id codec (`main`)
+
+- **Codec code predates its tests.** `ScheduleIds.kt` plus the Room/InMemory
+  schedule and `ScheduleAlarm.kt` codec hunks arrived in the working tree
+  from the prior schedule-runtime session, so the new `ScheduleIdsTest`
+  (9 tests) passed on the first run — red was not observed for those
+  paths. The remaining implementation is behavior-preserving unification,
+  not behavior change: `ScheduledRun.kt:46` hardcoded `"approval_$nextId"`
+  (the exact line #67 reverted to keep its commit standalone) now reads
+  `ScheduleIds.approvalId(nextId)`; `InMemoryScheduleStore.delete` and
+  `InMemoryPendingApprovalStore.take` gained codec guards
+  (`schedulePid`/`approvalPid` null → no-op) mirroring the Room adapters;
+  the dead `RoomPendingApprovalStore.approvalId` private wrapper is gone.
+  Verified `git diff` per file that `ScheduleDb.kt`, `ScheduleAlarm.kt`,
+  and `ScheduledRun.kt` hunks are T1-pure before staging.
+- **Dirty tree does not compile: foreign T2/T3 hunks break the clean
+  build.** `AgentViewModel.kt` (T2, #79) references `onApprovedWrite` /
+  `ScheduleSideEffect` and `ScheduleWork.kt` (T3, #80) calls
+  `buildRoutineChat(full)` against a 3-param definition — both fail
+  `:app:compileDebugKotlin`. Verified T1 in isolation by stashing those
+  two paths and moving untracked `ScheduleRuntime.kt` aside (restored
+  afterwards untouched). In that tree the new tests plus
+  `ScheduleTest`/`PendingApprovalTest`/`ScheduledRunTest` are green.
+- **One pre-existing failure belongs to T2, not T1.**
+  `ScheduleTest.loopCreateArmsAndCancelDisarmsOnlyOnApprovedSuccess`
+  (`ScheduleTest.kt:278`) expects the legacy 3-arg
+  `loopScheduleSideEffect("create_schedule", …)` → ARM, but the in-tree
+  uncommitted T2 hunk routes through `onApprovedWrite` with empty args
+  (no id) → null. Untouched here; #79 owns the test update with its
+  `onApprovedWrite` Arm/Disarm/None coverage.
+- Tests: new `ScheduleIdsTest` (codec round-trips ×2, malformed/wrong-
+  prefix rejection ×2, InMemory schedule days-preserving round-trip +
+  malformed-delete no-op, InMemory approval codec round-trip + malformed-
+  take no-op, Room approval malformed-take no-op). Room schedule
+  round-trip incl. days stays pinned in `ScheduleTest`
+  (`roomStoreCrudRoundTripsIds`, `roomStoreDeleteIgnoresMalformedId`).
+  Full `:app:testDebugUnitTest` green on the exact T1 commit content
+  (verified in a scratch worktree at HEAD plus the T1 files only:
+  439 tests, 0 failures, 0 errors). No UI touched, so no `assembleDebug`
+  per ticket rule.
+- Glossary check: Schedule / PendingApproval used per `GLOSSARY.md`;
+  no ADR conflict (codec unification is #77's decided design, no migration).

@@ -39,14 +39,15 @@ interface ScheduleStore {
 
 class InMemoryScheduleStore : ScheduleStore {
     private val items = mutableListOf<Schedule>()
-    private var nextId = 0
+    private var nextId = 0L
     override fun save(instruction: String, hour: Int, minute: Int, days: Set<Int>?): Schedule {
-        val schedule = Schedule("sched_${++nextId}", instruction, hour, minute, days)
+        val schedule = Schedule(ScheduleIds.scheduleId(++nextId), instruction, hour, minute, days)
         items += schedule
         return schedule
     }
     override fun list(): List<Schedule> = items.toList()
     override fun delete(id: String) {
+        ScheduleIds.schedulePid(id) ?: return
         items.removeAll { it.id == id }
     }
 }

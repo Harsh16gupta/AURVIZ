@@ -207,26 +207,23 @@ class RoomPendingApprovalStore(private val dao: PendingApprovalDao) : PendingApp
                     createdAt = System.currentTimeMillis(),
                 ),
             )
-        return approval.copy(id = approvalId(pid))
+        return approval.copy(id = ScheduleIds.approvalId(pid))
     }
 
     override fun list(): List<PendingApproval> =
         dao.listAll().map {
-            PendingApproval(it.scheduleId, it.toolName, argsFromJson(it.argsJson), it.reason, approvalId(it.pid))
+            PendingApproval(it.scheduleId, it.toolName, argsFromJson(it.argsJson), it.reason, ScheduleIds.approvalId(it.pid))
         }
 
     // Claim-then-read: the DELETE count is the exactly-once guard — a
     // concurrent claim deletes zero rows and loses before any transport
-    // touch. Ids round-trip ("approval_12" -> pid 12) like the memory
-    // ("room_12") and schedule ("sched_12") stores.
+    // touch. Ids round-trip via ScheduleIds (ticket 1: single codec).
     override fun take(id: String): PendingApproval? {
-        val pid = id.removePrefix("approval_").toLongOrNull() ?: return null
+        val pid = ScheduleIds.approvalPid(id) ?: return null
         val row = dao.findById(pid) ?: return null
         if (dao.deleteById(pid) == 0) return null
-        return PendingApproval(row.scheduleId, row.toolName, argsFromJson(row.argsJson), row.reason, approvalId(row.pid))
+        return PendingApproval(row.scheduleId, row.toolName, argsFromJson(row.argsJson), row.reason, ScheduleIds.approvalId(row.pid))
     }
-
-    private fun approvalId(pid: Long): String = "approval_$pid"
 
     private fun argsFromJson(json: String): Map<String, Any?> {
         val obj = JSONObject(json)
@@ -238,18 +235,18 @@ class RoomPendingApprovalStore(private val dao: PendingApprovalDao) : PendingApp
     }
 }
 
-// Adapter: Room rows in, Schedule objects out. Ids round-trip
-// ("sched_12" -> pid 12) so unschedule-by-id works on the phone too.
+// Adapter: Room rows in, Schedule objects out. Ids round-trip via
+// ScheduleIds ("sched_12" -> pid 12) so unschedule-by-id works.
 class RoomScheduleStore(private val dao: ScheduleDao) : ScheduleStore {
     override fun save(instruction: String, hour: Int, minute: Int, days: Set<Int>?): Schedule {
         val pid = dao.insert(ScheduleRow(instruction = instruction, hour = hour, minute = minute, days = days?.sorted()?.joinToString(",")))
-        return Schedule("sched_$pid", instruction, hour, minute, days)
+        return Schedule(ScheduleIds.scheduleId(pid), instruction, hour, minute, days)
     }
 
     override fun list(): List<Schedule> =
         dao.listAll().map {
             Schedule(
-                "sched_${it.pid}",
+                ScheduleIds.scheduleId(it.pid),
                 it.instruction,
                 it.hour,
                 it.minute,
@@ -258,7 +255,7 @@ class RoomScheduleStore(private val dao: ScheduleDao) : ScheduleStore {
         }
 
     override fun delete(id: String) {
-        val pid = id.removePrefix("sched_").toLongOrNull() ?: return
+        val pid = ScheduleIds.schedulePid(id) ?: return
         dao.deleteById(pid)
     }
 }

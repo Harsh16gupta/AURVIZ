@@ -42,7 +42,7 @@ private fun alarmIntent(context: Context, scheduleId: String, fireTimeMs: Long =
         Intent(context, AlarmReceiver::class.java)
             .putExtra(SCHEDULE_ID_KEY, scheduleId)
             .putExtra(FIRE_TIME_KEY, fireTimeMs)
-    val code = scheduleId.removePrefix("sched_").toIntOrNull() ?: scheduleId.hashCode()
+    val code = ScheduleIds.schedulePid(scheduleId)?.toInt() ?: scheduleId.hashCode()
     return PendingIntent.getBroadcast(
         context, code, intent,
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
