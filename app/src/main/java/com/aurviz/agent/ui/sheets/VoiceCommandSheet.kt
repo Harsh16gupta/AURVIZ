@@ -2,14 +2,17 @@ package com.aurviz.agent.ui.sheets
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -24,32 +27,29 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.aurviz.agent.ui.VOICE_LEVEL_MAX_DB
 import com.aurviz.agent.ui.VOICE_LEVEL_MIN_DB
 import com.aurviz.agent.ui.VoiceUiState
 import com.aurviz.agent.ui.canConfirmVoice
-import com.aurviz.agent.ui.components.Button
-import com.aurviz.agent.ui.components.ButtonVariant
 import com.aurviz.agent.ui.components.Icon
 import com.aurviz.agent.ui.components.ModalBottomSheet
-import com.aurviz.agent.ui.components.Section
 import com.aurviz.agent.ui.components.Text
 import com.aurviz.agent.ui.theme.Icons
 import com.aurviz.agent.ui.theme.Check
 import com.aurviz.agent.ui.theme.Microphone
-import com.aurviz.agent.ui.theme.ProvideContentColor
-import com.aurviz.agent.ui.theme.Space
 import com.aurviz.agent.ui.theme.Stop
 import com.aurviz.agent.ui.theme.Theme
-import com.aurviz.agent.ui.theme.X
 
-// Ticket #91: Todoist Ramble hero. A quoted transcript (muted interim vs
-// crisp final, maxLines 4) over a 48dp live Canvas waveform (28 rounded
-// bars from a 32-sample ring buffer driven by levelDb), with 56dp Pause +
-// Confirm circles + Cancel. Confirm stays disabled on a blank transcript;
-// errors render once with a Retry. GLOSSARY: Voice Command.
+// Ticket #91: Todoist Ramble hero. A status caption over the quoted
+// transcript (muted interim vs crisp final, maxLines 4, centered) over a
+// 48dp live Canvas waveform (28 rounded bars from a 32-sample ring buffer
+// driven by levelDb), with a 60dp primary mic/stop circle + a 52dp
+// secondary confirm circle. Confirm stays disabled on a blank transcript.
+// The sheet header's single top-left X is the only dismiss affordance.
+// GLOSSARY: Voice Command.
 private const val WAVE_BARS = 28
 private const val WAVE_SAMPLES = 32
 
@@ -78,84 +78,107 @@ fun VoiceCommandSheet(
             samples.add(amp)
             while (samples.size > WAVE_SAMPLES) samples.removeAt(0)
         }
-        Section("Listen") {
-            Column(
-                Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(Space * 3),
-            ) {
-                // Quoted transcript: interim reads muted, final reads crisp.
-                val heard = state.transcript
-                if (heard.isBlank()) {
-                    Text(
-                        "Tap the mic and speak — typing always works too.",
-                        color = Theme.colors.onBackgroundMuted,
-                    )
-                } else {
-                    Text(
-                        "“$heard”",
-                        color = if (state.isPartial) Theme.colors.onBackgroundMuted else Theme.colors.onSurface,
-                        style = Theme.typography.title,
-                        maxLines = 4,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                Waveform(
-                    samples = samples.toList(),
-                    active = state.listening,
-                    modifier = Modifier.fillMaxWidth().height(48.dp),
-                )
-                if (state.error != null) {
-                    Text(state.error, color = Theme.colors.destructive)
-                    Button(
-                        onClick = onMicTap,
-                        variant = ButtonVariant.Secondary,
-                    ) {
-                        Text("Retry")
-                    }
-                }
+        val statusCaption =
+            when {
+                state.listening -> "Listening..."
+                state.transcript.isNotBlank() -> "Paused"
+                else -> "Ready to listen"
             }
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically,
+        val heard = state.transcript
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(Space * 4)) {
-                SheetCircle(
-                    onClick = onMicTap,
-                    description = if (state.listening) "Pause" else "Speak",
-                    filled = false,
-                    enabled = true,
+            Text(
+                statusCaption,
+                style = Theme.typography.caption.copy(textAlign = TextAlign.Center),
+                color = Theme.colors.onBackgroundMuted,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(12.dp))
+            if (heard.isBlank()) {
+                Text(
+                    "Tap the mic and speak — typing always works too.",
+                    style = Theme.typography.title.copy(textAlign = TextAlign.Center),
+                    color = Theme.colors.onBackgroundMuted,
+                    maxLines = 4,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                )
+            } else {
+                Text(
+                    "“$heard”",
+                    style = Theme.typography.title.copy(textAlign = TextAlign.Center),
+                    color = if (state.isPartial) Theme.colors.onBackgroundMuted else Theme.colors.onSurface,
+                    maxLines = 4,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                )
+            }
+            Spacer(Modifier.height(20.dp))
+            Waveform(
+                samples = samples.toList(),
+                active = state.listening,
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+            )
+            if (state.error != null) {
+                Text(
+                    state.error,
+                    style = Theme.typography.caption.copy(textAlign = TextAlign.Center),
+                    color = Theme.colors.destructive,
+                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                )
+            }
+            Spacer(Modifier.height(24.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(24.dp, Alignment.CenterHorizontally),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier
+                        .size(60.dp)
+                        .clip(Theme.shapes.fullyRounded)
+                        .background(Theme.colors.primary)
+                        .clickable(
+                            onClick = onMicTap,
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = androidx.compose.foundation.LocalIndication.current,
+                        )
+                        .semantics {
+                            contentDescription = if (state.listening) "Stop" else "Speak"
+                        },
+                    contentAlignment = Alignment.Center,
                 ) {
                     Icon(
                         if (state.listening) Icons.Stop else Icons.Microphone,
                         contentDescription = null,
                         modifier = Modifier.size(24.dp),
+                        tint = Theme.colors.onPrimary,
                     )
                 }
-                SheetCircle(
-                    onClick = onUseTranscript,
-                    description = "Use as command",
-                    filled = true,
-                    enabled = state.canConfirmVoice,
+                val canConfirm = state.canConfirmVoice
+                Box(
+                    Modifier
+                        .size(52.dp)
+                        .alpha(if (canConfirm) 1f else 0.35f)
+                        .clip(Theme.shapes.fullyRounded)
+                        .background(Theme.colors.surfaceVariant)
+                        .border(1.dp, Theme.colors.edge, Theme.shapes.fullyRounded)
+                        .clickable(
+                            onClick = onUseTranscript,
+                            enabled = canConfirm,
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = androidx.compose.foundation.LocalIndication.current,
+                        )
+                        .semantics { contentDescription = "Use as command" },
+                    contentAlignment = Alignment.Center,
                 ) {
                     Icon(
                         Icons.Check,
                         contentDescription = null,
                         modifier = Modifier.size(24.dp),
-                    )
-                }
-                SheetCircle(
-                    onClick = onDismiss,
-                    description = "Cancel",
-                    filled = false,
-                    enabled = true,
-                ) {
-                    Icon(
-                        Icons.X,
-                        contentDescription = null,
-                        modifier = Modifier.size(24.dp),
+                        tint = if (canConfirm) Theme.colors.onSurface else Theme.colors.onBackgroundMuted,
                     )
                 }
             }
@@ -183,38 +206,5 @@ private fun Waveform(samples: List<Float>, active: Boolean, modifier: Modifier =
                 cornerRadius = CornerRadius(barW / 2f, barW / 2f),
             )
         }
-    }
-}
-
-@Composable
-private fun SheetCircle(
-    onClick: () -> Unit,
-    description: String,
-    filled: Boolean,
-    enabled: Boolean,
-    content: @Composable () -> Unit,
-) {
-    val (container, contentColor) =
-        when {
-            filled && !enabled -> Theme.colors.surfaceVariant to Theme.colors.onBackgroundMuted
-            filled -> Theme.colors.primary to Theme.colors.onPrimary
-            else -> Theme.colors.surfaceVariant to Theme.colors.onSurfaceVariant
-        }
-    Box(
-        Modifier
-            .size(56.dp)
-            .alpha(if (enabled) 1f else 0.6f)
-            .clip(Theme.shapes.fullyRounded)
-            .background(container)
-            .clickable(
-                onClick = onClick,
-                enabled = enabled,
-                interactionSource = remember { MutableInteractionSource() },
-                indication = androidx.compose.foundation.LocalIndication.current,
-            )
-            .semantics { contentDescription = description },
-        contentAlignment = Alignment.Center,
-    ) {
-        ProvideContentColor(contentColor, content)
     }
 }

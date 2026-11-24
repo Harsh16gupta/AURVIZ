@@ -2,6 +2,22 @@
 
 Every case where the AI was wrong and how it was caught. Add an entry with file:line evidence before moving on.
 
+## 2026-11-24 — V2.1 drawer footer still clipped on gesture-nav device (PR #97 follow-up)
+
+- **Wrong assumption: `navigationBarsPadding()` suffices for the drawer footer.**
+  Shipped `Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()`
+  in `SideDrawer.kt:62`, but on the tester's Realme (gesture navigation,
+  `navigation_mode=2`) `WindowInsets.navigationBars.bottom` reads ~0, so the
+  64.dp profile footer rendered half off-screen — confirmed by the user's
+  screenshot and reproduced via `adb exec-out screencap` with the drawer open.
+  Fixed with a gesture-aware bottom inset —
+  `WindowInsets.navigationBars.union(WindowInsets.systemGestures).only(Bottom)`
+  plus an 8.dp floor (`SideDrawer.kt:61-74`) — and re-verified with a second
+  device screenshot showing the full footer above the bottom edge. Source guard
+  added: `V2ShellPartATest` drawer test now asserts `systemGestures` is present.
+- Tests: `testDebugUnitTest` green (516 tests, 0 failures); `assembleDebug`
+  exit 0; release-installed on-device via `adb install -r` and screenshot-verified.
+
 ## 2026-11-24 — Issue #84 LLM seam 3/3 single-shot plan path (`main`)
 
 - **Exhausted-vs-raw exception type on terminal failure.** After deleting

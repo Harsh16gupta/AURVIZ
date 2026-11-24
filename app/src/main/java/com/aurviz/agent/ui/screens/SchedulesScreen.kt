@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -103,21 +104,27 @@ fun SchedulesScreen(
 
     Page(title = "Schedules", modifier = modifier, onBack = onBack) {
         Section("New Schedule") {
-            TextField(
-                value = draft,
-                onValueChange = { draft = it },
-                label = "When and what — e.g. every morning at 9AM check emails",
-            )
-            MorningBriefingChip(
-                onPick = {
-                    draft = MorningBriefingText
-                    onPreviewSchedule(MorningBriefingText)
-                },
-            )
-            Button(
-                onClick = { onPreviewSchedule(draft) },
+            Column(
+                Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Text("Preview Schedule")
+                TextField(
+                    value = draft,
+                    onValueChange = { draft = it },
+                    label = "When and what — e.g. every morning at 9AM check emails",
+                )
+                MorningBriefingChip(
+                    onPick = {
+                        draft = MorningBriefingText
+                        onPreviewSchedule(MorningBriefingText)
+                    },
+                )
+                Button(
+                    onClick = { onPreviewSchedule(draft) },
+                    modifier = Modifier.height(44.dp),
+                ) {
+                    Text("Preview Schedule")
+                }
             }
         }
         if (state.pendingSchedule != null) {
@@ -254,6 +261,7 @@ fun SchedulesScreen(
                     "Nothing waiting — blocked Schedule writes appear here.",
                     color = Theme.colors.onBackgroundMuted,
                     style = Theme.typography.caption,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
                 )
             } else {
                 val known = knownAddressesFromInbox(state.emails)
@@ -293,6 +301,7 @@ fun SchedulesScreen(
                     "No runs yet.",
                     color = Theme.colors.onBackgroundMuted,
                     style = Theme.typography.caption,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
                 )
             } else {
                 state.scheduleRuns.take(10).forEach { run ->
