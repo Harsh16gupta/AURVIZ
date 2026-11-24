@@ -2,7 +2,6 @@ package com.aurviz.agent.ui.sheets
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -12,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
@@ -27,9 +27,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.aurviz.agent.ui.VOICE_LEVEL_MAX_DB
 import com.aurviz.agent.ui.VOICE_LEVEL_MIN_DB
 import com.aurviz.agent.ui.VoiceUiState
@@ -46,7 +48,7 @@ import com.aurviz.agent.ui.theme.Theme
 // Ticket #91: Todoist Ramble hero. A status caption over the quoted
 // transcript (muted interim vs crisp final, maxLines 4, centered) over a
 // 48dp live Canvas waveform (28 rounded bars from a 32-sample ring buffer
-// driven by levelDb), with a 60dp primary mic/stop circle + a 52dp
+// driven by levelDb), with a 64dp primary mic/stop circle + a 52dp
 // secondary confirm circle. Confirm stays disabled on a blank transcript.
 // The sheet header's single top-left X is the only dismiss affordance.
 // GLOSSARY: Voice Command.
@@ -86,36 +88,41 @@ fun VoiceCommandSheet(
             }
         val heard = state.transcript
         Column(
-            Modifier.fillMaxWidth().padding(horizontal = 24.dp),
+            Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
                 statusCaption,
-                style = Theme.typography.caption.copy(textAlign = TextAlign.Center),
-                color = Theme.colors.onBackgroundMuted,
+                style = Theme.typography.caption.copy(textAlign = TextAlign.Center, fontWeight = FontWeight.Medium),
+                color = if (state.listening) Theme.colors.primary else Theme.colors.onBackgroundMuted,
                 modifier = Modifier.fillMaxWidth(),
             )
-            Spacer(Modifier.height(12.dp))
-            if (heard.isBlank()) {
-                Text(
-                    "Tap the mic and speak — typing always works too.",
-                    style = Theme.typography.title.copy(textAlign = TextAlign.Center),
-                    color = Theme.colors.onBackgroundMuted,
-                    maxLines = 4,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-                )
-            } else {
-                Text(
-                    "“$heard”",
-                    style = Theme.typography.title.copy(textAlign = TextAlign.Center),
-                    color = if (state.isPartial) Theme.colors.onBackgroundMuted else Theme.colors.onSurface,
-                    maxLines = 4,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-                )
+            Spacer(Modifier.height(16.dp))
+            Box(
+                Modifier.fillMaxWidth().heightIn(min = 88.dp).padding(horizontal = 8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (heard.isBlank()) {
+                    Text(
+                        "Tap the mic and speak — typing always works too.",
+                        style = Theme.typography.title.copy(fontSize = 20.sp, lineHeight = 28.sp, textAlign = TextAlign.Center),
+                        color = Theme.colors.onBackgroundMuted,
+                        maxLines = 4,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                } else {
+                    Text(
+                        "“$heard”",
+                        style = Theme.typography.title.copy(fontSize = 20.sp, lineHeight = 28.sp, textAlign = TextAlign.Center),
+                        color = if (state.isPartial) Theme.colors.onBackgroundMuted else Theme.colors.onSurface,
+                        maxLines = 4,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(24.dp))
             Waveform(
                 samples = samples.toList(),
                 active = state.listening,
@@ -137,7 +144,7 @@ fun VoiceCommandSheet(
             ) {
                 Box(
                     Modifier
-                        .size(60.dp)
+                        .size(64.dp)
                         .clip(Theme.shapes.fullyRounded)
                         .background(Theme.colors.primary)
                         .clickable(
@@ -161,10 +168,9 @@ fun VoiceCommandSheet(
                 Box(
                     Modifier
                         .size(52.dp)
-                        .alpha(if (canConfirm) 1f else 0.35f)
+                        .alpha(if (canConfirm) 1f else 0.38f)
                         .clip(Theme.shapes.fullyRounded)
                         .background(Theme.colors.surfaceVariant)
-                        .border(1.dp, Theme.colors.edge, Theme.shapes.fullyRounded)
                         .clickable(
                             onClick = onUseTranscript,
                             enabled = canConfirm,
@@ -178,7 +184,7 @@ fun VoiceCommandSheet(
                         Icons.Check,
                         contentDescription = null,
                         modifier = Modifier.size(24.dp),
-                        tint = if (canConfirm) Theme.colors.onSurface else Theme.colors.onBackgroundMuted,
+                        tint = if (canConfirm) Theme.colors.primary else Theme.colors.onBackgroundMuted,
                     )
                 }
             }
@@ -194,7 +200,7 @@ private fun Waveform(samples: List<Float>, active: Boolean, modifier: Modifier =
         val n = WAVE_BARS
         val gapPx = 4.dp.toPx()
         val barW = (size.width - gapPx * (n - 1)) / n
-        val minH = 3.dp.toPx()
+        val minH = 4.dp.toPx()
         val padded = List(n - samples.takeLast(n).size) { 0f } + samples.takeLast(n)
         padded.forEachIndexed { i, amp ->
             val h = minH + amp * (size.height - minH)

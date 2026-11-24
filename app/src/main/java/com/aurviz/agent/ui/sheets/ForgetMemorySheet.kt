@@ -1,10 +1,13 @@
 package com.aurviz.agent.ui.sheets
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -44,26 +47,37 @@ fun ForgetMemorySheet(
         modifier = modifier,
     ) {
         Section("Delete these?") {
-            preview.take(PREVIEW_ROWS).forEach { memory ->
+            Column(
+                Modifier.fillMaxWidth().padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                preview.take(PREVIEW_ROWS).forEachIndexed { index, memory ->
+                    if (index > 0) {
+                        Box(Modifier.fillMaxWidth().height(1.dp).background(Theme.colors.edge))
+                    }
+                    Text(
+                        memory.text,
+                        style = Theme.typography.body,
+                        color = Theme.colors.onSurface,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                val overflow = preview.size - PREVIEW_ROWS
+                if (overflow > 0) {
+                    Text(
+                        "+$overflow more",
+                        style = Theme.typography.caption,
+                        color = Theme.colors.onBackgroundMuted,
+                    )
+                }
+                Box(Modifier.fillMaxWidth().height(1.dp).background(Theme.colors.edge))
                 Text(
-                    memory.text,
-                    color = Theme.colors.onSurface,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            val overflow = preview.size - PREVIEW_ROWS
-            if (overflow > 0) {
-                Text(
-                    "+$overflow more",
+                    "This only deletes the ${preview.size} listed ${if (preview.size == 1) "Memory" else "Memories"} — nothing else.",
                     style = Theme.typography.caption,
                     color = Theme.colors.onBackgroundMuted,
                 )
             }
-            Text(
-                "This only deletes the ${preview.size} listed ${if (preview.size == 1) "Memory" else "Memories"} — nothing else.",
-                color = Theme.colors.onBackgroundMuted,
-            )
         }
         Column(
             modifier = Modifier.fillMaxWidth(),
