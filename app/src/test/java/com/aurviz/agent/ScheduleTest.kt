@@ -144,6 +144,39 @@ class ScheduleTest {
         assertTrue(preview.contains("check emails"))
     }
 
+    // --- Ticket #69: unschedule preview (no silent disarm). Pure
+    // helpers behind the command-path Confirmation: normalize the typed
+    // id, resolve it against the store list, and render the Stop? line.
+
+    @Test
+    fun unscheduleIdGainsPrefixWhenMissing() {
+        assertEquals("sched_2", normalizeScheduleId("2"))
+        assertEquals("sched_2", normalizeScheduleId("sched_2"))
+        assertEquals("sched_2", normalizeScheduleId("  sched_2  "))
+    }
+
+    @Test
+    fun unscheduleFindsKnownScheduleByBareOrPrefixedId() {
+        val schedules = listOf(Schedule("sched_2", "check emails", 9, 0))
+        assertEquals("sched_2", findScheduleByRawId(schedules, "2")?.id)
+        assertEquals("sched_2", findScheduleByRawId(schedules, "sched_2")?.id)
+    }
+
+    @Test
+    fun unscheduleFindReturnsNullForUnknownId() {
+        val schedules = listOf(Schedule("sched_2", "check emails", 9, 0))
+        assertNull(findScheduleByRawId(schedules, "9"))
+        assertNull(findScheduleByRawId(emptyList(), "sched_2"))
+    }
+
+    @Test
+    fun unschedulePreviewNamesIdInstructionAndTime() {
+        val preview = formatUnschedulePreview(Schedule("sched_2", "check emails", 9, 5))
+        assertTrue(preview.contains("sched_2"))
+        assertTrue(preview.contains("check emails"))
+        assertTrue(preview.contains("9:05"))
+    }
+
     // --- Seam B: save / list / delete ---
 
     @Test

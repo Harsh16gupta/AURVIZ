@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.runtime.Composable
@@ -31,20 +32,21 @@ fun ChoiceTile(
 ) {
     val outline by
         animateColorAsState(
-            if (selected) Theme.colors.primary else Theme.colors.border,
+            if (selected) Theme.colors.primary else Theme.colors.edge,
             tween(160),
             label = "Outline",
         )
     Column(
         modifier
             .clip(Theme.shapes.small)
-            .background(if (selected) Theme.colors.surfaceVariant else Theme.colors.surface)
-            .border(if (selected) 2.dp else 1.dp, outline, Theme.shapes.small)
+            .background(if (selected) Theme.colors.surfaceVariant else Theme.colors.inset)
+            .border(if (selected) 1.dp else 0.5.dp, outline, Theme.shapes.small)
             .selectable(
                 selected = selected,
                 onClick = onClick,
                 role = Role.RadioButton,
             )
+            .heightIn(min = 44.dp)
             .padding(contentPadding),
         verticalArrangement = Arrangement.spacedBy(Space),
         content = content,

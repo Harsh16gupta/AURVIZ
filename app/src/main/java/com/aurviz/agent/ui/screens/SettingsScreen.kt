@@ -23,10 +23,12 @@ import com.aurviz.agent.BuildConfig
 import com.aurviz.agent.OEM_AUTOSTART_GUIDANCE
 import com.aurviz.agent.ProviderSettings
 import com.aurviz.agent.firstConfiguredProvider
+import com.aurviz.agent.providerDisplayName
 import com.aurviz.agent.toolLabel
 import com.aurviz.agent.ui.AgentUiState
 import com.aurviz.agent.ui.components.Button
 import com.aurviz.agent.ui.components.ButtonVariant
+import com.aurviz.agent.ui.components.CardDivider
 import com.aurviz.agent.ui.components.ChoiceTile
 import com.aurviz.agent.ui.components.HapticKind
 import com.aurviz.agent.ui.components.LocalHaptics
@@ -141,7 +143,7 @@ fun SettingsScreen(
     Page(title = "Settings", modifier = modifier, onBack = onBack) {
         Section("Appearance & Feedback") {
             Row(
-                modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 4.dp),
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 listOf(
@@ -157,7 +159,9 @@ fun SettingsScreen(
                         },
                         modifier = Modifier.weight(1f),
                     ) {
-                        Text(label, style = Theme.typography.label)
+                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            Text(label, style = Theme.typography.label)
+                        }
                     }
                 }
             }
@@ -219,29 +223,37 @@ fun SettingsScreen(
             )
             if (state.pasteFallbackVisible) {
                 CardDivider()
-                Text(
-                    state.loopbackHint.ifBlank { "Finish in the newest browser tab, then paste the full address-bar link here." },
-                    color = Theme.colors.onBackgroundMuted,
-                )
-                TextField(
-                    value = pasted,
-                    onValueChange = { pasted = it },
-                    label = "Paste the callback link (?code=…)",
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(Space * 2)) {
-                    Button(
-                        onClick = {
-                            onPasteLink(pasted)
-                            pasted = ""
-                        },
-                    ) {
-                        Text("Use pasted link")
-                    }
-                    Button(
-                        onClick = onDismissPasteFallback,
-                        variant = ButtonVariant.Secondary,
-                    ) {
-                        Text("Dismiss")
+                Column(
+                    Modifier.fillMaxWidth().padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(
+                        state.loopbackHint.ifBlank { "Finish in the newest browser tab, then paste the full address-bar link here." },
+                        style = Theme.typography.caption,
+                        color = Theme.colors.onBackgroundMuted,
+                    )
+                    TextField(
+                        value = pasted,
+                        onValueChange = { pasted = it },
+                        label = "Paste the callback link (?code=…)",
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(Space * 2)) {
+                        Button(
+                            onClick = {
+                                onPasteLink(pasted)
+                                pasted = ""
+                            },
+                            modifier = Modifier.weight(1f).height(48.dp),
+                        ) {
+                            Text("Use pasted link")
+                        }
+                        Button(
+                            onClick = onDismissPasteFallback,
+                            variant = ButtonVariant.Secondary,
+                            modifier = Modifier.weight(1f).height(48.dp),
+                        ) {
+                            Text("Dismiss")
+                        }
                     }
                 }
             }
@@ -267,19 +279,27 @@ fun SettingsScreen(
         }
         Section("Performance Telemetry") {
             val perf = state.perf
-            TelemetryBar("Plan", perf.planMs, perf.planAvgMs)
+            val maxScaleMs = maxOf(
+                perf.planMs ?: 0L,
+                perf.toolMs ?: 0L,
+                perf.recallMs ?: 0L,
+                perf.planAvgMs ?: 0L,
+                perf.toolAvgMs ?: 0L,
+                perf.recallAvgMs ?: 0L,
+                1000L,
+            ).toFloat()
+            TelemetryBar("Plan", perf.planMs, perf.planAvgMs, maxScaleMs)
             CardDivider()
-            TelemetryBar("Tool", perf.toolMs, perf.toolAvgMs)
+            TelemetryBar("Tool", perf.toolMs, perf.toolAvgMs, maxScaleMs)
             CardDivider()
-            TelemetryBar("Recall", perf.recallMs, perf.recallAvgMs)
+            TelemetryBar("Recall", perf.recallMs, perf.recallAvgMs, maxScaleMs)
             CardDivider()
             OptionRow(
                 title = "Provider",
                 description = "${state.interactions.size} Interactions recorded · " +
                     "${(perf.successRate * 100).toInt()}% success over ${perf.runs} runs.",
-                value = providerLabel(
-                    (state.selectedProvider ?: state.providerUsed ?: BuildConfig.LLM_DEFAULT_PROVIDER)
-                        .lowercase(),
+                value = providerDisplayName(
+                    state.selectedProvider ?: state.providerUsed ?: BuildConfig.LLM_DEFAULT_PROVIDER,
                 ),
             )
         }
@@ -332,8 +352,8 @@ fun SettingsScreen(
             }
             CardDivider()
             Column(
-                Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                Modifier.fillMaxWidth().padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 TextField(
                     value = newAllow,
@@ -345,7 +365,7 @@ fun SettingsScreen(
                         onAllowAlwaysAdd(newAllow)
                         newAllow = ""
                     },
-                    modifier = Modifier.height(44.dp),
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
                 ) {
                     Text("Always allow")
                 }
@@ -411,10 +431,14 @@ fun SettingsScreen(
                 navigates = true,
             )
             if (guideExpanded) {
-                Text(
-                    OEM_AUTOSTART_GUIDANCE,
-                    color = Theme.colors.onBackgroundMuted,
-                )
+                CardDivider()
+                Box(Modifier.fillMaxWidth().padding(16.dp)) {
+                    Text(
+                        OEM_AUTOSTART_GUIDANCE,
+                        style = Theme.typography.caption,
+                        color = Theme.colors.onBackgroundMuted,
+                    )
+                }
             }
         }
     }
@@ -486,22 +510,18 @@ fun SettingsScreen(
 }
 
 // Ticket #90: one ChatGPT-Usage-style labeled progress bar per stage —
-// Last + Avg ms with the Last sample as the filled share of a fixed
-// 4000ms scale. Foundation Box only; no new icons.
-@Composable
-private fun CardDivider() {
-    Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-        Box(Modifier.fillMaxWidth().height(1.dp).background(Theme.colors.edge))
-    }
-}
+// Last + Avg ms with proportional fill against the slowest stage. The Last
+// (else Avg) sample fills a 4dp track as its share of maxScaleMs.
+// Foundation Box only; no new icons.
 @Composable
 private fun TelemetryBar(
     label: String,
     lastMs: Long?,
     avgMs: Long?,
+    maxScaleMs: Float = 4000f,
 ) {
     Column(
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Row(
@@ -523,12 +543,8 @@ private fun TelemetryBar(
                     .clip(Theme.shapes.fullyRounded)
                     .background(Theme.colors.surfaceVariant),
         ) {
-            val fraction =
-                if (lastMs == null) {
-                    0f
-                } else {
-                    (lastMs.toFloat() / 4000f).coerceIn(0.06f, 1f)
-                }
+            val sample = lastMs ?: avgMs
+            val fraction = if (sample == null) 0f else (sample.toFloat() / maxScaleMs).coerceIn(0.06f, 1f)
             if (fraction > 0f) {
                 Box(
                     modifier =

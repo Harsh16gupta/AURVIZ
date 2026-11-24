@@ -44,7 +44,7 @@ fun ConfirmationCard(
     detail: String?,
     status: ConfirmationStatus = ConfirmationStatus.Pending,
     warningText: String? = null,
-    approveLabel: String = "Approve",
+    approveLabel: String = "Confirm",
     denyLabel: String = "Deny",
     settledSummary: String? = null,
     onApprove: () -> Unit = {},
@@ -79,7 +79,7 @@ fun ConfirmationCard(
             ) {
                 Icon(settledIcon, contentDescription = null, modifier = Modifier.size(16.dp), tint = tint)
                 Text(
-                    text = settledSummary ?: if (status == ConfirmationStatus.Approved) "Approved · $title" else "Denied · $title",
+                    text = settledSummary ?: title,
                     style = Theme.typography.caption,
                     color = Theme.colors.onBackgroundMuted,
                     maxLines = 1,

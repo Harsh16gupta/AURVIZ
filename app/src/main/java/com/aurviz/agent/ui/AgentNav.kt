@@ -2,7 +2,6 @@ package com.aurviz.agent.ui
 
 import android.content.Intent
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -14,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -53,6 +53,7 @@ import com.aurviz.agent.ui.sheets.EmailConfirmationSheet
 import com.aurviz.agent.ui.sheets.ForgetMemorySheet
 import com.aurviz.agent.ui.sheets.VoiceCommandSheet
 import com.aurviz.agent.ui.theme.Bell
+import com.aurviz.agent.ui.theme.Brain
 import com.aurviz.agent.ui.theme.CaretRight
 import com.aurviz.agent.ui.theme.Globe
 import com.aurviz.agent.ui.theme.Icons
@@ -150,6 +151,8 @@ fun AgentNav(
                         onPreviewSchedule = { vm.sendCommand("schedule $it") },
                         onApproveSchedule = vm::approveSchedule,
                         onRejectSchedule = vm::rejectSchedule,
+                        onApproveUnschedule = vm::approveUnschedule,
+                        onRejectUnschedule = vm::rejectUnschedule,
                         onUnschedule = vm::unschedule,
                         onApproveHeldWrite = vm::approveHeldWrite,
                         onRejectHeldWrite = vm::rejectHeldWrite,
@@ -215,7 +218,7 @@ fun AgentNav(
                 Text("AURVIZ", style = Theme.typography.title, color = Theme.colors.onSurface)
                 Spacer(Modifier.weight(1f))
                 Box(
-                    Modifier.size(40.dp).clip(Theme.shapes.fullyRounded).clickable(
+                    Modifier.size(48.dp).clip(Theme.shapes.fullyRounded).clickable(
                         onClick = {
                             vm.startNewSession()
                             drawerOpen = false
@@ -315,6 +318,37 @@ fun AgentNav(
                         tint = Theme.colors.inkTertiary,
                     )
                 }
+                // Row 3: Memory 44.dp.
+                Row(
+                    Modifier.fillMaxWidth().height(44.dp).clip(Theme.shapes.small).clickable(
+                        onClick = {
+                            drawerOpen = false
+                            navController.navigate(Dests.MEMORY)
+                        },
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = androidx.compose.foundation.LocalIndication.current,
+                    ).padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Brain,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                        tint = Theme.colors.onSurface,
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        "Memory",
+                        style = Theme.typography.label,
+                        color = Theme.colors.onSurface,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        "${state.memories.size}",
+                        style = Theme.typography.caption,
+                        color = Theme.colors.onBackgroundMuted,
+                    )
+                }
             }
             // Hairline Divider: 1.dp height, edge, 12.dp vertical padding.
             Box(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
@@ -412,7 +446,7 @@ fun AgentNav(
             // Bottom Pinned Profile / Settings Footer: 1.dp top divider, 64.dp height, 16.dp padding.
             Box(Modifier.fillMaxWidth().height(1.dp).background(Theme.colors.edge))
             Row(
-                Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 16.dp).clickable(
+                Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 10.dp).clickable(
                     onClick = {
                         drawerOpen = false
                         navController.navigate(Dests.SETTINGS)
@@ -423,8 +457,7 @@ fun AgentNav(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Box(
-                    Modifier.size(36.dp).clip(CircleShape).background(Theme.colors.surfaceVariant)
-                        .border(1.dp, Theme.colors.edge, CircleShape),
+                    Modifier.size(36.dp).clip(CircleShape).background(Theme.colors.surfaceVariant),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
@@ -513,14 +546,14 @@ private fun SessionRow(
     ) {
         Text(
             session.title,
-            style = Theme.typography.body,
-            color = Theme.colors.onSurface,
+            style = if (active) Theme.typography.label else Theme.typography.body,
+            color = if (active) Theme.colors.onSurface else Theme.colors.onBackgroundMuted,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
         Box(
-            Modifier.size(32.dp).clickable(
+            Modifier.size(44.dp).clickable(
                 onClick = onDelete,
                 interactionSource = remember { MutableInteractionSource() },
                 indication = androidx.compose.foundation.LocalIndication.current,

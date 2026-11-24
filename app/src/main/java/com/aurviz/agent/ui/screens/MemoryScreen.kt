@@ -196,8 +196,12 @@ fun MemoryScreen(
                     message = "Nothing matches \"${query.trim()}\" — try different words.",
                 )
             } else {
-                shown.forEach { memory ->
-                    FeedCard {
+                Column(
+                    Modifier.fillMaxWidth().padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    shown.forEach { memory ->
+                        FeedCard {
                         Row(verticalAlignment = Alignment.Top) {
                             Column(
                                 Modifier.weight(1f),
@@ -249,6 +253,7 @@ fun MemoryScreen(
                                 )
                             }
                         }
+                    }
                     }
                 }
             }

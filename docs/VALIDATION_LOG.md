@@ -2,6 +2,281 @@
 
 Every case where the AI was wrong and how it was caught. Add an entry with file:line evidence before moving on.
 
+## 2026-11-24 — Issue #70 T5 close-out: both audit gaps wired (`main`)
+
+- **Caught own mistake: first AgentUiState edit orphaned the class doc.**
+  The helper insert replaced the `InteractionRecord` doc comment with the
+  `rememberAddressFor` body, leaving the class head mangled
+  (`AgentUiState.kt`, helper lines inside the data-class parens). Caught on
+  immediate post-edit re-read; repaired by restoring the class head first
+  and appending the helper after the class close. Lesson holds: multi-line
+  edits need a post-edit read before moving on.
+- **Settled receipts are optimistic at tap time, exact at record time.**
+  `approvePendingSend`/`approvePendingSendEdited` stamp CARD/EDITED receipts
+  (`AgentViewModel.kt:1353,1363`) from the decision + effective args before
+  the gate resolves — same optimism as the old stamp (Approved at tap), now
+  in canonical language. `approveEmail` stamps from the real gated execution
+  (`:705`), which also fixes a mis-stamp: policy-denied sends previously
+  recorded `ConfirmationStatus.Approved`; they now record Denied via the
+  receipt outcome (`:711`). `rejectPendingSend`/`rejectEmail` stamp the
+  synthetic cancelled_by_user DENIED (`:1374-1378`, `:726`).
+- **Draft-deny cards lose the Remember Preference button, by construction.**
+  The grant now derives from executed-step args
+  (`rememberAddressFor`, `AgentUiState.kt:199-207`); a denied draft never
+  executed, and `rejectEmail` records `steps = emptyList()`
+  (`AgentViewModel.kt:728-734`) so a stale timeline can't offer a wrong
+  address. Loop-path and direct-send approved cards keep the grant via the
+  effective-args step (edited address included). No test pinned the old
+  draft-deny grant; accepted tradeoff, flagged here.
+- **Held rows lose per-recipient To/Subject/Body detail, per the audit.**
+  `SchedulesScreen.kt:282-287` now renders `receiptForHeld(held)` title +
+  detail (tool named, nothing-ran-yet), replacing the `approvalCardFor`
+  derivation. The stored `held.reason` line below the card is kept as the
+  schedule-context line. No model changes: `ConfirmationReceipt.kt` mapping
+  + `ConfirmationReceiptTest.kt` matrix untouched.
+- **Copy sweep extras beyond the audit list:** `EmailConfirmationSheet.kt:71`
+  "before approving", `Email.kt:381` gate-refusal error "was not approved",
+  and `docs/SCHEDULING_TEST.md:85` button name — all user-visible, same
+  rule. Left untouched: ADR-0003:7 "approve, edit, or reject" prose (bullet 3
+  verified — do not touch), historical logs, and all code-internal
+  `ApprovalDecision` / `ApprovalGate` / `NeedsApproval` / `pending_approvals`
+  identifiers per ADR 0003:22-25.
+- Tests: 6 new `rememberAddressFor` pins in `CommandPlanUiTest.kt`
+  (legacy prefix, receipt-title fallback, edited address, first-of-many,
+  no-send null, non-address null) written red-first, green after. Full
+  `:app:testDebugUnitTest --rerun-tasks` green (526 tests, 0 failures — up 6
+  from 520). Secret scan clean on the diff.
+
+## 2026-11-24 — Issue #70 T5 audit: two genuine gaps, ticket left open (`main`)
+
+- **Bullet 3 verifies; the #67 audit claim holds.** `docs/adr/0002-workmanager-alarm-scheduling.md:8-11`
+  carries the bounded exact-match exception (recipient set + template +
+  owning Schedule, fire-time revalidated, drift defers), and the
+  `docs/adr/0003-gmail-oauth-confirmation.md:9-25` amendment covers every
+  element (exact recipient set + subject/body template scoped to owning
+  `ScheduledSendConsent`, headless fire-time re-validation + SendPolicy,
+  drift/policy-deny → `PendingApproval`, writes always defer, expired
+  credentials → Reconnect prompt). No amendment delta needed.
+- **Bullet 4 verifies on both paths.** `RedTeamTest.kt` pins
+  `evilForwardForegroundYieldsCardNeverSend` (card-never-sends),
+  `evilForwardScheduledYieldsPendingApprovalNeverSend` (hold-never-executes),
+  plus the same pair for Memory poisoning
+  (`memoryPoisoningForegroundYieldsCardNeverSend`,
+  `memoryPoisoningScheduledYieldsPendingApprovalNeverSend`) and
+  routine-runner/receipt-mapping variants. `PromptShapingTest.kt` pins the
+  framing (tool-content-is-data, delimited `[memories]`, source tags).
+- **Genuine gap 1 (bullet 1): GLOSSARY has no PendingApproval entry.**
+  `GLOSSARY.md` defines `Confirmation` but `grep -i pendingapproval`
+  returns nothing, and the Confirmation definition itself reads
+  "Explicit user approval required ... until the user approves, edits, or
+  rejects" (`GLOSSARY.md:40`) — the retired noun in the canonical
+  definition. The #65 "Glossary already updated" claim is false on this
+  tree, and user-visible "Approval" copy remains: `ScheduleWork.kt:237-238`
+  notification ("Approval needed" / "need your approval"),
+  `SchedulesScreen.kt:272` `Section("Approvals")`, button labels
+  `CommandScreen.kt:676,707`, `SchedulesScreen.kt:299`,
+  `ConfirmationCard.kt:47`, settled `ConfirmationCard.kt:82`
+  ("Approved ·"), status lines `AgentViewModel.kt:755-756,802,1105,1112,1115,1420,1453`.
+  Code identifiers (`ApprovalDecision` / `ApprovalGate` / `NeedsApproval`)
+  correctly stay per the `0003:22-25` amendment — no renames.
+- **Genuine gap 2 (bullet 2): receipts unrendered.** The five-outcome model
+  (`ConfirmationReceipt.kt:17-23`) and `ConfirmationReceiptTest.kt` matrix
+  (ALLOWED x3, CARD-APPROVED, EDITED-APPROVED, DENIED x3, HELD x2, plus
+  `everyOutcomeExplainsItself`, each asserting no "approv" outside
+  "pendingapproval") are done and green — but `grep receiptFor*` finds
+  zero callers in `app/src/main`, and the file header admits wiring "is a
+  UI follow-up": `ConfirmationCard` + held list
+  (`SchedulesScreen.kt:282-299`) still render the old
+  `ConfirmationStatus`/title/detail, not `receipt.title/detail`.
+- Ticket #70 left open; no code changed, so no `:app:testDebugUnitTest`
+  re-run (docs-only commit). Secret scan clean on the diff.
+
+## 2026-11-24 — Issue #69 T4 unschedule fast-path Confirmation (`main`)
+
+- **The audit was right; the fix mirrors the create preview.** The #69
+  audit (98aae02) left one genuine gap: `handleUnschedule` disarmed on a
+  typed/voice command with no Confirmation. Fixed by preview-gating it
+  exactly like `handleScheduleCreate`: resolve via pure helpers, publish
+  a Stop? card, disarm only on approve.
+- **Missing imports cascade into a misleading type error.** Wiring
+  `handleUnschedule` to `findSchedule`/`normalizeScheduleId`/
+  `formatUnschedulePreview` failed `:app:compileDebugKotlin` with
+  `Unresolved reference` plus a bogus `Any vs Schedule?` mismatch at
+  `AgentViewModel.kt:1205` — the mismatch was error-recovery fallout,
+  not a real type problem. Fixed with three explicit imports
+  (`AgentViewModel.kt`, same explicit-import idiom as the other
+  schedule helpers).
+- **Screen inline-delete keeps its own confirm; no double-gate.**
+  `SchedulesScreen.kt:223-239` already confirms Delete/Keep per row, so
+  `unschedule(id)` (`AgentViewModel.kt`, screen path) still disarms
+  immediately while the command path (`handleUnschedule`) previews.
+  The two paths are documented at both sites so a later reader does not
+  "unify" them into a double-confirm.
+- Tests: 4 new pure-helper tests in `ScheduleTest.kt` (prefix
+  normalize, bare/prefixed find, unknown → null, preview names
+  id/instruction/time) written red-first, green after. Full
+  `:app:testDebugUnitTest --rerun-tasks` green (520 tests, 0 failures —
+  up 4 from 516). Secret scan clean on the diff.
+- Review drove two cleanups: `findSchedule` → `findScheduleByRawId`
+  (states the normalize + bare/prefixed contract), shared time shape
+  `formatScheduleTime` for both previews, and one `disarmSchedule`
+  helper for the approve + screen paths. Disputed and kept with
+  precedent: no timeout on the manual card (same as `approveSchedule`),
+  no edit step (cancel target fully determined; reject + retype is the
+  edit path), screen inline row keeps its own Delete/Keep (explicit
+  per-item Confirmation, not a second mechanism for the same entry
+  point), `unschedule(id)` silent on unknown (post-confirm lost race,
+  list already fresh).
+- Glossary check: Schedule / Confirmation used per `GLOSSARY.md`;
+  `cancel_schedule` toolLabel on the card names the Tool being
+  confirmed. No ADR conflict (per-call Confirmation for schedule
+  writes is #65/ADR-0003 direction).
+
+## 2026-11-24 — Issue #69 audit: one genuine gap, ticket left OPEN (`main`)
+
+- Audited #69 (T4 schedule writes + voice parity through judge) against the
+  tree before writing code. Bullets 2-4 fully satisfied; bullet 1 PARTIALLY
+  satisfied — the `unschedule` typed/voice command path disarms with no
+  Confirmation. Ticket left OPEN; gap reported on the issue, nothing
+  implemented pending scope sign-off.
+- Bullet 1 (create/cancel require Confirmation; no silent arm/disarm):
+  SATISFIED for the judge path — `ScheduleTools.kt:30-32`
+  `create_schedule` MEDIUM + `requiresConfirmation`, `:100-102` same for
+  `cancel_schedule`; kernel refuses gated Tools ungated
+  (`ToolRegistry.kt:159-173`); loop routes every call through
+  `executeGated` (`AgentLoop.kt:186-189`); typed create fast path is
+  preview-gated (`AgentViewModel.kt:991-1036` `pendingSchedule` +
+  `approveSchedule`/`rejectSchedule`); screen delete is inline-confirmed
+  (`SchedulesScreen.kt:87,212-245` `confirmDeleteId`, added in #89).
+  MISSING: `handleUnschedule` (`AgentViewModel.kt:1184-1200`) deletes the
+  row plus cancels alarm/work (`:1193-1195`) with no Confirmation of any
+  kind — reachable from typed text (`:529`) AND voice transcript (voice
+  routes into the same `sendCommand`, `AgentNav.kt:467-471`), so a
+  misrecognized "unschedule 2" silently disarms a routine. Every other
+  destructive path (email send, schedule create, forget, screen delete)
+  has a confirm step; this is the lone exception.
+- Bullet 2 (voice parity): SATISFIED — voice transcript enters the single
+  entry point (`AgentNav.kt:467-471` `vm.sendCommand(text)`), voice wins
+  over typed (`VoiceInput.kt:38-39` `resolveCommandInput`), blank
+  transcripts can't confirm (`AgentUiState.kt:86-87` `canConfirmVoice`).
+  Tests: `ScheduleWriteConfirmTest.kt:132-146` voice drives identical
+  gated outcomes, `:149-158` voice reject; `VoiceInputTest.kt:42-56`
+  blank-voice fallback; `VoiceSheetStateTest.kt:38-40` confirm guard.
+- Bullet 3 (reject/timeout without side effects): SATISFIED for the judge
+  path — `ToolRegistry.kt:204-217` reject/timeout return
+  `cancelled_by_user` without running; `Schedule.kt:161`
+  `onApprovedWrite` returns `None` unless approved Success;
+  `AgentViewModel.kt:1150-1182` side-effect sync acts only on approved
+  Success (effective args, never the original call). Tests:
+  `ScheduleWriteConfirmTest.kt:35-57` create reject/timeout arm nothing,
+  `:60-83` cancel reject/timeout leave armed, `:86-96` approve disarms.
+- Bullet 4 (approve/reject/timeout x create/cancel x typed/voice):
+  SATISFIED at the gate seam — `ScheduleWriteConfirmTest.kt` whole file:
+  create reject/timeout (`:35-57`), cancel reject/timeout/approve
+  (`:60-96`), loop NeedsApproval for both (`:123-129` typed,
+  `:132-146` voice-identical, `:149-158` voice reject); plus
+  `ScheduleToolsTest.kt` timeout cases and `ApprovalGateTest.kt`
+  fail-closed default confirmer. (The `unschedule` fast path has no
+  approve/reject/timeout at all — same gap as bullet 1.)
+- Fix sketch (not implemented): mirror the create preview — publish a
+  `pendingUnschedule` + preview line in `handleUnschedule`, add
+  `approveUnschedule`/`rejectUnschedule`, render in `CommandScreen`/
+  `SchedulesScreen`; JVM tests for approve/reject/timeout-equivalent
+  (reject path) on the fast path. Needs UX sign-off first since it adds
+  a confirm step to an explicit command.
+- Tests: full `:app:testDebugUnitTest --rerun-tasks` green (516 tests /
+  48 files, 0 failures/errors), secret scan clean. No implementation
+  commit beyond this log entry; #69 stays OPEN.
+
+## 2026-11-24 — Issue #68 audit: already-implemented-but-open (`main`)
+
+- Audited #68 (T3 allow-always Preference per recipient) against the tree
+  before writing code: all 4 acceptance bullets already satisfied, no
+  genuine gaps, no code changes. Prior art confirmed by behavior, not
+  assumed: store + eligibility + Settings revoke path all traced end to end.
+- Per-recipient scope, Settings revoke with immediate effect:
+  `AllowAlways.kt:13-24` per-recipient doc, `:26-50`
+  `InMemoryAllowAlwaysStore` (normalized set; allow refuses blank /
+  wildcard / implausible `:36-43`; revoke `:46-48`), `:55-75`
+  normalization + `allowAlwaysEligible` (exactly one plausible recipient).
+  `AgentViewModel.kt:177-181` the confirm hook reads the same live
+  instance, so allow/revoke apply to the next decision with no restart;
+  `:234-246` `allowAlwaysAllow`/`allowAlwaysRevoke` mutate store +
+  persist via `UiPrefs` + update state synchronously. Persistence
+  `Haptics.kt:83-89`; Settings UI `SettingsScreen.kt:315-352` (revoke rows
+  "takes effect immediately" `:328`, add field `:338-351`) wired in
+  `AgentNav.kt:193-194`.
+- Allowed skips card, unknown still asks: `AgentViewModel.kt:1348-1356`
+  (`allowAlwaysEligible` returns `Approved` with no `openGate`; otherwise
+  the card path `:1356-1373`). Grant path from settled receipts:
+  `CommandScreen.kt:508-526` + `ConfirmationCard.kt:146-168` Remember
+  Preference button. Tests: `AllowAlwaysTest.kt:56-77` eligible runs with
+  no card shown, `:89-107` unknown held with card shown, `:205-234` loop
+  auto-approves listed + holds unlisted.
+- Bulk / evil-forward still denied: `AllowAlways.kt:6-8` doc (policy keeps
+  the final word), `AgentViewModel.kt:1349-1351` hook comment;
+  multi-recipient never eligible `AllowAlways.kt:70-71`; the gated path
+  always re-runs `SendPolicy` (`ToolRegistry.kt:228-234` +
+  `Email.kt:385-391`). Tests: `AllowAlwaysTest.kt:131-143`
+  evil-forward denied when allowed, `:145-157` header-injection denied
+  when allowed.
+- Unit-test bullet: allow (`AllowAlwaysTest.kt:41-53`), revoke immediate +
+  case-insensitive (`:111-127`, immediacy via shared live instance
+  `AgentViewModel.kt:177-181`), policy-overrides-allow (`:131-157`), no
+  blanket allow-all (`:159-201` multi-recipient / blank+wildcard /
+  malformed / non-send never eligible).
+- Tests: full `:app:testDebugUnitTest --rerun-tasks` green (516 tests /
+  48 files, 0 failures/errors), secret scan clean. Closed #68 with audit
+  comment, no implementation commit beyond this log entry.
+
+## 2026-11-24 — Issue #67 audit: already-implemented-but-open (`main`)
+
+- Audited #67 (T2 scheduled hold + bounded creation consent) against the
+  tree before writing code: all 5 acceptance bullets already satisfied, no
+  genuine gaps, no code changes.
+- Reads run unattended; sends/schedule writes hold except exact-match
+  consent: `ScheduledRun.kt:255-262` allowlist, `:406-444` `scheduledRegistry`
+  read-only view (consent-aware `send_email` `:417-432`), `:530-539`
+  headless confirmer (reads allow, send only via `isConsentedSend`),
+  `:201-211` exact-match + `SendPolicy` gate. Tests:
+  `ScheduledConsentTest.kt:51-78` reads unattended, `:83-114` writes held,
+  `ScheduledRunTest.kt:63-85,98-151` allowlist + held sends.
+- Drift defers: `ScheduledRun.kt:157-163` `consentMatches`,
+  `:173-177` `consentPolicyAllows`, `:423-430` executor re-check,
+  `:555-565` drift saved as `PendingApproval`. Tests:
+  `ScheduledConsentTest.kt:147-169` recipient, `:172-196` bulk,
+  `:199-238` subject/body, `:241-263` policy, `:267-317` schedule-write /
+  cross-schedule scope.
+- Held approve/reject exactly-once: `ScheduledRun.kt:75-86` claim-first
+  approve, `:89-94` reject, `:54-57` in-memory atomic `take`,
+  `ScheduleDb.kt:239-244` Room DELETE-count guard. Tests:
+  `PendingApprovalTest.kt:76-97` approve + double-approve, `:110-141`
+  reject + schedule-write doubled, `ScheduledConsentTest.kt:342-366`
+  drift-held double-approve.
+- Idempotent per fire time + reconnect: `ScheduledRun.kt:335-341`
+  claim, `:595-607` `DuplicateSkipped`, `ScheduleDb.kt:172-185` IGNORE
+  idempotency, `ScheduleWork.kt:152-164` unique REPLACE work,
+  `:380-395` `isGmailAuthFailure`, `:473-489` Reconnect note,
+  `:551-574` `AUTH_ERROR`. Tests: `ScheduledRunTest.kt:186-212`
+  double-fire, `:256-268,335-357,401-455` store/Room/stale-lease,
+  `:218-234` expired token; `ScheduledConsentTest.kt:322-338,439-466`
+  consented double-fire + expired-with-consent.
+- Unit-test bullet: read allowlist, writes-held, exact-match, drift,
+  double-approve, cron/timezone edges all present —
+  `ScheduleTest.kt:76-136` `nextFireTime`/timezone/`emptyDays` plus
+  `ScheduledConsentTest.kt:403-434` consent-across-rearm.
+- ADR check (#65 requirement): bounded-consent amendment already in
+  `docs/adr/0002-workmanager-alarm-scheduling.md:7-11` and
+  `docs/adr/0003-gmail-oauth-confirmation.md:9-25` — part of #67's scope,
+  no separate ticket needed. Stale pointer noted, not fixed (audit-only
+  scope): `ScheduledRun.kt:102-104` still says the amendment "lands in
+  #70" though the ADR is already amended — comment-only drift, no
+  functional gap. Glossary: Confirmation / PendingApproval / Schedule used
+  canonically; no ADR conflict.
+- Tests: full `:app:testDebugUnitTest --rerun-tasks` green (516 tests /
+  48 files, 0 failures/errors), secret scan clean. Closed #67 with audit
+  comment, no implementation commit beyond this log entry.
+
 ## 2026-11-24 — V2.1 drawer footer still clipped on gesture-nav device (PR #97 follow-up)
 
 - **Wrong assumption: `navigationBarsPadding()` suffices for the drawer footer.**
@@ -928,3 +1203,17 @@ Per-screen/sheet audit, Midnight + Daylight (code inspection; no PNGs needed):
 - **Suspend DAO needs room-ktx.** Task spec asked for `suspend fun listBySession/deleteSession` in `InteractionDb.kt:36-43`, but the module only depended on `room-runtime` — `kaptDebugKotlin` failed with "To use Coroutine features, you must add `ktx` artifact" (`InteractionDao.java:20,26`). Caught by running `./gradlew testDebugUnitTest`. Fixed by adding `implementation("androidx.room:room-ktx:2.6.1")` (`app/build.gradle.kts`); Room DB stays at version 6, no migration.
 - **CommandScreen Alpha import.** Replaced the `40.dp` hit-target `IconButton` top bar with `Box(...).alpha(...)` for the disabled `agentRunning` dim (`CommandScreen.kt`) — needed explicit `import androidx.compose.ui.draw.alpha`; verified via `compileDebugKotlin` green.
 - Tests: `:app:testDebugUnitTest --rerun-tasks` green (516 tests, 0 failures incl. new `V2ShellPartATest` 13 tests) + `assembleDebug` green (EXIT:0). Secret scan clean (no keys in diff). Glossary check: Session/Schedule/Confirmation/Task Execution/Preference/Memory/Interaction used; no History/Chat/Alarm/Cron/raw `send_email` in new UI strings.
+
+## 2026-11-24 — T2 CommandScreen IME fix & flagship polish (#100)
+
+- **Over-broad source-guard assertion (own mistake).** New `FlagshipT2CraftTest.onboardingUsesLargeTouchTargetsAndHairlineCards` asserted `assertFalse(text.contains(".border(1.dp, Theme.colors.edge"))` (`FlagshipT2CraftTest.kt:102`), which also matches the intentional 1.dp `Theme.shapes.field` wells on the two `BasicTextField` inputs (`OnboardingScreen.kt:341,447`) — the ticket only thins *card* borders to 0.5.dp. Caught by `testDebugUnitTest` (1 failure). Fixed by narrowing the guard to `".border(1.dp, Theme.colors.edge, Theme.shapes.medium)"`.
+- **Dead IME imports.** Removing the duplicate `.windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))` from the Composer wrapper (`CommandScreen.kt:297`) orphaned the `WindowInsets`, `ime`, `navigationBars`, `union`, `windowInsetsPadding` imports; removed them to keep the file warning-clean.
+- No ADR contradiction (ADRs 0001–0005 cover memory/scheduling/gmail/LLM/loop, not UI). Glossary check: Session/Memory/Confirmation/Task Execution/Preference used; "Workspace" sheet title per ticket spec, not a glossary term; zero "More options". Stock foundation only, existing 55 Icons only, no backend/Room edits.
+- Full gate: testDebugUnitTest **543/543 green** (0 failures, incl. new `FlagshipT2CraftTest` 8 tests + updated `V2ShellPartATest`) + `assembleDebug` green. Secret scan clean. One commit.
+
+## 2026-11-24 — T5 contrast/glossary/tap-target close-out (#103)
+
+- **Own mistake: unescaped regex counted the import as an inset.** First draft of `commandScreenKeepsSingleImeInset` used `".imePadding()".toRegex()` (`FlagshipUiCraftTest.kt`), where `.`/`()` are regex metas — it matched the `import ...layout.imePadding` line too (count 2, test red). Caught by the red run; fixed with literal `split(".imePadding()").size - 1 == 1`. Lesson: prefer literal splits for source-count guards.
+- **Spec imprecision, not code drift: `send_email`/`Alarm` bans are display-copy bans.** A naive `contains` check fails on purpose-built identifiers: `pendingCall.name == "send_email"` (`CommandScreen.kt:667`), `toolLabel("send_email")` (`SettingsScreen.kt:312`, mapped to "Send email" via `ToolLabels.kt:24-32` so no raw snake_case reaches UI), `exactAlarmNeeded`/`onOpenExactAlarmSettings` identifiers (`SettingsScreen.kt:70-71`, user copy reads "On-time Schedules"), and the private prefs key (`Haptics.kt:55`). The T5 glossary guard therefore scans quoted literals only, with those three non-display patterns exempted and commented. Likewise `singleLine = true` lives on the `BasicTextField` (`BrowserScreen.kt:144`) while the "Paste a link, then Go" placeholder `Text` uses `maxLines = 1` + `TextOverflow.Ellipsis` (`:151-157`) — the custom `Text` (`Text.kt:14-22`) has no `singleLine` param — so the guard pins all four tokens at file level. No ADR contradiction (ADRs 0001–0005 cover memory/scheduling/gmail/LLM/loop, not UI copy).
+- **V2 layout-bug evidence pinned by the T5 suite (all fixes landed in #99–#102, guards added here):** single IME inset (`CommandScreen.kt:145-147` `.navigationBarsPadding().imePadding()`, duplicate union removed in #100); status-bar consumption (`ScreenScaffold.kt:31-32` `statusBarsPadding` + `consumeWindowInsets(statusBars)`); gesture-aware drawer footer (`SideDrawer.kt:77-80` safeDrawing∪navigationBars∪systemGestures on Bottom + 16.dp floor; `AgentNav.kt:449` `heightIn(min = 64.dp)`); centered header pill (`ModelPill.kt`, `heightIn(min = 36.dp)`, no badge); single-line URL pill (`BrowserScreen.kt:144-145`); zero-padding fixes (`EmailConfirmationSheet.kt` no `Section(`, `ForgetMemorySheet.kt:51` `.padding(16.dp)`, `SchedulesScreen.kt:125` `fillMaxWidth().height(48.dp)` on "Preview Schedule"); last banned word `"Command options"` → `"Session actions"` (`DrawerItem.kt:46`, glossary Session term). Contrast: zero `.alpha(0.72f)` repo-wide in `ui/`; Midnight vs Daylight `background/surface/surfaceVariant/inset` tokens all distinct within and across themes (`Theme.kt:55-104`).
+- Full gate: `:app:testDebugUnitTest --rerun-tasks` **560/560 green** (0 failures; 554 at #102 + 6 new T5 guards) + `:app:assembleDebug` green (EXIT:0). Secret scan on the diff clean (no key/secret patterns). Stock foundation only, existing Icons only, zero backend/ViewModel/Room edits. One commit.

@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -73,14 +74,14 @@ fun OnboardingScreen(
                 .imePadding()
                 .padding(horizontal = 20.dp),
         ) {
-            // Top bar: 52dp — back, progress segments, Skip.
+            // Top bar: 56dp — back, progress segments, Skip.
             Row(
-                Modifier.fillMaxWidth().height(52.dp),
+                Modifier.fillMaxWidth().height(56.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (step > 0) {
                     Box(
-                        Modifier.size(40.dp)
+                        Modifier.size(48.dp)
                             .clip(Theme.shapes.fullyRounded)
                             .clickable(
                                 onClick = { step -= 1 },
@@ -96,7 +97,7 @@ fun OnboardingScreen(
                         )
                     }
                 } else {
-                    Spacer(Modifier.width(40.dp))
+                    Spacer(Modifier.width(48.dp))
                 }
                 Row(
                     Modifier.weight(1f),
@@ -114,19 +115,23 @@ fun OnboardingScreen(
                         )
                     }
                 }
-                Text(
-                    "Skip",
-                    style = Theme.typography.label,
-                    color = Theme.colors.onBackgroundMuted,
-                    modifier = Modifier
+                Box(
+                    Modifier.heightIn(min = 48.dp)
                         .clip(Theme.shapes.fullyRounded)
                         .clickable(
                             onClick = onComplete,
                             interactionSource = remember { MutableInteractionSource() },
                             indication = androidx.compose.foundation.LocalIndication.current,
                         )
-                        .padding(horizontal = 8.dp, vertical = 10.dp),
-                )
+                        .padding(horizontal = 12.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        "Skip",
+                        style = Theme.typography.label,
+                        color = Theme.colors.onBackgroundMuted,
+                    )
+                }
             }
 
             // Middle scrollable content.
@@ -186,7 +191,7 @@ private fun OnboardingWelcome() {
             Modifier.size(56.dp)
                 .clip(Theme.shapes.medium)
                 .background(Theme.colors.surface)
-                .border(1.dp, Theme.colors.edge, Theme.shapes.medium),
+                .border(0.5.dp, Theme.colors.edge, Theme.shapes.medium),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
@@ -216,7 +221,7 @@ private fun OnboardingWelcome() {
         Modifier.fillMaxWidth()
             .clip(Theme.shapes.medium)
             .background(Theme.colors.surface)
-            .border(1.dp, Theme.colors.edge, Theme.shapes.medium)
+            .border(0.5.dp, Theme.colors.edge, Theme.shapes.medium)
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
@@ -294,7 +299,7 @@ private fun OnboardingConnect(
         Modifier.fillMaxWidth()
             .clip(Theme.shapes.medium)
             .background(Theme.colors.surface)
-            .border(1.dp, Theme.colors.edge, Theme.shapes.medium)
+            .border(0.5.dp, Theme.colors.edge, Theme.shapes.medium)
             .padding(16.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -320,7 +325,7 @@ private fun OnboardingConnect(
             Button(
                 onClick = onConnectGmail,
                 variant = ButtonVariant.Secondary,
-                modifier = Modifier.fillMaxWidth().height(44.dp),
+                modifier = Modifier.fillMaxWidth().height(48.dp),
             ) {
                 Text("Connect Gmail")
             }
@@ -360,14 +365,14 @@ private fun OnboardingConnect(
                         pasted = ""
                     },
                     enabled = pasted.isNotBlank(),
-                    modifier = Modifier.weight(1f).height(44.dp),
+                    modifier = Modifier.weight(1f).height(48.dp),
                 ) {
                     Text("Use pasted link")
                 }
                 Button(
                     onClick = onDismissPasteFallback,
                     variant = ButtonVariant.Secondary,
-                    modifier = Modifier.weight(1f).height(44.dp),
+                    modifier = Modifier.weight(1f).height(48.dp),
                 ) {
                     Text("Dismiss")
                 }
@@ -382,7 +387,7 @@ private fun OnboardingConnect(
         Modifier.fillMaxWidth()
             .clip(Theme.shapes.medium)
             .background(Theme.colors.surface)
-            .border(1.dp, Theme.colors.edge, Theme.shapes.medium)
+            .border(0.5.dp, Theme.colors.edge, Theme.shapes.medium)
             .padding(16.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -467,7 +472,7 @@ private fun OnboardingConnect(
             },
             enabled = keyDraft.isNotBlank(),
             variant = ButtonVariant.Secondary,
-            modifier = Modifier.fillMaxWidth().height(44.dp),
+            modifier = Modifier.fillMaxWidth().height(48.dp),
         ) {
             Text("Save key")
         }
@@ -497,7 +502,7 @@ private fun OnboardingPermissions(
         Modifier.fillMaxWidth()
             .clip(Theme.shapes.medium)
             .background(Theme.colors.surface)
-            .border(1.dp, Theme.colors.edge, Theme.shapes.medium),
+            .border(0.5.dp, Theme.colors.edge, Theme.shapes.medium),
     ) {
         Row(
             Modifier.fillMaxWidth().padding(16.dp),

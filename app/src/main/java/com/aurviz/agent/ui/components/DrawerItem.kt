@@ -43,7 +43,7 @@ fun DrawerItem(
             .background(if (selected) Theme.colors.surfaceVariant else Color.Transparent)
             .combinedClickable(
                 role = Role.Button,
-                onLongClickLabel = if (onLongClick != null) "Command options" else null,
+                onLongClickLabel = if (onLongClick != null) "Session actions" else null,
                 onLongClick = onLongClick,
                 onClick = onClick,
             )

@@ -30,7 +30,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.toArgb
@@ -47,8 +46,9 @@ import com.aurviz.agent.ui.AgentUiState
 import com.aurviz.agent.ui.WebViewHolder
 import com.aurviz.agent.ui.components.Button
 import com.aurviz.agent.ui.components.ButtonVariant
-import com.aurviz.agent.ui.components.ChoiceTile
 import com.aurviz.agent.ui.components.Icon
+import com.aurviz.agent.ui.components.IconButton
+import com.aurviz.agent.ui.components.IconButtonSize
 import com.aurviz.agent.ui.components.Markdown
 import com.aurviz.agent.ui.components.ScreenScaffold
 import com.aurviz.agent.ui.components.StatusBanner
@@ -97,73 +97,37 @@ fun BrowserScreen(
 
     ScreenScaffold(modifier) {
         Column(Modifier.fillMaxSize()) {
-            // 52dp synced top chrome: Back / Forward / 36dp URL pill / Reload.
+            // 56dp top chrome with 48dp hit targets and a 40dp single-line URL pill.
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .height(52.dp)
-                    // Top inset comes from ScreenScaffold exactly once.
+                    .height(56.dp)
                     .padding(horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                // Far-left 36dp close target: pops the Browser back to Command.
-                Box(
-                    Modifier.size(36.dp)
-                        .clip(RoundedCornerShape(18.dp))
-                        .clickable(
-                            onClick = onBack,
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = androidx.compose.foundation.LocalIndication.current,
-                        ),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        Icons.X,
-                        contentDescription = "Close Browser",
-                        modifier = Modifier.size(20.dp),
-                        tint = Theme.colors.onBackground,
-                    )
+                IconButton(onClick = onBack, contentDescription = "Close Browser", size = IconButtonSize.Small) {
+                    Icon(Icons.X, contentDescription = null, modifier = Modifier.size(20.dp), tint = Theme.colors.onBackground)
                 }
-                Box(
-                    Modifier.size(36.dp)
-                        .alpha(if (chrome.canGoBack) 1f else 0.4f)
-                        .clip(RoundedCornerShape(18.dp))
-                        .clickable(
-                            onClick = { WebViewHolder.goBack() },
-                            enabled = chrome.canGoBack,
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = androidx.compose.foundation.LocalIndication.current,
-                        ),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(Icons.CaretLeft, contentDescription = "Back", modifier = Modifier.size(22.dp))
+                IconButton(onClick = { WebViewHolder.goBack() }, contentDescription = "Back", enabled = chrome.canGoBack, size = IconButtonSize.Small) {
+                    Icon(Icons.CaretLeft, contentDescription = null, modifier = Modifier.size(20.dp))
                 }
                 if (chrome.canGoForward) {
-                    Box(
-                        Modifier.size(36.dp)
-                            .clip(RoundedCornerShape(18.dp))
-                            .clickable(
-                                onClick = { WebViewHolder.goForward() },
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = androidx.compose.foundation.LocalIndication.current,
-                            ),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(Icons.CaretRight, contentDescription = "Forward", modifier = Modifier.size(22.dp))
+                    IconButton(onClick = { WebViewHolder.goForward() }, contentDescription = "Forward", size = IconButtonSize.Small) {
+                        Icon(Icons.CaretRight, contentDescription = null, modifier = Modifier.size(20.dp))
                     }
                 }
-                // 36dp URL pill: lock for an open https page, globe otherwise.
+                // 40dp URL pill: lock for an open https page, globe otherwise.
                 // Text syncs to the open page; typing + Go opens a new page.
                 Row(
                     Modifier
                         .weight(1f)
-                        .height(36.dp)
-                        .clip(RoundedCornerShape(18.dp))
+                        .height(40.dp)
+                        .clip(RoundedCornerShape(20.dp))
                         .background(Theme.colors.surfaceVariant)
-                        .padding(horizontal = 10.dp),
+                        .padding(horizontal = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(Space * 2),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Icon(
                         if (chrome.showSecureIcon) Icons.LockSimple else Icons.Globe,
@@ -175,17 +139,18 @@ fun BrowserScreen(
                         value = url,
                         onValueChange = { url = it },
                         modifier = Modifier.weight(1f),
-                        textStyle = Theme.typography.body.copy(color = Theme.colors.onSurfaceVariant),
+                        textStyle = Theme.typography.label.copy(color = Theme.colors.onSurfaceVariant),
                         cursorBrush = SolidColor(Theme.colors.primary),
                         singleLine = true,
                         maxLines = 1,
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
                         keyboardActions = KeyboardActions(onGo = { onOpenUrl(url) }),
                         decorationBox = { field ->
-                            Box {
+                            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
                                 if (url.isEmpty()) {
                                     Text(
-                                        "Enter URL",
+                                        "Paste a link, then Go",
+                                        style = Theme.typography.label,
                                         color = Theme.colors.onBackgroundMuted,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
@@ -196,19 +161,8 @@ fun BrowserScreen(
                         },
                     )
                 }
-                Box(
-                    Modifier.size(36.dp)
-                        .alpha(if (chrome.canReload) 1f else 0.4f)
-                        .clip(RoundedCornerShape(18.dp))
-                        .clickable(
-                            onClick = { WebViewHolder.reload() },
-                            enabled = chrome.canReload,
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = androidx.compose.foundation.LocalIndication.current,
-                        ),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(Icons.ArrowClockwise, contentDescription = "Reload", modifier = Modifier.size(20.dp))
+                IconButton(onClick = { WebViewHolder.reload() }, contentDescription = "Reload", enabled = chrome.canReload, size = IconButtonSize.Small) {
+                    Icon(Icons.ArrowClockwise, contentDescription = null, modifier = Modifier.size(20.dp))
                 }
             }
 
@@ -233,31 +187,40 @@ fun BrowserScreen(
             }
 
             if (chrome.showEmptyState) {
-                // Vertically centered empty state: the WebView stays unmounted
+                // Optically centered empty state: the WebView stays unmounted
                 // while no page is open, so Midnight never flashes white.
-                Column(
+                Box(
                     Modifier.weight(1f).fillMaxSize().padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Icon(
-                        Icons.Globe,
-                        contentDescription = null,
-                        modifier = Modifier.size(40.dp),
-                        tint = Theme.colors.onBackgroundMuted,
-                    )
-                    Text(
-                        "No page open yet",
-                        style = Theme.typography.title.copy(textAlign = TextAlign.Center),
-                        color = Theme.colors.onBackground,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Text(
-                        "Ask the Agent to open a link, or paste one above.",
-                        color = Theme.colors.onBackgroundMuted,
-                        style = Theme.typography.body.copy(textAlign = TextAlign.Center),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Box(
+                            Modifier.size(56.dp)
+                                .clip(Theme.shapes.fullyRounded)
+                                .background(Theme.colors.surfaceVariant),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                Icons.Globe,
+                                contentDescription = null,
+                                modifier = Modifier.size(26.dp),
+                                tint = Theme.colors.primary,
+                            )
+                        }
+                        Text(
+                            "No page open yet",
+                            style = Theme.typography.title.copy(textAlign = TextAlign.Center),
+                            color = Theme.colors.onBackground,
+                        )
+                        Text(
+                            "Ask the Agent to open a link, or paste one above.",
+                            style = Theme.typography.body.copy(textAlign = TextAlign.Center),
+                            color = Theme.colors.onBackgroundMuted,
+                        )
+                    }
                 }
             } else {
                 val pageBackground = Theme.colors.background.toArgb()
@@ -289,32 +252,39 @@ fun BrowserScreen(
                 )
                 Row(
                     Modifier.fillMaxWidth()
-                        .padding(horizontal = Space * 4, vertical = Space * 2),
-                    horizontalArrangement = Arrangement.spacedBy(Space * 2),
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Theme.colors.surfaceVariant)
+                        .padding(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    ChoiceTile(
-                        selected = panel == "Page",
-                        onClick = { panel = "Page" },
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text("Page", style = Theme.typography.label)
-                    }
-                    ChoiceTile(
-                        selected = panel == "Text",
-                        onClick = { panel = "Text" },
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text("Text", style = Theme.typography.label)
-                    }
-                    ChoiceTile(
-                        selected = panel == "Links",
-                        onClick = { panel = "Links" },
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text(
-                            "Links (${page?.links?.size ?: 0})",
-                            style = Theme.typography.label,
-                        )
+                    listOf(
+                        "Page" to "Page",
+                        "Text" to "Text",
+                        "Links" to "Links (${page?.links?.size ?: 0})",
+                    ).forEach { (key, label) ->
+                        val selected = panel == key
+                        Box(
+                            Modifier.weight(1f)
+                                .heightIn(min = 40.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (selected) Theme.colors.surface else androidx.compose.ui.graphics.Color.Transparent)
+                                .clickable(
+                                    onClick = { panel = key },
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = androidx.compose.foundation.LocalIndication.current,
+                                )
+                                .padding(horizontal = 8.dp, vertical = 8.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                label,
+                                style = Theme.typography.label,
+                                color = if (selected) Theme.colors.onSurface else Theme.colors.onBackgroundMuted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     }
                 }
 

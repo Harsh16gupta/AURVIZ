@@ -56,10 +56,10 @@ fun Composer(
     Row(
         modifier
             .fillMaxWidth()
-            .heightIn(min = 48.dp, max = 56.dp)
-            .clip(RoundedCornerShape(50))
+            .heightIn(min = 52.dp)
+            .clip(RoundedCornerShape(26.dp))
             .background(Theme.colors.composer)
-            .border(1.dp, Theme.colors.composerRing, RoundedCornerShape(50))
+            .border(1.dp, Theme.colors.composerRing, RoundedCornerShape(26.dp))
             .padding(horizontal = 6.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space),

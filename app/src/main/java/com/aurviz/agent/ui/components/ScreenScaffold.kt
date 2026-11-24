@@ -3,7 +3,10 @@ package com.aurviz.agent.ui.components
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -21,7 +24,13 @@ fun ScreenScaffold(
 ) {
     // Top inset lives here so every destination (Page AppBar included)
     // clears the status bar; bottom/IME insets are handled per screen.
-    Box(Modifier.fillMaxSize().background(Theme.colors.background).statusBarsPadding()) {
+    Box(
+        modifier
+            .fillMaxSize()
+            .background(Theme.colors.background)
+            .statusBarsPadding()
+            .consumeWindowInsets(WindowInsets.statusBars),
+    ) {
         ProvideContentColor(Theme.colors.onBackground) { content() }
     }
 }

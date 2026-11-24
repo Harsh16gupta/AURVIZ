@@ -190,6 +190,22 @@ data class InteractionRecord(
     val failed: Boolean = false,
 )
 
+// Ticket #70 Gap B: settled cards render receipt titles (ConfirmationReceipt),
+// so the Remember Preference grant can no longer parse the recipient out of
+// the title prefix alone. Legacy records still carry "Send email to <addr>";
+// current records carry the receipt title plus the executed send step, whose
+// argsSummary holds the effective (possibly edited) "to:" value. JVM-tested
+// in CommandPlanUiTest. Null when no send address is recoverable.
+fun rememberAddressFor(record: InteractionRecord): String? {
+    val legacyPrefix = "Send email to "
+    val legacy = record.confirmationTitle?.takeIf { it.startsWith(legacyPrefix) }
+        ?.removePrefix(legacyPrefix)?.split(",")?.firstOrNull()?.trim()?.takeIf { it.contains("@") }
+    if (legacy != null) return legacy
+    val summary = record.steps.firstOrNull { it.toolName == "send_email" }?.argsSummary ?: return null
+    return summary.split(",").map { it.trim() }.firstOrNull { it.startsWith("to:") }
+        ?.substringAfter("to:")?.trim()?.split(Regex("\\s+"))?.firstOrNull()?.trim()?.takeIf { it.contains("@") }
+}
+
 data class AgentUiState(
     val inputText: String = "",
     val statusLine: String = "Type a command to begin.",
@@ -208,6 +224,11 @@ data class AgentUiState(
     val pendingForget: List<Memory> = emptyList(),
     val pendingSchedule: ParsedSchedule? = null,
     val schedulePreview: String = "",
+    // Ticket #69 (part of #65 T4): the typed/voice `unschedule` fast path
+    // publishes the resolved Schedule here for an explicit Stop/Discard
+    // Confirmation card — no silent disarm. The screen's inline row keeps
+    // its own Delete/Keep confirm and never touches this slot.
+    val pendingUnschedule: Schedule? = null,
     // Ticket 12/25: the loop's live Confirmation card (GLOSSARY
     // Confirmation). NeedsApproval raises pendingApproval with the
     // unseen flags computed at raise time; StepDone clears it.

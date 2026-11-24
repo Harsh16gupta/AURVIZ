@@ -94,9 +94,33 @@ fun parseSchedule(text: String): ParsedSchedule? {
 
 // The "Save?" line the screen shows before saving, so a misparse is caught.
 fun formatSchedulePreview(parsed: ParsedSchedule): String {
-    val time = "%d:%02d".format(parsed.hour, parsed.minute)
     val when_ = if (parsed.days == null) "Every day" else "On days ${parsed.days.sorted().joinToString(",")}"
-    return "Save? $when_ at $time — ${parsed.instruction}"
+    return "Save? $when_ at ${formatScheduleTime(parsed.hour, parsed.minute)} — ${parsed.instruction}"
+}
+
+// Shared HH:MM shape for both preview lines so the two framings cannot drift.
+fun formatScheduleTime(hour: Int, minute: Int): String = "%d:%02d".format(hour, minute)
+
+// Ticket #69 (part of #65 T4): the typed/voice `unschedule <id>` fast path
+// is preview-gated like create — no silent disarm. Pure helpers behind
+// the ViewModel's pendingUnschedule card: normalize the typed id, resolve
+// it against the store list, render the Stop? line. The screen's inline
+// row keeps its own Delete/Keep confirm and deletes directly.
+fun normalizeScheduleId(raw: String): String {
+    val trimmed = raw.trim()
+    return if (trimmed.startsWith("sched_")) trimmed else "sched_$trimmed"
+}
+
+fun findScheduleByRawId(schedules: List<Schedule>, rawId: String): Schedule? {
+    val id = normalizeScheduleId(rawId)
+    return schedules.find { it.id == id }
+}
+
+// The "Stop?" line the screen shows before disarming, so a misheard id
+// is caught. Same time shape as the create preview.
+fun formatUnschedulePreview(schedule: Schedule): String {
+    val time = formatScheduleTime(schedule.hour, schedule.minute)
+    return "Stop? ${schedule.id} — ${schedule.instruction} at $time"
 }
 
 // --- Seam B: the notebook for routines. ---

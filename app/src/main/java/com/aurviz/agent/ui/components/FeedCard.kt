@@ -12,7 +12,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
-import com.aurviz.agent.ui.theme.Space
 import com.aurviz.agent.ui.theme.Theme
 
 // Shared feed-card primitive (Signal p02 grouped-card rhythm): one card
@@ -29,8 +28,8 @@ fun FeedCard(
             .clip(RoundedCornerShape(16.dp))
             .background(Theme.colors.card)
             .border(0.5.dp, Theme.colors.edge, RoundedCornerShape(16.dp))
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(Space * 2),
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
         content = content,
     )
 }

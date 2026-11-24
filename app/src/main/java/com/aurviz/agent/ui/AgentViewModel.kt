@@ -14,6 +14,8 @@ import com.aurviz.agent.AgentLoopResult
 import com.aurviz.agent.AppMigrations
 import com.aurviz.agent.ApprovalDecision
 import com.aurviz.agent.ApprovalGate
+import com.aurviz.agent.ConfirmationOutcome
+import com.aurviz.agent.GatedExecution
 import com.aurviz.agent.InMemoryAllowAlwaysStore
 import com.aurviz.agent.allowAlwaysEligible
 import com.aurviz.agent.BuildConfig
@@ -54,18 +56,19 @@ import com.aurviz.agent.cancelRoutineAlarm
 import com.aurviz.agent.cancelRoutineWork
 import com.aurviz.agent.codeChallenge
 import com.aurviz.agent.composeEmail
-import com.aurviz.agent.confirmationDetailFor
-import com.aurviz.agent.confirmationTitleFor
 import com.aurviz.agent.createSchedule
 import com.aurviz.agent.defaultCandidates
 import com.aurviz.agent.defaultToolRegistry
 import com.aurviz.agent.deleteSchedule
 import com.aurviz.agent.effectiveSettings
+import com.aurviz.agent.findScheduleByRawId
 import com.aurviz.agent.formatSchedulePreview
+import com.aurviz.agent.formatUnschedulePreview
 import com.aurviz.agent.firstConfiguredProvider
 import com.aurviz.agent.forgetPreview
 import com.aurviz.agent.knownAddressesFromInbox
 import com.aurviz.agent.listSchedules
+import com.aurviz.agent.normalizeScheduleId
 import com.aurviz.agent.onApprovedWrite
 import com.aurviz.agent.ScheduleSideEffect
 import com.aurviz.agent.newCodeVerifier
@@ -77,6 +80,7 @@ import com.aurviz.agent.refreshBatteryNeeded
 import com.aurviz.agent.scheduleTimingNote
 import com.aurviz.agent.settingsFromBuildConfig
 import com.aurviz.agent.recallFor
+import com.aurviz.agent.receiptForGated
 import com.aurviz.agent.registerRoutineAlarm
 import com.aurviz.agent.rejectPendingApproval
 import com.aurviz.agent.rememberFact
@@ -455,9 +459,6 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun confirmationTextFor(call: ToolCall, args: Map<String, Any?> = call.arguments): Pair<String, String> =
-        confirmationTitleFor(call, args) to confirmationDetailFor(call, args)
-
     fun cancelRun() {
         state.value.pendingApprovalProposalId?.let { proposalId ->
             if (state.value.pendingApproval?.id != null) {
@@ -699,12 +700,15 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                     perf = it.perf.recordRun(toolMs = ms, success = sent),
                 )
             }
+            // Ticket #70 Gap B: stamp the settled receipt from the real gated
+            // execution — a policy denial stamps DENIED, not Approved.
+            val receipt = receiptForGated(call, gated)
             recordCompleted(
                 responseText = if (sent) "Sent ✓" else (error ?: "Not sent."),
                 failed = !sent,
-                confirmTitle = "Send email to ${to.trim()}",
-                confirmDetail = "To: ${to.trim()}\nSubject: $subject\n$body",
-                confirmStatus = ConfirmationStatus.Approved,
+                confirmTitle = receipt.title,
+                confirmDetail = receipt.detail,
+                confirmStatus = if (receipt.outcome == ConfirmationOutcome.DENIED) ConfirmationStatus.Denied else ConfirmationStatus.Approved,
             )
             if (activeJob === emailJob) activeJob = null
         }
@@ -714,12 +718,19 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
     fun rejectEmail() {
         val draft = state.value.pendingEmail
         _state.update { it.copy(pendingEmail = null, statusLine = "Not sent.") }
-        val detail = draft?.let { "To: ${it.to.joinToString()}\nSubject: ${it.subject}\n${it.body}" }
+        // Ticket #70 Gap B: stamp the settled DENIED receipt for the draft
+        // that never ran. Steps stay empty — nothing executed — so the
+        // Remember Preference grant (steps-derived) correctly stays hidden.
+        val deniedCall = draft?.let { ToolCall("ui_reject", "send_email", mapOf("to" to it.to.joinToString(), "subject" to it.subject, "body" to it.body)) }
+        val receipt = deniedCall?.let {
+            receiptForGated(it, GatedExecution(ToolResult.Success(mapOf("status" to "cancelled_by_user")), it.arguments, approved = false))
+        }
         recordCompleted(
             responseText = "Not sent.",
-            confirmTitle = draft?.let { "Send email to ${it.to.joinToString()}" },
-            confirmDetail = detail,
-            confirmStatus = ConfirmationStatus.Denied,
+            steps = emptyList(),
+            confirmTitle = receipt?.title,
+            confirmDetail = receipt?.detail,
+            confirmStatus = if (receipt == null) null else ConfirmationStatus.Denied,
         )
     }
 
@@ -749,8 +760,8 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                 it.copy(
                     authUrl = url,
                     pasteFallbackVisible = true,
-                    loopbackHint = "Waiting for Google approval… (finish in the newest browser tab)",
-                    statusLine = "Waiting for Google approval… (finish in the newest browser tab)",
+                    loopbackHint = "Waiting for Google confirmation… (finish in the newest browser tab)",
+                    statusLine = "Waiting for Google confirmation… (finish in the newest browser tab)",
                 )
             }
             val code = receiver.waitForCode()
@@ -796,7 +807,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         }
         lastExchangedCode = code
         signInDone = true
-        _state.update { it.copy(statusLine = "Got approval — finishing sign-in…") }
+        _state.update { it.copy(statusLine = "Confirmed — finishing sign-in…") }
         viewModelScope.launch(Dispatchers.IO) {
             var attempt = 0
             while (true) {
@@ -1099,17 +1110,17 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun approveHeldWrite(id: String) {
-        _state.update { it.copy(statusLine = "Running approved write…") }
+        _state.update { it.copy(statusLine = "Running confirmed write…") }
         viewModelScope.launch(Dispatchers.IO) {
             val registry = defaultToolRegistry(gmailApi = gmail, scheduleStore = scheduleStore, memoryStore = roomStore)
             when (val outcome = approvePendingApproval(RoomPendingApprovalStore(db.approvals()), id, registry)) {
                 is PendingApprovalOutcome.Executed -> {
                     if (outcome.result is ToolResult.Success) {
                         syncAlarmsForApproved(outcome.approval, outcome.result)
-                        _state.update { it.copy(statusLine = "Approved — ran ${outcome.approval.toolName} ✓") }
+                        _state.update { it.copy(statusLine = "Confirmed — ran ${outcome.approval.toolName} ✓") }
                     } else {
                         val error = (outcome.result as ToolResult.Failure).error
-                        _state.update { it.copy(statusLine = "Approved but failed: $error") }
+                        _state.update { it.copy(statusLine = "Confirmed but failed: $error") }
                     }
                 }
                 is PendingApprovalOutcome.Rejected ->
@@ -1181,25 +1192,70 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // Ticket #69 (part of #65 T4): the typed/voice `unschedule` fast path
+    // is preview-gated like create — resolving the id publishes a Stop?
+    // card, and only approve disarms. Unknown ids fail with guidance to
+    // list, same as before. The screen's inline row confirms Delete/Keep
+    // itself and deletes through unschedule() below, never this slot.
     private fun handleUnschedule(raw: String) {
-        val id = raw.trim().let { if (it.startsWith("sched_")) it else "sched_$it" }
         viewModelScope.launch(Dispatchers.IO) {
-            val known = listSchedules(scheduleStore).any { it.id == id }
-            if (!known) {
-                _state.update { it.copy(statusLine = "No Schedule $id.") }
-                recordCompleted(responseText = "No Schedule $id.", failed = true)
+            val target = findScheduleByRawId(listSchedules(scheduleStore), raw)
+            if (target == null) {
+                _state.update {
+                    it.copy(
+                        statusLine = "No Schedule ${normalizeScheduleId(raw)}. Say 'schedules' to list them.",
+                        pendingUnschedule = null,
+                    )
+                }
+                recordCompleted(responseText = "No Schedule ${normalizeScheduleId(raw)}.", failed = true)
                 return@launch
             }
-            deleteSchedule(scheduleStore, id)
-            cancelRoutineWork(getApplication(), id)
-            cancelRoutineAlarm(getApplication(), id)
-            refreshSchedules()
-            _state.update { it.copy(statusLine = "Schedule $id stopped.") }
-            recordCompleted(responseText = "Schedule $id stopped.")
+            val preview = formatUnschedulePreview(target)
+            _state.update {
+                it.copy(
+                    pendingUnschedule = target,
+                    statusLine = "$preview — review in Schedules.",
+                )
+            }
+            recordCompleted(responseText = preview)
         }
     }
 
-    fun unschedule(id: String) = handleUnschedule(id.removePrefix("sched_"))
+    fun approveUnschedule() {
+        val target = _state.value.pendingUnschedule ?: return
+        _state.update { it.copy(pendingUnschedule = null, statusLine = "Stopping Schedule…") }
+        viewModelScope.launch(Dispatchers.IO) {
+            disarmSchedule(target.id)
+            _state.update { it.copy(statusLine = "Schedule ${target.id} stopped.") }
+            recordCompleted(responseText = "Schedule ${target.id} stopped.")
+        }
+    }
+
+    fun rejectUnschedule() {
+        _state.update { it.copy(pendingUnschedule = null, statusLine = "Schedule kept.") }
+        recordCompleted(responseText = "Schedule kept.")
+    }
+
+    // Shared disarm: delete the row plus cancel alarm/work, then refresh.
+    // Both the approved command-path card and the screen's inline-confirmed
+    // row funnel through here — the Confirmation happens before the call.
+    private fun disarmSchedule(id: String) {
+        deleteSchedule(scheduleStore, id)
+        cancelRoutineWork(getApplication(), id)
+        cancelRoutineAlarm(getApplication(), id)
+        refreshSchedules()
+    }
+
+    // Screen inline-delete path: the row already confirmed Delete/Keep, so
+    // this disarms immediately. The typed/voice command path above always
+    // previews first. Unknown here means a lost race with another delete —
+    // nothing to disarm, and the list is already fresh, so stay silent.
+    fun unschedule(id: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val target = findScheduleByRawId(listSchedules(scheduleStore), id) ?: return@launch
+            disarmSchedule(target.id)
+        }
+    }
 
     private fun refreshSchedules(showLine: Boolean = false) {
         viewModelScope.launch(Dispatchers.IO) {
@@ -1289,26 +1345,38 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
     @Volatile
     private var currentRunId: Long? = null
 
+    private fun stampReceipt(call: ToolCall, gated: GatedExecution, status: ConfirmationStatus) {
+        val receipt = receiptForGated(call, gated)
+        stampConfirmation(receipt.title, receipt.detail, status)
+    }
+
     fun approvePendingSend(proposalId: String) {
         state.value.pendingApproval?.let { call ->
-            val (title, detail) = confirmationTextFor(call)
-            stampConfirmation(title, detail, ConfirmationStatus.Approved)
+            // The tap confirms the exact card, so effective args equal the
+            // call args → the settled CARD_APPROVED receipt.
+            stampReceipt(call, GatedExecution(ToolResult.Success(mapOf("status" to "confirmed")), call.arguments, approved = true), ConfirmationStatus.Approved)
         }
         approvalGate.resolve(proposalId, ApprovalDecision.Approved)
     }
 
     fun approvePendingSendEdited(proposalId: String, args: Map<String, Any?>) {
         state.value.pendingApproval?.let { call ->
-            val (title, detail) = confirmationTextFor(call, args)
-            stampConfirmation(title, detail, ConfirmationStatus.Approved)
+            // The tap confirms with edited details, so they are what runs
+            // → the settled EDITED_APPROVED receipt.
+            stampReceipt(call, GatedExecution(ToolResult.Success(mapOf("status" to "confirmed")), args, approved = true), ConfirmationStatus.Approved)
         }
         approvalGate.resolve(proposalId, ApprovalDecision.ApprovedWithEdit(args))
     }
 
     fun rejectPendingSend(proposalId: String) {
         state.value.pendingApproval?.let { call ->
-            val (title, detail) = confirmationTextFor(call)
-            stampConfirmation(title, detail, ConfirmationStatus.Denied)
+            // Reject lands as cancelled_by_user with nothing executed →
+            // the settled DENIED receipt.
+            stampReceipt(
+                call,
+                GatedExecution(ToolResult.Success(mapOf("status" to "cancelled_by_user")), call.arguments, approved = false),
+                ConfirmationStatus.Denied,
+            )
         }
         approvalGate.resolve(proposalId, ApprovalDecision.Rejected)
     }
@@ -1369,7 +1437,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                             pendingApproval = call,
                             pendingApprovalProposalId = ticket.proposalId,
                             pendingApprovalUnseen = unseen,
-                            statusLine = "Command: $cmd\nAgent: needs approval: ${call.name}",
+                            statusLine = "Command: $cmd\nAgent: needs confirmation: ${call.name}",
                         )
                     }
                     // Bounded wait: expiry becomes TimedOut (cancelled_by_user),
@@ -1402,7 +1470,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                             when (event) {
                                 is AgentEvent.StepStarted -> "thinking…"
                                 is AgentEvent.ToolRunning -> "running ${event.call.name}…"
-                                is AgentEvent.NeedsApproval -> "needs approval: ${event.call.name}"
+                                is AgentEvent.NeedsApproval -> "needs confirmation: ${event.call.name}"
                                 is AgentEvent.StepDone -> "ran ${event.call.name}"
                                 is AgentEvent.Failed -> "failed: ${event.error}"
                             }

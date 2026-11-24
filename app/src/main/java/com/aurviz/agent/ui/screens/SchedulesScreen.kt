@@ -29,14 +29,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.aurviz.agent.ToolCall
-import com.aurviz.agent.approvalCardFor
-import com.aurviz.agent.knownAddressesFromInbox
+import com.aurviz.agent.formatUnschedulePreview
 import com.aurviz.agent.nextFireTime
-import com.aurviz.agent.toolLabel
+import com.aurviz.agent.receiptForHeld
 import com.aurviz.agent.ui.AgentUiState
 import com.aurviz.agent.ui.components.Button
 import com.aurviz.agent.ui.components.ButtonVariant
+import com.aurviz.agent.ui.components.CardDivider
 import com.aurviz.agent.ui.components.ConfirmationCard
 import com.aurviz.agent.ui.components.EmptyState
 import com.aurviz.agent.ui.components.FeedCard
@@ -71,6 +70,8 @@ fun SchedulesScreen(
     onPreviewSchedule: (String) -> Unit,
     onApproveSchedule: () -> Unit,
     onRejectSchedule: () -> Unit,
+    onApproveUnschedule: () -> Unit,
+    onRejectUnschedule: () -> Unit,
     onUnschedule: (String) -> Unit,
     onApproveHeldWrite: (String) -> Unit,
     onRejectHeldWrite: (String) -> Unit,
@@ -105,8 +106,8 @@ fun SchedulesScreen(
     Page(title = "Schedules", modifier = modifier, onBack = onBack) {
         Section("New Schedule") {
             Column(
-                Modifier.padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                Modifier.fillMaxWidth().padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 TextField(
                     value = draft,
@@ -121,11 +122,22 @@ fun SchedulesScreen(
                 )
                 Button(
                     onClick = { onPreviewSchedule(draft) },
-                    modifier = Modifier.height(44.dp),
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
                 ) {
                     Text("Preview Schedule")
                 }
             }
+        }
+        if (state.pendingUnschedule != null) {
+            ConfirmationCard(
+                toolLabel = "cancel_schedule",
+                title = "Stop Schedule",
+                detail = formatUnschedulePreview(state.pendingUnschedule),
+                approveLabel = "Stop schedule",
+                denyLabel = "Keep",
+                onApprove = onApproveUnschedule,
+                onDeny = onRejectUnschedule,
+            )
         }
         if (state.pendingSchedule != null) {
             ConfirmationCard(
@@ -150,7 +162,11 @@ fun SchedulesScreen(
                     message = "Describe one above — the Agent previews the time before saving.",
                 )
             } else {
-                state.schedules.forEach { schedule ->
+                Column(
+                    Modifier.fillMaxWidth().padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    state.schedules.forEach { schedule ->
                     val enabled = schedule.id !in state.disabledScheduleIds
                     val next = nextFireTime(schedule, ZoneId.systemDefault(), nowTick)
                     val nextText = next?.format(DateTimeFormatter.ofPattern("EEE MMM d HH:mm")) ?: "—"
@@ -250,12 +266,13 @@ fun SchedulesScreen(
                             }
                         }
                     }
+                    }
                 }
             }
         }
         // Writes from unattended runs held for the user: approve runs the
         // held call exactly once, reject drops it untouched.
-        Section("Approvals") {
+        Section("Pending confirmations") {
             if (state.pendingApprovals.isEmpty()) {
                 Text(
                     "Nothing waiting — blocked Schedule writes appear here.",
@@ -264,34 +281,30 @@ fun SchedulesScreen(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
                 )
             } else {
-                val known = knownAddressesFromInbox(state.emails)
-                state.pendingApprovals.forEach { held ->
-                    val card =
-                        approvalCardFor(ToolCall(held.id, held.toolName, held.arguments), known)
-                    val title: String
-                    val detail: String
-                    if (card != null) {
-                        val to = card.to.joinToString { it.address }
-                        title = "Send email to $to"
-                        detail = "To: $to\nSubject: ${card.subject}\n${card.body}"
-                    } else {
-                        title = "${toolLabel(held.toolName)} (Schedule ${held.scheduleId})"
-                        detail = held.arguments.entries.joinToString("\n") { (k, v) -> "$k: $v" }
+                Column(
+                    Modifier.fillMaxWidth().padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    state.pendingApprovals.forEach { held ->
+                        // Ticket #70 Gap B: the held row renders the settled HELD
+                        // receipt (receiptForHeld) — title/detail come from the
+                        // receipt model, not the old approvalCardFor derivation.
+                        val receipt = receiptForHeld(held)
+                        ConfirmationCard(
+                            toolLabel = held.toolName,
+                            title = receipt.title,
+                            detail = receipt.detail,
+                            approveLabel = "Confirm",
+                            denyLabel = "Deny",
+                            onApprove = { onApproveHeldWrite(held.id) },
+                            onDeny = { onRejectHeldWrite(held.id) },
+                        )
+                        Text(
+                            held.reason,
+                            color = Theme.colors.onBackgroundMuted,
+                            style = Theme.typography.caption,
+                        )
                     }
-                    ConfirmationCard(
-                        toolLabel = held.toolName,
-                        title = title,
-                        detail = detail,
-                        approveLabel = "Approve",
-                        denyLabel = "Deny",
-                        onApprove = { onApproveHeldWrite(held.id) },
-                        onDeny = { onRejectHeldWrite(held.id) },
-                    )
-                    Text(
-                        held.reason,
-                        color = Theme.colors.onBackgroundMuted,
-                        style = Theme.typography.caption,
-                    )
                 }
             }
         }
@@ -304,10 +317,14 @@ fun SchedulesScreen(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
                 )
             } else {
-                state.scheduleRuns.take(10).forEach { run ->
-                    val ok = run.status == "SUCCESS"
-                    FeedCard(modifier = Modifier.heightIn(min = 64.dp)) {
+                Column(Modifier.fillMaxWidth()) {
+                    state.scheduleRuns.take(10).forEachIndexed { index, run ->
+                        if (index > 0) CardDivider()
+                        val ok = run.status == "SUCCESS"
                         Row(
+                            modifier = Modifier.fillMaxWidth()
+                                .heightIn(min = 64.dp)
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(Space * 3),
                         ) {
