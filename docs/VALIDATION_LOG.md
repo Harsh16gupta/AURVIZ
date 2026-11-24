@@ -2,6 +2,36 @@
 
 Every case where the AI was wrong and how it was caught. Add an entry with file:line evidence before moving on.
 
+## 2026-11-24 — Issue #83 LLM seam 2/3 contract shim names (`main`)
+
+- **Substring grep over-counts the old names.** Plain
+  `FallbackChatLlm|HeadlessChatLlm` matches all 19 `PinnedFallbackChatLlm`
+  sites, so it cannot prove deletion. Caught by inspecting the hit list
+  (`ChatFallback.kt:16`, `AgentViewModel.kt:1196`,
+  `ScheduleWork.kt:125,132`, plus pinning/wire tests) — every hit carries
+  the `Pinned` prefix. Negative check
+  `grep -v PinnedFallbackChatLlm` returns zero, which is the real gate.
+- **Shim deletion orphans imports and `open`.** Removing `FallbackChatLlm`
+  (`AgentViewModel.kt:149-152`) left `import org.json.JSONArray`
+  (`AgentViewModel.kt:95`) unused, and removing `HeadlessChatLlm`
+  (`ScheduledRun.kt:431-434`) left `import org.json.JSONArray`
+  (`ScheduledRun.kt:3`) unused; `open` on `PinnedFallbackChatLlm`
+  (`ChatFallback.kt:16`) no longer has subclasses. Fixed by deleting both
+  imports and sealing the class. `:app:compileDebugKotlin` +
+  `:app:compileDebugUnitTestKotlin` green after.
+- **Secret-scan literal vs BuildConfig reference.** Naive key-pattern grep
+  flags `LlmProvider.kt:256` (`BuildConfig.META_API_KEY`) — a vault-backed
+  reference, not a literal. Caught by reading the line; diff-content scan
+  (`git diff -- app/src` for added key literals) is clean, which is the
+  correct gate.
+- Tests: full `:app:testDebugUnitTest` green (455 tests, 0 failures,
+  0 errors). Foreground (`AgentViewModel.kt:1196`) and Worker
+  (`ScheduleWork.kt:125,132`) construct `PinnedFallbackChatLlm` directly;
+  same candidates order, same injected Tool views, no behavior change.
+  Glossary check: Task Execution / Schedule / Confirmation / PendingApproval
+  used per `GLOSSARY.md`; no ADR conflict (shim deletion is #81's decided
+  follow-up).
+
 ## 2026-11-24 — Issue #82 LLM seam 1/3 expand (`main`)
 
 - **Open property with private setter does not compile.** First

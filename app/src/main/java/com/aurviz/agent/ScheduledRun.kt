@@ -1,6 +1,5 @@
 package com.aurviz.agent
 
-import org.json.JSONArray
 import org.json.JSONObject
 
 // Ticket 17/24: scheduled-run deferral seam (ADR-0002, gaps §3E). A
@@ -423,15 +422,6 @@ private fun blockedScheduledTool(name: String): ToolResult =
         "tool '$name' never runs in scheduled runs: recorded for a Confirmation decision instead; nothing ran",
         retryable = false,
     )
-
-// Scheduled shim over the unified pinned-fallback seam. Same class as the
-// foreground chat; only the injected registry view differs (read-only).
-// Kept as a one-line subclass so Worker/tests imports keep working;
-// deleted in follow-up.
-class HeadlessChatLlm(
-    candidates: List<NamedProvider>,
-    tools: JSONArray = JSONArray(),
-) : PinnedFallbackChatLlm(candidates, tools)
 
 // What the summary note says: the loop's answer (or its error), plus
 // how many attempted writes are waiting for a Confirmation decision, plus the retry

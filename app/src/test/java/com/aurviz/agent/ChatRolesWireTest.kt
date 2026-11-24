@@ -1,6 +1,5 @@
 package com.aurviz.agent
 
-import com.aurviz.agent.ui.FallbackChatLlm
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Response
@@ -44,7 +43,7 @@ class ChatRolesWireTest {
     fun chatSendsStructuredRolesAndKeepsInjectionInToolResult() {
         val captured = mutableListOf<String>()
         val http = OpenAiChatProvider("https://example.com", "k", "m", capturingClient(captured))
-        val chat = FallbackChatLlm(listOf(NamedProvider("gemini", "k", http)))
+        val chat = PinnedFallbackChatLlm(listOf(NamedProvider("gemini", "k", http)))
         val messages =
             listOf(
                 ChatMessage(role = "system", content = buildSystemPrompt(listOf(Memory("m1", "boss is Priya", "you")))),
@@ -88,7 +87,7 @@ class ChatRolesWireTest {
     fun headlessChatSendsStructuredRolesOverHttp() {
         val captured = mutableListOf<String>()
         val http = OpenAiChatProvider("https://example.com", "k", "m", capturingClient(captured))
-        val chat = HeadlessChatLlm(listOf(NamedProvider("gemini", "k", http)))
+        val chat = PinnedFallbackChatLlm(listOf(NamedProvider("gemini", "k", http)))
         chat.chat(
             listOf(
                 ChatMessage(role = "system", content = buildSystemPrompt()),
@@ -131,7 +130,7 @@ class ChatRolesWireTest {
         val captured = mutableListOf<String>()
         val http = OpenAiChatProvider("https://example.com", "k", "m", capturingClient(captured))
         val view = ToolRegistry().apply { register(searchEmailsTool(null)) }
-        val chat = FallbackChatLlm(listOf(NamedProvider("gemini", "k", http)), view.toolSchemas())
+        val chat = PinnedFallbackChatLlm(listOf(NamedProvider("gemini", "k", http)), view.toolSchemas())
         chat.chat(listOf(ChatMessage(role = "user", content = "hi")))
         // The wire carries the run's view (1 Tool), not a hardcoded list.
         val tools = JSONObject(captured.single()).getJSONArray("tools")
@@ -149,7 +148,7 @@ class ChatRolesWireTest {
         val http = OpenAiChatProvider("https://example.com", "k", "m", capturingClient(captured))
         val full = defaultToolRegistry()
         val scheduled = scheduledRegistry(full)
-        val chat = HeadlessChatLlm(listOf(NamedProvider("gemini", "k", http)), scheduled.toolSchemas())
+        val chat = PinnedFallbackChatLlm(listOf(NamedProvider("gemini", "k", http)), scheduled.toolSchemas())
         chat.chat(listOf(ChatMessage(role = "user", content = "hi")))
         val tools = JSONObject(captured.single()).getJSONArray("tools")
         val names = (0 until tools.length())

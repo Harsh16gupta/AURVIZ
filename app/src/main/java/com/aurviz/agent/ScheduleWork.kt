@@ -122,14 +122,14 @@ class ScheduleWorker(context: Context, params: WorkerParameters) : Worker(contex
         )
     }
 
-    private fun buildRoutineChat(full: ToolRegistry): HeadlessChatLlm {
+    private fun buildRoutineChat(full: ToolRegistry): PinnedFallbackChatLlm {
         val vaultKeys =
             try {
                 TokenVault(applicationContext).loadLlmKeys()
             } catch (_: Exception) {
                 LlmKeys()
             }
-        return HeadlessChatLlm(
+        return PinnedFallbackChatLlm(
             defaultCandidates(BuildConfig.LLM_DEFAULT_PROVIDER, vaultKeys),
             scheduledRegistry(full).toolSchemas(),
         )

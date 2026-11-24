@@ -1,7 +1,6 @@
 package com.aurviz.agent
 
 import com.aurviz.agent.ui.AgentUiState
-import com.aurviz.agent.ui.FallbackChatLlm
 import com.aurviz.agent.ui.LoopUiProgress
 import com.aurviz.agent.ui.approvalWaitMs
 import com.aurviz.agent.ui.retryLine
@@ -134,7 +133,7 @@ class ViewModelLoopWiringTest {
                 "groq-key",
                 ScriptedPlanProvider(listOf(searchCall(), answer("done"))),
             )
-        val chat = FallbackChatLlm(listOf(flaky, backup))
+        val chat = PinnedFallbackChatLlm(listOf(flaky, backup))
         val result = AgentLoop(chat, defaultToolRegistry(gmailApi = FakeGmail())).run("check mail")
 
         assertTrue(result is AgentLoopResult.Answered)
@@ -151,7 +150,7 @@ class ViewModelLoopWiringTest {
 
     @Test
     fun noDisclosureWhenSingleProviderAnswersLoop() {
-        val chat = FallbackChatLlm(listOf(NamedProvider("gemini", "k", ScriptedPlanProvider(listOf(answer("hi"))))))
+        val chat = PinnedFallbackChatLlm(listOf(NamedProvider("gemini", "k", ScriptedPlanProvider(listOf(answer("hi"))))))
         val result = AgentLoop(chat, defaultToolRegistry(gmailApi = FakeGmail())).run("hi")
         assertTrue(result is AgentLoopResult.Answered)
         assertEquals(listOf("gemini"), chat.tried)
@@ -167,7 +166,7 @@ class ViewModelLoopWiringTest {
     @Test
     fun checkMailWorksEndToEndThroughLoop() {
         val chat =
-            FallbackChatLlm(
+            PinnedFallbackChatLlm(
                 listOf(NamedProvider("gemini", "k", ScriptedPlanProvider(listOf(searchCall(), answer("Boss wrote about Q3"))))),
             )
         val registry = defaultToolRegistry(gmailApi = FakeGmail())

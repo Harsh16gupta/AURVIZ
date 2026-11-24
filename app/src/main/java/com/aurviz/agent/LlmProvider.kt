@@ -24,9 +24,9 @@ interface LlmProvider {
 }
 
 // Ticket 75 (part of #71): no hardcoded Tool schema list. The kernel's
-// toolSchemas() view is the single advertised Tool list — every
-// model-request site injects it explicitly (foreground FallbackChatLlm,
-// scheduled HeadlessChatLlm). toolSchema() stays as the shared OpenAI
+// toolSchemas() view is the single advertised Tool list — both model-request
+// sites (foreground Task Execution with the full registry view, scheduled
+// runs with the read-only view) construct PinnedFallbackChatLlm directly. toolSchema() stays as the shared OpenAI
 // function-tool envelope builder only.
 
 // Ticket 16/29: injection framing (ADR-0005, gaps §3E). Email and page

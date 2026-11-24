@@ -360,7 +360,7 @@ class ScheduledRunTest {
     @Test
     fun headlessChatReplaysMessagesThroughProviders() {
         val fake = FakeLlmProvider(listOf(answer("second")))
-        val chat = HeadlessChatLlm(listOf(NamedProvider("fake", "k", fake)))
+        val chat = PinnedFallbackChatLlm(listOf(NamedProvider("fake", "k", fake)))
         val out = chat.chat(listOf(ChatMessage(role = "user", content = "hi")))
         assertEquals("second", out.content)
         assertEquals(1, fake.seenMessages.size)

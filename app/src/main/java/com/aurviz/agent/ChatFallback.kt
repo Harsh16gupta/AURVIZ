@@ -13,7 +13,7 @@ interface TriedChatLlm : ChatLlmProvider {
     val lastProvider: String?
 }
 
-open class PinnedFallbackChatLlm(
+class PinnedFallbackChatLlm(
     private val candidates: List<NamedProvider>,
     private val tools: JSONArray = JSONArray(),
 ) : TriedChatLlm {

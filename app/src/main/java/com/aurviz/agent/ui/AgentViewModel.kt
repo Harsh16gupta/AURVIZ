@@ -92,7 +92,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import org.json.JSONArray
 
 // Thin orchestrator over the tested domain logic (Email, Web,
 // WebViewBridge, MemoryStore, VoiceInput, LoopbackAuth). All decisions stay
@@ -141,15 +140,6 @@ fun approvalWaitMs(
 // Single-shot fallback rendering delegates to the shared helper in the
 // agent package (ADR-0005): one renderer, not two.
 fun renderLoopPrompt(messages: List<ChatMessage>): String = flattenChatMessages(messages)
-
-// Foreground shim over the unified pinned-fallback seam: the loop's
-// messages ride intact with the run's registry view injected.
-// Kept as a one-line subclass so existing imports keep working; the
-// shared logic lives in PinnedFallbackChatLlm. Deleted in follow-up.
-class FallbackChatLlm(
-    candidates: List<NamedProvider>,
-    tools: JSONArray = JSONArray(),
-) : PinnedFallbackChatLlm(candidates, tools)
 
 class AgentViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -1203,7 +1193,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
             val runT0 = System.currentTimeMillis()
             val registry = defaultToolRegistry(gmailApi = gmail, scheduleStore = scheduleStore, memoryStore = roomStore)
             val chat =
-                FallbackChatLlm(
+                PinnedFallbackChatLlm(
                     defaultCandidates(effectiveProvider(), tokenVault.loadLlmKeys()),
                     // Ticket 39 (minimal): the model sees this run's
                     // registry view — every Tool it can call, gated or not.
