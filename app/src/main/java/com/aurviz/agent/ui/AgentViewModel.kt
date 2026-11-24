@@ -1388,7 +1388,14 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         activeJob = runJob
     }
 
-    // --- Voice (transcript only; onRmsChanged never reaches here) ---
+    // --- Voice (transcript + throttled RMS level; the sheet renders both) ---
+
+    // Ticket #91: live mic level from MainActivity.onRmsChanged
+    // (throttled ~100ms). Pure clamp via voiceLevelClamped(); never
+    // touches transcript, orb, or listening.
+    fun onVoiceLevel(db: Float) {
+        _state.update { it.copy(voice = it.voice.copy(levelDb = voiceLevelClamped(db))) }
+    }
 
     fun setVoiceListening(listening: Boolean) {
         _state.update {
@@ -1403,13 +1410,15 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onVoicePartial(text: String) {
         _state.update {
-            it.copy(voice = it.voice.copy(transcript = text, orb = OrbState.Hearing))
+            it.copy(voice = it.voice.copy(transcript = text, isPartial = true, orb = OrbState.Hearing))
         }
     }
 
     fun onVoiceFinal(text: String) {
         _state.update {
-            it.copy(voice = it.voice.copy(transcript = text, listening = false, orb = OrbState.Thinking))
+            it.copy(
+                voice = it.voice.copy(transcript = text, isPartial = false, listening = false, orb = OrbState.Thinking),
+            )
         }
     }
 

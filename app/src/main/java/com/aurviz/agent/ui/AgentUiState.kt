@@ -66,7 +66,24 @@ data class VoiceUiState(
     val transcript: String = "",
     val listening: Boolean = false,
     val error: String? = null,
+    // Ticket #91: live mic level in dB for the waveform ring buffer
+    // (MainActivity.onRmsChanged throttled ~100ms → onVoiceLevel) and
+    // whether the visible transcript is interim (muted) or final (crisp).
+    val levelDb: Float = VOICE_LEVEL_MIN_DB,
+    val isPartial: Boolean = true,
 )
+
+// Ticket #91: RMS meter window for the VoiceCommandSheet waveform.
+// Silence floor (-2 dB) renders flat; loud speech (~12 dB) peaks.
+const val VOICE_LEVEL_MIN_DB = -2f
+const val VOICE_LEVEL_MAX_DB = 12f
+
+// Ticket #91: pure clamp for RMS samples — JVM-tested, no Android.
+fun voiceLevelClamped(db: Float): Float = db.coerceIn(VOICE_LEVEL_MIN_DB, VOICE_LEVEL_MAX_DB)
+
+// Ticket #91: Confirm stays disabled on a blank transcript (state-derived).
+val VoiceUiState.canConfirmVoice: Boolean
+    get() = transcript.isNotBlank()
 
 // One past command in the scrollable Interaction feed (GLOSSARY
 // Interaction): the command, recalled Memories, the Plan steps, the

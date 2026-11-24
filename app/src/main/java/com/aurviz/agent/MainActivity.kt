@@ -38,6 +38,9 @@ class MainActivity : ComponentActivity() {
     private lateinit var vm: AgentViewModel
     private var recognizer: SpeechRecognizer? = null
     private var retriedOnline = false
+    // Ticket #91: RMS callbacks fire rapidly; the waveform ring buffer
+    // only needs ~10Hz, so samples are throttled to one per 100ms.
+    private var lastRmsPublishMs = 0L
 
     private val micPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -179,8 +182,8 @@ class MainActivity : ComponentActivity() {
     }
 
     // Must run on the main thread; shows live transcription as you speak.
-    // onRmsChanged intentionally does nothing: the orb is driven by
-    // VoiceUiState, never blocked on audio levels.
+    // RMS levels stream (throttled ~100ms) into onVoiceLevel for the
+    // waveform; partial/final text still drives transcript + isPartial.
     private fun startListening(online: Boolean = false) {
         if (recognizer == null) {
             recognizer = SpeechRecognizer.createSpeechRecognizer(this)
@@ -229,7 +232,13 @@ class MainActivity : ComponentActivity() {
 
                     override fun onEvent(eventType: Int, params: Bundle?) = Unit
 
-                    override fun onRmsChanged(rmsdB: Float) = Unit
+                    override fun onRmsChanged(rmsdB: Float) {
+                        val now = System.currentTimeMillis()
+                        if (now - lastRmsPublishMs >= 100L) {
+                            lastRmsPublishMs = now
+                            vm.onVoiceLevel(rmsdB)
+                        }
+                    }
                 },
             )
         }

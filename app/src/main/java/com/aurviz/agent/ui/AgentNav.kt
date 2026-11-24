@@ -205,6 +205,7 @@ fun AgentNav(
         )
         EmailConfirmationSheet(
             draft = state.pendingEmail,
+            from = state.gmailAccount,
             unseen = unseenRecipients(
                 state.pendingEmail?.to.orEmpty(),
                 knownAddressesFromInbox(state.emails),
