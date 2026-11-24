@@ -39,6 +39,10 @@ object WebViewHolder {
         // reach local files. Mixed content is pinned to NEVER_ALLOW.
         val created = WebView(context.applicationContext).apply {
             settings.javaScriptEnabled = true
+            // In-app browser posture: DOM storage + images on for foreground
+            // browsing so modern pages render fully.
+            settings.domStorageEnabled = true
+            settings.loadsImagesAutomatically = true
             settings.allowFileAccess = false
             settings.allowContentAccess = false
             settings.allowFileAccessFromFileURLs = false
@@ -80,5 +84,13 @@ object WebViewHolder {
     @MainThread
     fun reload() {
         webView?.reload()
+    }
+
+    // Theme-aware page background so a null-page empty state never flashes
+    // white in Midnight: BrowserScreen applies Theme.colors.background on
+    // every attach.
+    @MainThread
+    fun applyBackground(color: Int) {
+        webView?.setBackgroundColor(color)
     }
 }

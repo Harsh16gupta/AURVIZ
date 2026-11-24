@@ -811,3 +811,19 @@ Every case where the AI was wrong and how it was caught. Add an entry with file:
   (`CommandScreen.kt` InteractionItem); non-email settled cards show Copy
   only rather than a dead button. SchedulesScreen cards pass neither
   callback — unchanged for #89.
+
+## 2026-11-24 — Ticket #88 (Browser empty state + synced chrome + inspector) self-review catches
+- Text component has no `textAlign` param (`components/Text.kt:14-22` wraps
+  BasicText): first BrowserScreen draft passed `textAlign =` to three
+  empty-state Texts; fixed to `style.copy(textAlign = TextAlign.Center)` with
+  `fillMaxWidth()` before compiling. Lesson: check shared-primitive
+  signatures before using new params.
+- Empty-state gating is structural, not alpha: `AndroidView` (the real
+  WebView) is only composed when `state.webPage != null`
+  (`BrowserScreen.kt`); a null page renders a theme-aware `FeedCard` so
+  Midnight never flashes white. `WebViewHolder.applyBackground()` re-applies
+  `Theme.colors.background` on every attach/update.
+- Tab rename Extracted -> Text keeps glossary-clean copy; "Save to Memory"
+  note stamps the source URL via pure `browserSaveNote()` seam
+  (`BrowserChromeUi.kt`), covered by `BrowserChromeUiTest` (6 tests).
+  Full gate: 474/474 green + assembleDebug green.
