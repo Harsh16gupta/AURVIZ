@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.Insert
+import androidx.room.ColumnInfo
 import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
 import androidx.room.Query
@@ -88,6 +89,9 @@ val MIGRATION_3_4 =
 
 // One recorded headless run. The unique (scheduleId, fireTime) index is
 // the double-fire guard: the second claim inserts nothing (IGNORE).
+// Ticket #92: provider names the LLM that answered (null = unknown /
+// pre-upgrade row); planMs/toolMs/recallMs split the run's stage timings
+// (0 = untimed / pre-upgrade row).
 @Entity(
     tableName = "schedule_runs",
     indices = [Index(value = ["scheduleId", "fireTime"], unique = true)],
@@ -100,6 +104,10 @@ data class ScheduleRunRow(
     val error: String?,
     val result: String?,
     val durationMs: Long,
+    val provider: String? = null,
+    @ColumnInfo(defaultValue = "0") val planMs: Long = 0,
+    @ColumnInfo(defaultValue = "0") val toolMs: Long = 0,
+    @ColumnInfo(defaultValue = "0") val recallMs: Long = 0,
 )
 
 @Dao
@@ -113,8 +121,8 @@ interface ScheduleRunDao {
     @Query("SELECT * FROM schedule_runs ORDER BY pid ASC")
     fun listAll(): List<ScheduleRunRow>
 
-    @Query("UPDATE schedule_runs SET status = :status, `error` = :error, `result` = :result, durationMs = :durationMs WHERE pid = :pid")
-    fun finish(pid: Long, status: String, error: String?, result: String?, durationMs: Long)
+    @Query("UPDATE schedule_runs SET status = :status, `error` = :error, `result` = :result, durationMs = :durationMs, provider = :provider, planMs = :planMs, toolMs = :toolMs, recallMs = :recallMs WHERE pid = :pid")
+    fun finish(pid: Long, status: String, error: String?, result: String?, durationMs: Long, provider: String?, planMs: Long, toolMs: Long, recallMs: Long)
 
     @Query("SELECT pid FROM schedule_runs WHERE scheduleId = :scheduleId AND fireTime = :fireTime LIMIT 1")
     fun findPid(scheduleId: String, fireTime: Long): Long?
@@ -176,8 +184,18 @@ class RoomScheduleRunStore(private val dao: ScheduleRunDao) : ScheduleRunStore {
         return if (pid == -1L) null else pid
     }
 
-    override fun finish(pid: Long, status: ScheduleRunStatus, error: String?, result: String?, durationMs: Long) {
-        dao.finish(pid, status.name, error, result, durationMs)
+    override fun finish(
+        pid: Long,
+        status: ScheduleRunStatus,
+        error: String?,
+        result: String?,
+        durationMs: Long,
+        provider: String?,
+        planMs: Long,
+        toolMs: Long,
+        recallMs: Long,
+    ) {
+        dao.finish(pid, status.name, error, result, durationMs, provider, planMs, toolMs, recallMs)
     }
 
     override fun find(scheduleId: String, fireTime: Long): ScheduleRun? = dao.find(scheduleId, fireTime)?.toRun()
@@ -192,7 +210,7 @@ class RoomScheduleRunStore(private val dao: ScheduleRunDao) : ScheduleRunStore {
     }
 
     private fun ScheduleRunRow.toRun(): ScheduleRun =
-        ScheduleRun(scheduleId, fireTime, ScheduleRunStatus.valueOf(status), error, result, durationMs)
+        ScheduleRun(scheduleId, fireTime, ScheduleRunStatus.valueOf(status), error, result, durationMs, provider, planMs, toolMs, recallMs)
 }
 
 class RoomPendingApprovalStore(private val dao: PendingApprovalDao) : PendingApprovalStore {

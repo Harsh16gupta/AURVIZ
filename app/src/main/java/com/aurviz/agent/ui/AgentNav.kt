@@ -117,6 +117,7 @@ fun AgentNav(
                             onCancelRun = vm::cancelRun,
                             onSelectProvider = vm::setSelectedProvider,
                             onNewSession = vm::startNewSession,
+                            onSelectPastInteraction = vm::onInputChange,
                             onAllowAlways = vm::allowAlwaysAllow,
                         )
                     }

@@ -72,6 +72,9 @@ fun searchMemoryTool(memoryStore: MemoryStore?): ToolDefinition {
             val query = args["query"] as String
             val max = (args["max_results"] as Number?)?.toInt()?.coerceAtLeast(0) ?: 5
             val hits = recallFor(store, query).take(max)
+            // Ticket #92: every recall teaches ranking — stamp useCount +
+            // lastUsed on each hit so repeated recalls outrank stale rows.
+            hits.forEach { store.markUsed(it.id) }
             ToolResult.Success(
                 hits.map { memory ->
                     mapOf(

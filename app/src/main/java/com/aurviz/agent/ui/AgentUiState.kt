@@ -3,6 +3,7 @@ package com.aurviz.agent.ui
 import com.aurviz.agent.EmailDraft
 import com.aurviz.agent.EmailSummary
 import com.aurviz.agent.FallbackResult
+import com.aurviz.agent.InteractionRow
 import com.aurviz.agent.LlmResult
 import com.aurviz.agent.Memory
 import com.aurviz.agent.ParsedSchedule
@@ -84,6 +85,66 @@ fun voiceLevelClamped(db: Float): Float = db.coerceIn(VOICE_LEVEL_MIN_DB, VOICE_
 // Ticket #91: Confirm stays disabled on a blank transcript (state-derived).
 val VoiceUiState.canConfirmVoice: Boolean
     get() = transcript.isNotBlank()
+
+// Ticket #92: Sessions drawer copy (GLOSSARY: Session, Interaction, Past
+// Interactions). Never "History" — banned word — in any of these.
+const val PAST_INTERACTIONS_TITLE = "Past Interactions"
+const val GROUP_TODAY = "Today"
+const val GROUP_PREVIOUS_7_DAYS = "Previous 7 Days"
+const val NEW_SESSION_LABEL = "New session"
+const val OPEN_SESSIONS_DESCRIPTION = "Open Sessions"
+const val CLOSE_SESSIONS_DESCRIPTION = "Close Sessions"
+const val NO_PAST_SESSIONS_LINE = "No past Sessions yet."
+
+// Ticket #92: Room round-trip for the feed. The Session id rides in the
+// row only — InteractionRecord stays the feed shape screens render.
+fun InteractionRecord.toRow(sessionId: String): InteractionRow =
+    InteractionRow(
+        sessionId = sessionId,
+        command = command,
+        responseText = responseText,
+        provider = providerUsed,
+        timestampMs = timestampMs,
+        failed = failed,
+    )
+
+fun InteractionRow.toRecord(): InteractionRecord =
+    InteractionRecord(
+        // Room ids ("42") never collide with in-memory ids ("in_..."),
+        // so hydrated rows keep their row id namespaced.
+        id = "room_interaction_$pid",
+        command = command,
+        timestampMs = timestampMs,
+        responseText = responseText,
+        providerUsed = provider,
+        failed = failed,
+    )
+
+// Ticket #92: drawer groups, newest first. Today = same calendar day as
+// now; Previous 7 Days = the 7 days before today; older rows stay in
+// Room but out of the drawer.
+data class PastInteractionGroups(
+    val today: List<InteractionRecord>,
+    val previous7Days: List<InteractionRecord>,
+)
+
+fun groupPastInteractions(records: List<InteractionRecord>, nowMs: Long = System.currentTimeMillis()): PastInteractionGroups {
+    val startOfToday =
+        java.util.Calendar.getInstance().let { cal ->
+            cal.timeInMillis = nowMs
+            cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
+            cal.set(java.util.Calendar.MINUTE, 0)
+            cal.set(java.util.Calendar.SECOND, 0)
+            cal.set(java.util.Calendar.MILLISECOND, 0)
+            cal.timeInMillis
+        }
+    val weekAgoMs = nowMs - 7L * 24 * 60 * 60 * 1000
+    val sorted = records.sortedByDescending { it.timestampMs }
+    return PastInteractionGroups(
+        today = sorted.filter { it.timestampMs >= startOfToday },
+        previous7Days = sorted.filter { it.timestampMs >= weekAgoMs && it.timestampMs < startOfToday },
+    )
+}
 
 // One past command in the scrollable Interaction feed (GLOSSARY
 // Interaction): the command, recalled Memories, the Plan steps, the

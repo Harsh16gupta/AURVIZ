@@ -55,6 +55,7 @@ import com.aurviz.agent.stepDisplayTitle
 import com.aurviz.agent.visiblePlanSteps
 import com.aurviz.agent.ui.AgentUiState
 import com.aurviz.agent.ui.InteractionRecord
+import com.aurviz.agent.ui.OPEN_SESSIONS_DESCRIPTION
 import com.aurviz.agent.ui.components.Button
 import com.aurviz.agent.ui.components.ButtonVariant
 import com.aurviz.agent.ui.components.Composer
@@ -69,11 +70,13 @@ import com.aurviz.agent.ui.components.ModelPill
 import com.aurviz.agent.ui.components.OptionRow
 import com.aurviz.agent.ui.components.ScreenScaffold
 import com.aurviz.agent.ui.components.ScrollToLatestButton
+import com.aurviz.agent.ui.components.SessionsDrawer
 import com.aurviz.agent.ui.components.StarterRow
 import com.aurviz.agent.ui.components.StatusBanner
 import com.aurviz.agent.ui.components.Text
 import com.aurviz.agent.ui.components.TextField
 import com.aurviz.agent.ui.components.Icon
+import com.aurviz.agent.ui.components.IconButton
 import com.aurviz.agent.ui.components.ThinkingIndicator
 import com.aurviz.agent.ui.components.UserMessage
 import com.aurviz.agent.ui.theme.Bell
@@ -82,6 +85,7 @@ import com.aurviz.agent.ui.theme.Check
 import com.aurviz.agent.ui.theme.EnvelopeSimple
 import com.aurviz.agent.ui.theme.Globe
 import com.aurviz.agent.ui.theme.Icons
+import com.aurviz.agent.ui.theme.Menu
 import com.aurviz.agent.ui.theme.Space
 import com.aurviz.agent.ui.theme.Sparkle
 import com.aurviz.agent.ui.theme.Theme
@@ -109,6 +113,7 @@ fun CommandScreen(
     onCancelRun: () -> Unit = {},
     onSelectProvider: (String?) -> Unit = {},
     onNewSession: () -> Unit = {},
+    onSelectPastInteraction: (String) -> Unit = {},
     onAllowAlways: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -118,6 +123,7 @@ fun CommandScreen(
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     var showProviderSheet by rememberSaveable { mutableStateOf(false) }
+    var showSessions by rememberSaveable { mutableStateOf(false) }
     val effectiveModel = state.selectedProvider ?: state.providerUsed ?: BuildConfig.LLM_DEFAULT_PROVIDER
     val providerKeySet =
         when (effectiveModel.lowercase()) {
@@ -141,6 +147,13 @@ fun CommandScreen(
                     .padding(horizontal = 16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                IconButton(onClick = { showSessions = true }, contentDescription = OPEN_SESSIONS_DESCRIPTION) {
+                    Icon(
+                        Icons.Menu,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
                 Text("AURVIZ", style = Theme.typography.title)
                 Spacer(Modifier.weight(1f))
                 if (state.sessionTurns > 0) {
@@ -280,6 +293,21 @@ fun CommandScreen(
                 )
             }
         }
+
+        SessionsDrawer(
+            visible = showSessions,
+            interactions = state.interactions,
+            nowMs = System.currentTimeMillis(),
+            onDismiss = { showSessions = false },
+            onNewSession = {
+                onNewSession()
+                showSessions = false
+            },
+            onSelectPast = {
+                onSelectPastInteraction(it)
+                showSessions = false
+            },
+        )
     }
 
     LaunchedEffect(state.interactions.size, state.timeline.size, state.pendingApproval) {

@@ -11,6 +11,7 @@ import com.aurviz.agent.AppDb
 import com.aurviz.agent.AgentEvent
 import com.aurviz.agent.AgentLoop
 import com.aurviz.agent.AgentLoopResult
+import com.aurviz.agent.AppMigrations
 import com.aurviz.agent.ApprovalDecision
 import com.aurviz.agent.ApprovalGate
 import com.aurviz.agent.InMemoryAllowAlwaysStore
@@ -23,10 +24,6 @@ import com.aurviz.agent.GmailException
 import com.aurviz.agent.GmailHttpApi
 import com.aurviz.agent.LoopbackReceiver
 import com.aurviz.agent.LlmKeys
-import com.aurviz.agent.MIGRATION_1_2
-import com.aurviz.agent.MIGRATION_2_3
-import com.aurviz.agent.MIGRATION_3_4
-import com.aurviz.agent.MIGRATION_4_5
 import com.aurviz.agent.EmailSummary
 import com.aurviz.agent.Memory
 import com.aurviz.agent.NamedProvider
@@ -156,7 +153,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
 
     private val db: AppDb =
         Room.databaseBuilder(application, AppDb::class.java, "aurviz.db")
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+            .addMigrations(*AppMigrations)
             .build()
     private val roomStore = RoomMemoryStore(db.memories())
     private val scheduleStore = RoomScheduleStore(db.schedules())
@@ -203,6 +200,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         refreshMemories()
         refreshSchedules()
         refreshPendingApprovals()
+        refreshInteractions()
         refreshExactAlarmFlag()
         refreshBatteryFlag()
     }
@@ -315,6 +313,37 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                 activeRecalledMemories = emptyList(),
             )
         }
+        // Ticket #92: the feed survives restarts — persist the settled
+        // record off the main thread and prune past the newest 50.
+        persistInteraction(entry)
+    }
+
+    // Ticket #92: hydrate the feed from Room on launch (newest 50,
+    // chronological) so Past Interactions outlive the process.
+    private fun refreshInteractions() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val rows =
+                try {
+                    db.interactions().listRecent(50)
+                } catch (_: Exception) {
+                    return@launch
+                }
+            if (rows.isEmpty()) return@launch
+            _state.update { s ->
+                if (s.interactions.isNotEmpty()) s else s.copy(interactions = rows.reversed().map { it.toRecord() })
+            }
+        }
+    }
+
+    private fun persistInteraction(entry: InteractionRecord) {
+        val sessionId = activeSessionId
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                db.interactions().insert(entry.toRow(sessionId))
+                db.interactions().prune(50)
+            } catch (_: Exception) {
+            }
+        }
     }
 
     // Attaches a Confirmation receipt to the in-flight run: stashes it
@@ -377,6 +406,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                 failed = false,
             )
             _state.update { s -> s.copy(interactions = (s.interactions + entry).takeLast(50)) }
+            persistInteraction(entry)
         }
         pendingConfirmTitle = null
         pendingConfirmDetail = null

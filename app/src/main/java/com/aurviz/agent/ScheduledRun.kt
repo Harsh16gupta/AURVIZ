@@ -277,7 +277,9 @@ enum class ScheduleRunStatus {
 }
 
 // One recorded run: the idempotency key is scheduleId+fireTime, so a
-// double-fired alarm never double-runs the loop.
+// double-fired alarm never double-runs the loop. Ticket #92: provider
+// names the LLM that answered; planMs/toolMs/recallMs split the stage
+// timings (all defaulted: unknown/untimed for older rows).
 data class ScheduleRun(
     val scheduleId: String,
     val fireTime: Long,
@@ -285,6 +287,10 @@ data class ScheduleRun(
     val error: String?,
     val result: String?,
     val durationMs: Long,
+    val provider: String? = null,
+    val planMs: Long = 0,
+    val toolMs: Long = 0,
+    val recallMs: Long = 0,
 )
 
 // The plug shape. Tests use InMemoryScheduleRunStore; Room implements
@@ -294,7 +300,17 @@ data class ScheduleRun(
 interface ScheduleRunStore {
     fun claim(scheduleId: String, fireTime: Long): Long?
 
-    fun finish(pid: Long, status: ScheduleRunStatus, error: String?, result: String?, durationMs: Long)
+    fun finish(
+        pid: Long,
+        status: ScheduleRunStatus,
+        error: String?,
+        result: String?,
+        durationMs: Long,
+        provider: String? = null,
+        planMs: Long = 0,
+        toolMs: Long = 0,
+        recallMs: Long = 0,
+    )
 
     fun find(scheduleId: String, fireTime: Long): ScheduleRun?
 
@@ -325,9 +341,19 @@ class InMemoryScheduleRunStore : ScheduleRunStore {
     }
 
     @Synchronized
-    override fun finish(pid: Long, status: ScheduleRunStatus, error: String?, result: String?, durationMs: Long) {
+    override fun finish(
+        pid: Long,
+        status: ScheduleRunStatus,
+        error: String?,
+        result: String?,
+        durationMs: Long,
+        provider: String?,
+        planMs: Long,
+        toolMs: Long,
+        recallMs: Long,
+    ) {
         val entry = rows.entries.firstOrNull { it.value.first == pid } ?: return
-        rows[entry.key] = pid to ScheduleRun(entry.key.first, entry.key.second, status, error, result, durationMs)
+        rows[entry.key] = pid to ScheduleRun(entry.key.first, entry.key.second, status, error, result, durationMs, provider, planMs, toolMs, recallMs)
     }
 
     @Synchronized
@@ -548,7 +574,10 @@ fun runScheduledRoutine(
         }
     val durationMs = (nowMs() - startMs).coerceAtLeast(0L)
     val resultText = answer ?: error.orEmpty()
-    runs.finish(pid, status, error, resultText, durationMs)
+    // Ticket #92: stamp which provider answered the headless run so the
+    // schedule_runs row carries attribution, not just the outcome.
+    val finishProvider = (llm as? TriedChatLlm)?.lastProvider
+    runs.finish(pid, status, error, resultText, durationMs, provider = finishProvider)
     val run =
         runs.find(schedule.id, fireTime)
             ?: ScheduleRun(schedule.id, fireTime, status, error, resultText, durationMs)

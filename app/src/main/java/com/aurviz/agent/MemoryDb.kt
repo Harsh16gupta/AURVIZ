@@ -63,8 +63,8 @@ data class MemoryFts(
 )
 
 @Database(
-    entities = [MemoryRow::class, MemoryFts::class, ScheduleRow::class, ScheduleRunRow::class, PendingApprovalRow::class],
-    version = 5,
+    entities = [MemoryRow::class, MemoryFts::class, ScheduleRow::class, ScheduleRunRow::class, PendingApprovalRow::class, InteractionRow::class],
+    version = 6,
     exportSchema = false,
 )
 abstract class AppDb : RoomDatabase() {
@@ -72,6 +72,7 @@ abstract class AppDb : RoomDatabase() {
     abstract fun schedules(): ScheduleDao
     abstract fun runs(): ScheduleRunDao
     abstract fun approvals(): PendingApprovalDao
+    abstract fun interactions(): InteractionDao
 }
 
 // Version 2 -> 3 adds only the ticket #31 ranking columns; existing rows
