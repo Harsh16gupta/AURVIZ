@@ -2,6 +2,50 @@
 
 Every case where the AI was wrong and how it was caught. Add an entry with file:line evidence before moving on.
 
+## 2026-11-24 — Issue #70 T5 audit: two genuine gaps, ticket left open (`main`)
+
+- **Bullet 3 verifies; the #67 audit claim holds.** `docs/adr/0002-workmanager-alarm-scheduling.md:8-11`
+  carries the bounded exact-match exception (recipient set + template +
+  owning Schedule, fire-time revalidated, drift defers), and the
+  `docs/adr/0003-gmail-oauth-confirmation.md:9-25` amendment covers every
+  element (exact recipient set + subject/body template scoped to owning
+  `ScheduledSendConsent`, headless fire-time re-validation + SendPolicy,
+  drift/policy-deny → `PendingApproval`, writes always defer, expired
+  credentials → Reconnect prompt). No amendment delta needed.
+- **Bullet 4 verifies on both paths.** `RedTeamTest.kt` pins
+  `evilForwardForegroundYieldsCardNeverSend` (card-never-sends),
+  `evilForwardScheduledYieldsPendingApprovalNeverSend` (hold-never-executes),
+  plus the same pair for Memory poisoning
+  (`memoryPoisoningForegroundYieldsCardNeverSend`,
+  `memoryPoisoningScheduledYieldsPendingApprovalNeverSend`) and
+  routine-runner/receipt-mapping variants. `PromptShapingTest.kt` pins the
+  framing (tool-content-is-data, delimited `[memories]`, source tags).
+- **Genuine gap 1 (bullet 1): GLOSSARY has no PendingApproval entry.**
+  `GLOSSARY.md` defines `Confirmation` but `grep -i pendingapproval`
+  returns nothing, and the Confirmation definition itself reads
+  "Explicit user approval required ... until the user approves, edits, or
+  rejects" (`GLOSSARY.md:40`) — the retired noun in the canonical
+  definition. The #65 "Glossary already updated" claim is false on this
+  tree, and user-visible "Approval" copy remains: `ScheduleWork.kt:237-238`
+  notification ("Approval needed" / "need your approval"),
+  `SchedulesScreen.kt:272` `Section("Approvals")`, button labels
+  `CommandScreen.kt:676,707`, `SchedulesScreen.kt:299`,
+  `ConfirmationCard.kt:47`, settled `ConfirmationCard.kt:82`
+  ("Approved ·"), status lines `AgentViewModel.kt:755-756,802,1105,1112,1115,1420,1453`.
+  Code identifiers (`ApprovalDecision` / `ApprovalGate` / `NeedsApproval`)
+  correctly stay per the `0003:22-25` amendment — no renames.
+- **Genuine gap 2 (bullet 2): receipts unrendered.** The five-outcome model
+  (`ConfirmationReceipt.kt:17-23`) and `ConfirmationReceiptTest.kt` matrix
+  (ALLOWED x3, CARD-APPROVED, EDITED-APPROVED, DENIED x3, HELD x2, plus
+  `everyOutcomeExplainsItself`, each asserting no "approv" outside
+  "pendingapproval") are done and green — but `grep receiptFor*` finds
+  zero callers in `app/src/main`, and the file header admits wiring "is a
+  UI follow-up": `ConfirmationCard` + held list
+  (`SchedulesScreen.kt:282-299`) still render the old
+  `ConfirmationStatus`/title/detail, not `receipt.title/detail`.
+- Ticket #70 left open; no code changed, so no `:app:testDebugUnitTest`
+  re-run (docs-only commit). Secret scan clean on the diff.
+
 ## 2026-11-24 — Issue #69 T4 unschedule fast-path Confirmation (`main`)
 
 - **The audit was right; the fix mirrors the create preview.** The #69
