@@ -1,7 +1,6 @@
 package com.aurviz.agent.ui.screens
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -15,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -25,13 +25,22 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.aurviz.agent.Memory
+import com.aurviz.agent.matchRanges
+import com.aurviz.agent.titleCaseFacet
 import com.aurviz.agent.ui.AgentUiState
 import com.aurviz.agent.ui.components.Button
 import com.aurviz.agent.ui.components.ButtonVariant
 import com.aurviz.agent.ui.components.EmptyState
+import com.aurviz.agent.ui.components.FeedCard
 import com.aurviz.agent.ui.components.HapticKind
 import com.aurviz.agent.ui.components.Icon
 import com.aurviz.agent.ui.components.IconButton
@@ -40,13 +49,16 @@ import com.aurviz.agent.ui.components.ModalBottomSheet
 import com.aurviz.agent.ui.components.Page
 import com.aurviz.agent.ui.components.SearchField
 import com.aurviz.agent.ui.components.Section
+import com.aurviz.agent.ui.components.Toast
+import com.aurviz.agent.ui.components.UiPrefs
 import com.aurviz.agent.ui.theme.Space
 import com.aurviz.agent.ui.components.Text
 import com.aurviz.agent.ui.components.TextField
-import com.aurviz.agent.ui.components.Toast
 import com.aurviz.agent.ui.theme.Brain
 import com.aurviz.agent.ui.theme.Icons
+import com.aurviz.agent.ui.theme.MagnifyingGlass
 import com.aurviz.agent.ui.theme.PencilSimple
+import com.aurviz.agent.ui.theme.Plus
 import com.aurviz.agent.ui.theme.Theme
 import com.aurviz.agent.ui.theme.Trash
 import kotlinx.coroutines.delay
@@ -58,13 +70,13 @@ fun MemoryScreen(
     state: AgentUiState,
     onRemember: (String) -> Unit,
     onForget: (String) -> Unit,
-    onBack: () -> Unit,
     onUpdateMemory: (Memory, String) -> Unit = { _, _ -> },
     onRestoreMemory: (Memory) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
     var query by rememberSaveable { mutableStateOf("") }
-    var facet by rememberSaveable { mutableStateOf("All") }
+    var facet by rememberSaveable { mutableStateOf(UiPrefs.memoryFacet(context)) }
     var recentlyDeleted by remember { mutableStateOf<Memory?>(null) }
     var showAdd by rememberSaveable { mutableStateOf(false) }
     var addDraft by rememberSaveable { mutableStateOf("") }
@@ -77,8 +89,10 @@ fun MemoryScreen(
             .filter { it.isNotBlank() }
             .distinct()
     }
+    // Drop a persisted facet that no longer matches any row.
+    val effectiveFacet = if (facet == "All" || facets.contains(facet)) facet else "All"
     val shown = state.memories.filter { memory ->
-        (facet == "All" || memory.category == facet || memory.source == facet) &&
+        (effectiveFacet == "All" || memory.category == effectiveFacet || memory.source == effectiveFacet) &&
             (query.isBlank() || memory.text.contains(query.trim(), ignoreCase = true))
     }
 
@@ -91,8 +105,19 @@ fun MemoryScreen(
 
     Page(
         title = "Memory",
-        onBack = onBack,
         modifier = modifier,
+        actions = {
+            IconButton(
+                onClick = { showAdd = true },
+                contentDescription = "Add Memory",
+            ) {
+                Icon(
+                    Icons.Plus,
+                    contentDescription = null,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+        },
         overlay = {
             val deleted = recentlyDeleted
             if (deleted != null) {
@@ -110,7 +135,11 @@ fun MemoryScreen(
                             indication = null,
                         ),
                     ) {
-                        Toast(visible = true, message = "Memory deleted · Tap to Undo")
+                        Toast(
+                            visible = true,
+                            message = "Memory deleted · Tap to Undo",
+                            icon = Icons.Trash,
+                        )
                     }
                 }
             }
@@ -126,7 +155,7 @@ fun MemoryScreen(
             horizontalArrangement = Arrangement.spacedBy(Space * 2),
         ) {
             (listOf("All") + facets).forEach { pill ->
-                val selected = facet == pill
+                val selected = effectiveFacet == pill
                 Box(
                     Modifier
                         .clip(RoundedCornerShape(50))
@@ -136,12 +165,13 @@ fun MemoryScreen(
                         .clickable {
                             haptics?.play(HapticKind.Selection)
                             facet = pill
+                            UiPrefs.setMemoryFacet(context, pill)
                         }
                         .padding(horizontal = 14.dp, vertical = 8.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        pill,
+                        titleCaseFacet(pill),
                         style = Theme.typography.caption,
                         color = if (selected) Theme.colors.onPrimary else Theme.colors.onBackgroundMuted,
                         maxLines = 1,
@@ -151,41 +181,39 @@ fun MemoryScreen(
             }
         }
         Section("Remembered") {
-            if (shown.isEmpty()) {
+            if (state.memories.isEmpty()) {
                 EmptyState(
                     Icons.Brain,
-                    title = "Nothing remembered yet",
-                    message = "Try: remember my boss is Priya",
+                    title = "No memories yet",
+                    message = "The Agent remembers what you teach it. Try: remember my boss is Priya",
+                )
+            } else if (shown.isEmpty()) {
+                EmptyState(
+                    Icons.MagnifyingGlass,
+                    title = "No matches",
+                    message = "Nothing matches \"${query.trim()}\" — try different words.",
                 )
             } else {
                 shown.forEach { memory ->
-                    Column(
-                        Modifier.fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Theme.colors.card)
-                            .border(0.5.dp, Theme.colors.edge, RoundedCornerShape(16.dp))
-                            .padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(Space),
-                    ) {
+                    FeedCard {
                         Row(verticalAlignment = Alignment.Top) {
                             Column(
                                 Modifier.weight(1f),
                                 verticalArrangement = Arrangement.spacedBy(Space),
                             ) {
-                                Text(
-                                    memory.text,
-                                    style = Theme.typography.body,
-                                    color = Theme.colors.onBackground,
+                                BasicText(
+                                    text = highlightedText(memory.text, query),
+                                    style = Theme.typography.body.copy(color = Theme.colors.onBackground),
                                 )
                                 val meta = buildString {
-                                    append(memory.category)
+                                    append(titleCaseFacet(memory.category))
                                     append(" · ")
-                                    append(memory.source)
+                                    append(titleCaseFacet(memory.source))
                                     if (memory.useCount > 0) append(" · Used ${memory.useCount}×")
                                 }
                                 Text(
                                     meta,
-                                    style = Theme.typography.code,
+                                    style = Theme.typography.caption,
                                     color = Theme.colors.onBackgroundMuted,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
@@ -222,9 +250,6 @@ fun MemoryScreen(
                     }
                 }
             }
-        }
-        Button(onClick = { showAdd = true }) {
-            Text("+ Add Memory")
         }
 
         ModalBottomSheet(
@@ -287,5 +312,22 @@ fun MemoryScreen(
                 }
             }
         }
+    }
+}
+
+// Ticket #89: bold search-match highlights from pure matchRanges math.
+private fun highlightedText(text: String, query: String): AnnotatedString {
+    val ranges = matchRanges(text, query)
+    if (ranges.isEmpty()) return AnnotatedString(text)
+    return buildAnnotatedString {
+        var cursor = 0
+        for (range in ranges) {
+            append(text.substring(cursor, range.first))
+            withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                append(text.substring(range.first, range.last + 1))
+            }
+            cursor = range.last + 1
+        }
+        append(text.substring(cursor))
     }
 }

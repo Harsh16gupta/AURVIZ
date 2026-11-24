@@ -36,8 +36,11 @@ internal val PageWidth = 640.dp
 @Composable
 fun Page(
     title: String,
-    onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    // Null on the 5 root screens (Command, Browser, Schedules, Memory,
+    // Settings): no stray back chevron. Pushed sub-views pass a callback
+    // and get the chevron.
+    onBack: (() -> Unit)? = null,
     backIcon: ImageVector = Icons.CaretLeft,
     backLabel: String = "Back",
     actions: @Composable RowScope.() -> Unit = {},
@@ -50,8 +53,11 @@ fun Page(
         Column(Modifier.fillMaxSize()) {
             AppBar(
                 navigation = {
-                    IconButton(onClick = onBack, contentDescription = backLabel) {
-                        Icon(backIcon, contentDescription = null, modifier = Modifier.size(22.dp))
+                    val goBack = onBack
+                    if (goBack != null) {
+                        IconButton(onClick = goBack, contentDescription = backLabel) {
+                            Icon(backIcon, contentDescription = null, modifier = Modifier.size(22.dp))
+                        }
                     }
                 },
                 title = { Text(title, maxLines = 1) },

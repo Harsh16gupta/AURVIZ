@@ -23,6 +23,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.NavHost
@@ -88,9 +90,6 @@ fun AgentNav(
     val context = LocalContext.current
     val haptics = LocalHaptics.current
     var showVoice by rememberSaveable { mutableStateOf(false) }
-    val goCommand: () -> Unit = {
-        if (!navController.popBackStack()) navController.navigate(Dests.COMMAND)
-    }
 
     // One-shot: the ViewModel exposes the loopback OAuth URL; the Activity
     // context opens it in a browser, then the event is consumed.
@@ -110,7 +109,6 @@ fun AgentNav(
                             onInputChange = vm::onInputChange,
                             onSend = vm::sendCommand,
                             onRetry = vm::retry,
-                            onMicTap = onMicTap,
                             onVoiceClick = { showVoice = true },
                             onOpenBrowser = { navController.navigate(Dests.BROWSER) },
                             onApprovePending = vm::approvePendingSend,
@@ -118,7 +116,8 @@ fun AgentNav(
                             onRejectPending = vm::rejectPendingSend,
                             onCancelRun = vm::cancelRun,
                             onSelectProvider = vm::setSelectedProvider,
-                            onNewChat = vm::startNewSession,
+                            onNewSession = vm::startNewSession,
+                            onAllowAlways = vm::allowAlwaysAllow,
                         )
                     }
                     composable(Dests.BROWSER) {
@@ -126,7 +125,6 @@ fun AgentNav(
                             state = state,
                             onOpenUrl = vm::openWeb,
                             onAttachBridge = vm::attachWebBridge,
-                            onBack = goCommand,
                             onSaveMemory = { vm.sendCommand("remember $it") },
                         )
                     }
@@ -146,7 +144,6 @@ fun AgentNav(
                                 navController.navigate(Dests.COMMAND)
                             },
                             onRefreshRuns = vm::refreshScheduleRuns,
-                            onBack = goCommand,
                         )
                     }
                     composable(Dests.MEMORY) {
@@ -154,7 +151,6 @@ fun AgentNav(
                             state = state,
                             onRemember = { vm.sendCommand("remember $it") },
                             onForget = vm::deleteMemory,
-                            onBack = goCommand,
                             onUpdateMemory = vm::updateMemory,
                             onRestoreMemory = vm::restoreMemory,
                         )
@@ -173,7 +169,6 @@ fun AgentNav(
                             onOpenBatterySettings = onOpenBatterySettings,
                             onRefreshBattery = vm::refreshBatteryFlag,
                             onVoiceSettings = { showVoice = true },
-                            onBack = goCommand,
                             onSetThemeMode = vm::setThemeMode,
                             onSetHapticsEnabled = vm::setHapticsEnabled,
                             onAllowAlwaysAdd = vm::allowAlwaysAllow,
@@ -270,7 +265,8 @@ private fun BottomBar(
                                 Modifier.align(Alignment.TopEnd)
                                     .size(7.dp)
                                     .clip(CircleShape)
-                                    .background(Theme.colors.warning),
+                                    .background(Theme.colors.primary)
+                                    .semantics { contentDescription = "Pending approval" },
                             )
                         }
                     }

@@ -778,3 +778,71 @@ Every case where the AI was wrong and how it was caught. Add an entry with file:
 - Glossary check: no glossary term for Groq; remaining providers
   (Gemini/DeepSeek/Meta) match ADR-0004 as amended. Full
   `:app:testDebugUnitTest` required after this change.
+
+## 2026-11-24 — Ticket #86 (primitives + nav chrome) self-review catches
+- Wrong assertion drafted in `app/src/test/java/com/aurviz/agent/ToolLabelMapperTest.kt`
+  (`assertEquals("Click", toolLabel("click").let { "Select item" })` tautologically
+  failed); rewrote as `assertEquals("Select item", toolLabel("click"))` before the
+  first test run. Lesson: never wrap the value under test in an identity lambda.
+- Fallback casing drift: first `toolLabel()` fallback title-cased every word
+  ("Unknown Tool Id"), contradicting the spec's sentence-case examples
+  ("Send email", "Create schedule"); fixed to capitalize the first word only in
+  `app/src/main/java/com/aurviz/agent/ToolLabels.kt`. Caught by the new unit test.
+- Accidental import deletion: an edit removing `statusBarsPadding` from
+  `CommandScreen.kt` also dropped the still-used `size` import; restored
+  immediately after re-reading the file. Lesson: verify each import removal
+  against remaining usages (confirmed via failing-compile-risk scan).
+
+## 2026-11-24 — Ticket #87 (Command + Composer + Plan cards) self-review catches
+- Dropped binding during ActiveRunSection rewrite: an edit replacing the
+  timeline loop in `CommandScreen.kt` also removed
+  `val pendingCall = state.pendingApproval`, leaving the `if (pendingCall !=
+  null ...)` block unbound. Caught by re-reading the edited region
+  (`CommandScreen.kt:455-459`) before compiling; restored the binding and
+  routed step rendering through `visiblePlanSteps()`. Lesson: re-read the
+  full hunk after every multi-line edit, not just the replaced lines.
+- Scope guard on TimelineStep extension: adding `toolName`/`argsSummary`
+  fields risked breaking the pinned `ChatTimelineTest` raw-title asserts
+  (`"Tool 1 of 2: search_emails"`). Kept `buildTimeline` titles
+  byte-identical and mapped labels only in the pure `stepDisplayTitle()`
+  renderer — `ChatTimelineTest` (6 tests) green unchanged.
+- Copy-risk on settled receipts: `onRememberPreference` is only wired when
+  the settled title matches our own `"Send email to <addr>"` format
+  (`CommandScreen.kt` InteractionItem); non-email settled cards show Copy
+  only rather than a dead button. SchedulesScreen cards pass neither
+  callback — unchanged for #89.
+
+## 2026-11-24 — Ticket #88 (Browser empty state + synced chrome + inspector) self-review catches
+- Text component has no `textAlign` param (`components/Text.kt:14-22` wraps
+  BasicText): first BrowserScreen draft passed `textAlign =` to three
+  empty-state Texts; fixed to `style.copy(textAlign = TextAlign.Center)` with
+  `fillMaxWidth()` before compiling. Lesson: check shared-primitive
+  signatures before using new params.
+- Empty-state gating is structural, not alpha: `AndroidView` (the real
+  WebView) is only composed when `state.webPage != null`
+  (`BrowserScreen.kt`); a null page renders a theme-aware `FeedCard` so
+  Midnight never flashes white. `WebViewHolder.applyBackground()` re-applies
+  `Theme.colors.background` on every attach/update.
+- Tab rename Extracted -> Text keeps glossary-clean copy; "Save to Memory"
+  note stamps the source URL via pure `browserSaveNote()` seam
+  (`BrowserChromeUi.kt`), covered by `BrowserChromeUiTest` (6 tests).
+  Full gate: 474/474 green + assembleDebug green.
+
+## 2026-11-24 — Ticket #89 (Schedules + Memory polish) self-review catches
+- `Text` primitive takes `String` only (`components/Text.kt:14`): first
+  MemoryScreen draft passed an `AnnotatedString` for bold search-match
+  highlights; fixed to foundation `BasicText` with the merged body style
+  (`MemoryScreen.kt`, `highlightedText()` fed by pure `matchRanges()` in
+  `Memory.kt`, JVM-tested). Same lesson as #88: check primitive signatures
+  before compiling.
+- `semantics { contentDescription = ... }` needs the explicit
+  `androidx.compose.ui.semantics.contentDescription` import — `Role`/`role`
+  imports are not enough (`components/Switch.kt:62`). Caught at compile.
+- Removed the leftover #86 raw-cron seam entirely: `formatScheduleCron()`
+  deleted from `AgentViewModel.kt` (no other callers) and replaced with
+  `firesIn()` + `formatRunDuration()` pure helpers; schedule cards show
+  human cadence + live 30s-tick countdown, never cron strings.
+  Lossy `restoreMemory`/`updateMemory` (delete+re-save dropped category,
+  importance, useCount) now round-trip via `restoreMemoryRow()`
+  (`Memory.kt`), covered by `ScheduleMemoryPolishTest` (11 tests).
+  Full gate: 485/485 green + assembleDebug green.

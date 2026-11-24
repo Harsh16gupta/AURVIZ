@@ -1,12 +1,10 @@
 package com.aurviz.agent.ui.screens
 
 import android.view.ViewGroup
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,54 +12,71 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurviz.agent.WebBridge
+import com.aurviz.agent.browserChromeState
+import com.aurviz.agent.browserSaveNote
 import com.aurviz.agent.ui.AgentUiState
 import com.aurviz.agent.ui.WebViewHolder
 import com.aurviz.agent.ui.components.Button
 import com.aurviz.agent.ui.components.ButtonVariant
 import com.aurviz.agent.ui.components.ChoiceTile
+import com.aurviz.agent.ui.components.FeedCard
 import com.aurviz.agent.ui.components.Icon
 import com.aurviz.agent.ui.components.IconButton
 import com.aurviz.agent.ui.components.Markdown
 import com.aurviz.agent.ui.components.ScreenScaffold
-import com.aurviz.agent.ui.components.SearchField
-import com.aurviz.agent.ui.theme.Space
+import com.aurviz.agent.ui.components.StatusBanner
 import com.aurviz.agent.ui.components.Text
 import com.aurviz.agent.ui.theme.ArrowClockwise
 import com.aurviz.agent.ui.theme.CaretLeft
 import com.aurviz.agent.ui.theme.CaretRight
+import com.aurviz.agent.ui.theme.Globe
 import com.aurviz.agent.ui.theme.Icons
+import com.aurviz.agent.ui.theme.LockSimple
+import com.aurviz.agent.ui.theme.Space
 import com.aurviz.agent.ui.theme.Theme
 
-// Hosts the real android.webkit.WebView (used by WebViewBridge) inside an
-// AndroidView, with browser controls, a load progress bar, and a collapsible
-// inspector tray for extracted text and links. The WebView instance is
-// retained in WebViewHolder and detached from its previous parent on
-// re-attach, so it survives tab switches and `open` commands from Command
-// never fail.
+// In-app browser: 52dp synced top chrome over a 2dp Electric Blue progress
+// bar, a theme-aware native empty-state card when no page is open (the
+// WebView is never mounted for a null page, so Midnight never flashes
+// white), a 56dp StatusBanner for page errors, and a 28dp-radius bottom
+// inspector tray (Page / Text / Links) with 52dp outline link rows and a
+// Save to Memory action that stamps the source page URL.
 //
-// Ticket 41/NG-5: the address bar and extracted-link buttons forward raw
-// text to onOpenUrl (AgentViewModel.openWeb), which routes through the
-// shared allowlist (routeBrowserUrl/isAllowedWebUrl) and refuses non-web
-// addresses with an explanation — the Browser tab holds no second policy.
+// The WebView instance is retained in WebViewHolder and detached from its
+// previous parent on re-attach, so it survives tab switches and `open`
+// commands from Command never fail.
+//
+// Ticket 41/NG-5: the address pill forwards raw text to onOpenUrl
+// (AgentViewModel.openWeb), which routes through the shared allowlist
+// (routeBrowserUrl/isAllowedWebUrl) and refuses non-web addresses with an
+// explanation — the Browser tab holds no second policy.
 @Composable
 fun BrowserScreen(
     state: AgentUiState,
@@ -71,94 +86,170 @@ fun BrowserScreen(
     onSaveMemory: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    var url by rememberSaveable { mutableStateOf("") }
+    val page = state.webPage
+    var url by rememberSaveable(page?.url) { mutableStateOf(page?.url ?: "") }
     var panel by rememberSaveable { mutableStateOf("Page") }
     val progress by WebViewHolder.progress.collectAsStateWithLifecycle()
     val canGoBack by WebViewHolder.canGoBack.collectAsStateWithLifecycle()
     val canGoForward by WebViewHolder.canGoForward.collectAsStateWithLifecycle()
-    val showProgress = progress in 1..99 || state.webLoading
+    val chrome = browserChromeState(page, url, progress, state.webLoading, canGoBack, canGoForward)
 
     ScreenScaffold(modifier) {
         Column(Modifier.fillMaxSize()) {
+            // 52dp synced top chrome: Back / Forward / 36dp URL pill / Reload.
             Row(
-                Modifier.statusBarsPadding()
-                    .padding(horizontal = Space * 2, vertical = Space * 2),
+                Modifier
+                    .fillMaxWidth()
+                    .height(52.dp)
+                    // Top inset comes from ScreenScaffold exactly once.
+                    .padding(horizontal = Space * 2),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(Space),
             ) {
                 IconButton(
                     onClick = { WebViewHolder.goBack() },
                     contentDescription = "Back",
-                    enabled = canGoBack,
+                    enabled = chrome.canGoBack,
                 ) {
                     Icon(Icons.CaretLeft, contentDescription = null, modifier = Modifier.size(22.dp))
                 }
                 IconButton(
                     onClick = { WebViewHolder.goForward() },
                     contentDescription = "Forward",
-                    enabled = canGoForward,
+                    enabled = chrome.canGoForward,
                 ) {
                     Icon(Icons.CaretRight, contentDescription = null, modifier = Modifier.size(22.dp))
+                }
+                // 36dp URL pill: lock for an open https page, globe otherwise.
+                // Text syncs to the open page; typing + Go opens a new page.
+                Row(
+                    Modifier
+                        .weight(1f)
+                        .height(36.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(Theme.colors.surfaceVariant)
+                        .padding(horizontal = Space * 3),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Space * 2),
+                ) {
+                    Icon(
+                        if (chrome.showSecureIcon) Icons.LockSimple else Icons.Globe,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = Theme.colors.onBackgroundMuted,
+                    )
+                    BasicTextField(
+                        value = url,
+                        onValueChange = { url = it },
+                        modifier = Modifier.weight(1f),
+                        textStyle = Theme.typography.body.copy(color = Theme.colors.onSurfaceVariant),
+                        cursorBrush = SolidColor(Theme.colors.primary),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
+                        keyboardActions = KeyboardActions(onGo = { onOpenUrl(url) }),
+                        decorationBox = { field ->
+                            Box {
+                                if (url.isEmpty()) {
+                                    Text(
+                                        "Paste a link, then Go",
+                                        color = Theme.colors.onBackgroundMuted,
+                                    )
+                                }
+                                field()
+                            }
+                        },
+                    )
                 }
                 IconButton(
                     onClick = { WebViewHolder.reload() },
                     contentDescription = "Reload",
+                    enabled = chrome.canReload,
                 ) {
                     Icon(Icons.ArrowClockwise, contentDescription = null, modifier = Modifier.size(20.dp))
                 }
-                SearchField(
-                    value = url,
-                    onValueChange = { url = it },
-                    placeholder = "Paste a link, then Open",
-                    modifier = Modifier.weight(1f),
-                )
-                Button(onClick = { onOpenUrl(url) }) {
-                    Text("Go")
-                }
             }
 
-            if (showProgress) {
-                val transition = rememberInfiniteTransition(label = "WebProgress")
-                val pulse by transition.animateFloat(
-                    0.35f,
-                    1f,
-                    infiniteRepeatable(tween(800), RepeatMode.Reverse),
-                    label = "Pulse",
-                )
-                val fraction = if (progress in 1..99) progress / 100f else 1f
-                val alpha = if (progress in 1..99) 1f else pulse
+            // 2dp Electric Blue progress bar, solid primary — no alpha.
+            if (chrome.showProgress) {
                 Box(Modifier.fillMaxWidth().height(2.dp)) {
                     Box(
-                        Modifier.fillMaxWidth(fraction)
+                        Modifier.fillMaxWidth(chrome.progressFraction)
                             .height(2.dp)
-                            .background(Theme.colors.primary.copy(alpha = alpha)),
+                            .background(Theme.colors.primary),
                     )
                 }
             }
 
             if (state.webError != null) {
-                Text(
-                    state.webError,
-                    color = Theme.colors.destructive,
+                StatusBanner(
+                    message = state.webError,
+                    actionLabel = "Retry",
+                    onAction = { WebViewHolder.reload() },
                     modifier = Modifier.padding(horizontal = Space * 4, vertical = Space),
                 )
             }
 
-            AndroidView(
-                factory = { context ->
-                    val wv = WebViewHolder.obtain(context)
-                    (wv.parent as? ViewGroup)?.removeView(wv)
-                    onAttachBridge(WebViewHolder.bridge(wv))
-                    wv
-                },
-                modifier = Modifier.fillMaxWidth()
-                    .weight(if (panel == "Page") 1f else 0.55f),
-            )
+            if (chrome.showEmptyState) {
+                // Native theme-aware empty state: the WebView stays unmounted
+                // while no page is open, so Midnight never flashes white.
+                FeedCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(if (panel == "Page") 1f else 0.55f)
+                        .padding(horizontal = Space * 4, vertical = Space * 2),
+                ) {
+                    Column(
+                        Modifier.fillMaxWidth().padding(vertical = Space * 6),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(Space * 2),
+                    ) {
+                        Icon(
+                            Icons.Globe,
+                            contentDescription = null,
+                            modifier = Modifier.size(40.dp),
+                            tint = Theme.colors.onBackgroundMuted,
+                        )
+                        Text(
+                            "No page open yet",
+                            style = Theme.typography.title.copy(textAlign = TextAlign.Center),
+                            color = Theme.colors.onBackground,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Text(
+                            "Ask the Agent to open a link, or paste one above.",
+                            color = Theme.colors.onBackgroundMuted,
+                            style = Theme.typography.body.copy(textAlign = TextAlign.Center),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Text(
+                            "Try: open example.com",
+                            color = Theme.colors.onBackgroundMuted,
+                            style = Theme.typography.body.copy(textAlign = TextAlign.Center),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+            } else {
+                val pageBackground = Theme.colors.background.toArgb()
+                AndroidView(
+                    factory = { context ->
+                        val wv = WebViewHolder.obtain(context)
+                        (wv.parent as? ViewGroup)?.removeView(wv)
+                        WebViewHolder.applyBackground(pageBackground)
+                        onAttachBridge(WebViewHolder.bridge(wv))
+                        wv
+                    },
+                    update = { WebViewHolder.applyBackground(pageBackground) },
+                    modifier = Modifier.fillMaxWidth()
+                        .weight(if (panel == "Page") 1f else 0.55f),
+                )
+            }
 
+            // Bottom inspector tray with a large 28dp top radius.
             Column(
                 Modifier.fillMaxWidth()
                     .navigationBarsPadding()
-                    .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+                    .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
                     .background(Theme.colors.panel),
             ) {
                 Box(
@@ -171,7 +262,6 @@ fun BrowserScreen(
                         .padding(horizontal = Space * 4, vertical = Space * 2),
                     horizontalArrangement = Arrangement.spacedBy(Space * 2),
                 ) {
-                    val page = state.webPage
                     ChoiceTile(
                         selected = panel == "Page",
                         onClick = { panel = "Page" },
@@ -180,11 +270,11 @@ fun BrowserScreen(
                         Text("Page", style = Theme.typography.label)
                     }
                     ChoiceTile(
-                        selected = panel == "Extracted",
-                        onClick = { panel = "Extracted" },
+                        selected = panel == "Text",
+                        onClick = { panel = "Text" },
                         modifier = Modifier.weight(1f),
                     ) {
-                        Text("Extracted", style = Theme.typography.label)
+                        Text("Text", style = Theme.typography.label)
                     }
                     ChoiceTile(
                         selected = panel == "Links",
@@ -206,13 +296,12 @@ fun BrowserScreen(
                             .padding(bottom = Space * 4),
                         verticalArrangement = Arrangement.spacedBy(Space * 2),
                     ) {
-                        val page = state.webPage
                         if (page == null) {
                             Text(
-                                "Nothing opened yet — try: open example.com",
+                                "Nothing opened yet — open a page to inspect it.",
                                 color = Theme.colors.onBackgroundMuted,
                             )
-                        } else if (panel == "Extracted") {
+                        } else if (panel == "Text") {
                             Text(
                                 page.title.ifBlank { page.url },
                                 style = Theme.typography.title,
@@ -226,9 +315,7 @@ fun BrowserScreen(
                                 Markdown(page.text)
                             }
                             Button(
-                                onClick = {
-                                    onSaveMemory("Web note (${page.title}): ${page.text.take(220)}")
-                                },
+                                onClick = { onSaveMemory(browserSaveNote(page)) },
                                 variant = ButtonVariant.Secondary,
                             ) {
                                 Text("Save to Memory")
@@ -246,11 +333,40 @@ fun BrowserScreen(
                                     verticalArrangement = Arrangement.spacedBy(Space),
                                 ) {
                                     page.links.forEach { link ->
-                                        Button(
-                                            onClick = { onOpenUrl(link) },
-                                            variant = ButtonVariant.Secondary,
+                                        val interaction = remember { MutableInteractionSource() }
+                                        Row(
+                                            Modifier.fillMaxWidth()
+                                                .heightIn(min = 52.dp)
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .border(
+                                                    1.dp,
+                                                    Theme.colors.border,
+                                                    RoundedCornerShape(12.dp),
+                                                )
+                                                .clickable(
+                                                    interactionSource = interaction,
+                                                    indication = androidx.compose.foundation.LocalIndication.current,
+                                                    onClick = { onOpenUrl(link) },
+                                                )
+                                                .padding(
+                                                    horizontal = Space * 3,
+                                                    vertical = Space * 2,
+                                                ),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(Space * 2),
                                         ) {
-                                            Text(link, maxLines = 1)
+                                            Text(
+                                                link,
+                                                maxLines = 1,
+                                                color = Theme.colors.onBackground,
+                                                modifier = Modifier.weight(1f),
+                                            )
+                                            Icon(
+                                                Icons.CaretRight,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(18.dp),
+                                                tint = Theme.colors.onBackgroundMuted,
+                                            )
                                         }
                                     }
                                 }

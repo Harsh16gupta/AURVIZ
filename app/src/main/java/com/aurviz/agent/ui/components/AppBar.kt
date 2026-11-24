@@ -5,20 +5,12 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.union
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
@@ -49,12 +41,9 @@ fun AppBar(
             modifier
                 .fillMaxWidth()
                 .background(Theme.colors.background)
-                .blockTouchesToContentBehind()
-                .windowInsetsPadding(
-                    WindowInsets.statusBars.union(
-                        WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)
-                    )
-                )
+                // No status-bar inset here: ScreenScaffold pads the top
+                // inset exactly once for every destination, so AppBar must
+                // not add it a second time.
                 .height(56.dp)
                 .padding(horizontal = Space * 2),
     ) { (navigationSlot, titleSlot, actionsSlot), constraints ->
@@ -79,5 +68,3 @@ fun AppBar(
         }
     }
 }
-
-private fun Modifier.blockTouchesToContentBehind() = pointerInput(Unit) {}
