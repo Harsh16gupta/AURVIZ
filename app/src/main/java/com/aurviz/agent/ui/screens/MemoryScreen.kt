@@ -72,7 +72,7 @@ fun MemoryScreen(
     onForget: (String) -> Unit,
     onUpdateMemory: (Memory, String) -> Unit = { _, _ -> },
     onRestoreMemory: (Memory) -> Unit = {},
-    onBack: () -> Unit = {},
+    onBack: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -105,7 +105,7 @@ fun MemoryScreen(
     }
 
     Page(
-        title = "Memory",
+        title = "Memories",
         modifier = modifier,
         onBack = onBack,
         actions = {
@@ -215,7 +215,7 @@ fun MemoryScreen(
                                     append(titleCaseFacet(memory.category))
                                     append(" · ")
                                     append(titleCaseFacet(memory.source))
-                                    if (memory.useCount > 0) append(" · Used ${memory.useCount}×")
+                                    if (memory.useCount > 0) append(" · Recalled ${memory.useCount}×")
                                 }
                                 Text(
                                     meta,

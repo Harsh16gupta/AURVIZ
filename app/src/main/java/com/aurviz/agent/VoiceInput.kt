@@ -38,6 +38,13 @@ fun shouldRetryOnline(code: Int): Boolean =
 fun resolveCommandInput(voiceText: String?, typedText: String): String =
     if (!voiceText.isNullOrBlank()) voiceText else typedText
 
+// Live RMS meter mapping (pure, JVM-testable). SpeechRecognizer
+// onRmsChanged dB maps silence (-2 dB) .. loud speech (10 dB) into 0..1
+// for the Voice Command waveform ring buffer. MainActivity throttles
+// samples (~100ms) into AgentViewModel.onVoiceLevel which clamps via
+// voiceLevelClamped(); this helper is the spec -2..10 normalizer.
+fun voiceRmsFraction(rmsdB: Float): Float = ((rmsdB + 2f) / 12f).coerceIn(0f, 1f)
+
 // Can the mic be used right now? Three answers: READY shows the mic
 // button, NEED_PERMISSION explains why and asks, FALLBACK_TEXT hides
 // the mic (typing only) when the device has no recognizer.

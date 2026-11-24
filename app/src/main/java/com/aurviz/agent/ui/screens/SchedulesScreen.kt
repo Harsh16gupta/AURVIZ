@@ -3,6 +3,7 @@ package com.aurviz.agent.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -54,7 +56,6 @@ import com.aurviz.agent.ui.formatScheduleTime
 import com.aurviz.agent.ui.theme.Bell
 import com.aurviz.agent.ui.theme.Icons
 import com.aurviz.agent.ui.theme.Space
-import com.aurviz.agent.ui.theme.Sparkle
 import com.aurviz.agent.ui.theme.Theme
 import com.aurviz.agent.ui.theme.Trash
 import java.time.ZoneId
@@ -79,9 +80,10 @@ fun SchedulesScreen(
     onToggleScheduleEnabled: (String, Boolean) -> Unit = { _, _ -> },
     onRunScheduleNow: (String) -> Unit = {},
     onRefreshRuns: () -> Unit = {},
-    onBack: () -> Unit = {},
+    onBack: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
+    // Schedules is a root tab: onBack stays null so Page shows no chevron.
     var draft by rememberSaveable { mutableStateOf("") }
     // Inline delete row target (Delete Schedule? Delete/Keep) — explicit
     // row, never a morphing pill.
@@ -112,14 +114,40 @@ fun SchedulesScreen(
                 TextField(
                     value = draft,
                     onValueChange = { draft = it },
-                    label = "When and what — e.g. every morning at 9AM check emails",
+                    label = "When and what",
                 )
-                MorningBriefingChip(
-                    onPick = {
-                        draft = MorningBriefingText
-                        onPreviewSchedule(MorningBriefingText)
-                    },
-                )
+                // Three horizontal quick-fill chips replace the old example
+                // line: each tap fills the draft and opens the unchanged
+                // ConfirmationCard gate; the second tap creates the Schedule.
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    QuickFillChip(
+                        label = "Every day 9:00 AM",
+                        draftText = "every day at 9AM summarize unread emails",
+                        onPick = {
+                            draft = it
+                            onPreviewSchedule(it)
+                        },
+                    )
+                    QuickFillChip(
+                        label = "Weekdays 8:30 AM",
+                        draftText = "weekdays at 8:30AM summarize unread emails",
+                        onPick = {
+                            draft = it
+                            onPreviewSchedule(it)
+                        },
+                    )
+                    QuickFillChip(
+                        label = "Every Monday 10:00 AM",
+                        draftText = "every Monday at 10AM plan my week",
+                        onPick = {
+                            draft = it
+                            onPreviewSchedule(it)
+                        },
+                    )
+                }
                 Button(
                     onClick = { onPreviewSchedule(draft) },
                     modifier = Modifier.fillMaxWidth().height(48.dp),
@@ -169,7 +197,8 @@ fun SchedulesScreen(
                     state.schedules.forEach { schedule ->
                     val enabled = schedule.id !in state.disabledScheduleIds
                     val next = nextFireTime(schedule, ZoneId.systemDefault(), nowTick)
-                    val nextText = next?.format(DateTimeFormatter.ofPattern("EEE MMM d HH:mm")) ?: "—"
+                    val nextText = next?.format(DateTimeFormatter.ofPattern("EEE MMM d h:mm a")) ?: "—"
+                    val runCount = state.scheduleRuns.count { it.scheduleId == schedule.id }
                     FeedCard {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -191,7 +220,8 @@ fun SchedulesScreen(
                             )
                         }
                         Text(
-                            "${formatScheduleTime(schedule)} · Next $nextText",
+                            "${formatScheduleTime(schedule)} · Next $nextText · " +
+                                if (runCount == 1) "1 run" else "$runCount runs",
                             style = Theme.typography.caption,
                             color = Theme.colors.onBackgroundMuted,
                         )
@@ -368,22 +398,23 @@ fun SchedulesScreen(
     }
 }
 
-private const val MorningBriefingText = "every morning at 9AM summarize unread emails"
-
-// 2-tap preset: first tap fills the draft and opens the unchanged
+// 2-tap preset chip: first tap fills the draft and opens the unchanged
 // ConfirmationCard gate; second tap creates the Schedule.
 @Composable
-private fun MorningBriefingChip(onPick: () -> Unit) {
+private fun QuickFillChip(
+    label: String,
+    draftText: String,
+    onPick: (String) -> Unit,
+) {
     val haptics = LocalHaptics.current
     Box(
         Modifier
-            .fillMaxWidth()
             .clip(RoundedCornerShape(50))
             .border(1.dp, Theme.colors.border, RoundedCornerShape(50))
             .clickable(
                 onClick = {
                     haptics?.play(HapticKind.Light)
-                    onPick()
+                    onPick(draftText)
                 },
                 interactionSource = remember { MutableInteractionSource() },
                 indication = androidx.compose.foundation.LocalIndication.current,
@@ -391,23 +422,12 @@ private fun MorningBriefingChip(onPick: () -> Unit) {
             .padding(horizontal = 14.dp, vertical = 12.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(Space * 2),
-        ) {
-            Icon(
-                Icons.Sparkle,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp),
-                tint = Theme.colors.accentText,
-            )
-            Text(
-                "Morning Briefing · Daily at 09:00",
-                style = Theme.typography.label.copy(fontWeight = FontWeight.Medium),
-                color = Theme.colors.onBackground,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
+        Text(
+            label,
+            style = Theme.typography.label.copy(fontWeight = FontWeight.Medium),
+            color = Theme.colors.onBackground,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }

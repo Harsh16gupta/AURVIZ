@@ -23,7 +23,7 @@ fun AttachmentChip(
     modifier: Modifier = Modifier,
 ) {
     // Adapted: the Vela kit loads remote photos via compose-uri-painter.
-    // Aurviz has no photo attachments; render a placeholder tile instead.
+    // AIRA has no photo attachments; render a placeholder tile instead.
     Box(modifier.padding(top = 6.dp, end = 6.dp)) {
         Box(
             Modifier.size(56.dp)

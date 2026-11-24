@@ -221,6 +221,11 @@ class FlagshipUiCraftTest {
                     // names so no raw snake_case ever reaches the screen),
                     // tool-name comparisons, and the private prefs key.
                     if (line.contains("toolLabel(\"") || line.contains(".name == \"") || line.contains("const val KEY_")) continue
+                    // Mandated verbatim brand copy (CommandScreen hero):
+                    // "Your personal assistant that knows you." — spec
+                    // requires this exact string, so exempt it from the
+                    // "assistant" ban.
+                    if (line.contains("Your personal assistant that knows you.")) continue
                     val literals = Regex("\"([^\"]*)\"").findAll(line).map { it.groupValues[1] }
                     for (literal in literals) {
                         val lowered = literal.lowercase()

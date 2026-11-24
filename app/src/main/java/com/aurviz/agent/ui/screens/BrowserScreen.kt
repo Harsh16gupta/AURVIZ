@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -42,6 +43,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurviz.agent.WebBridge
 import com.aurviz.agent.browserChromeState
 import com.aurviz.agent.browserSaveNote
+import com.aurviz.agent.toolLabel
 import com.aurviz.agent.ui.AgentUiState
 import com.aurviz.agent.ui.WebViewHolder
 import com.aurviz.agent.ui.components.Button
@@ -67,7 +69,7 @@ import com.aurviz.agent.ui.theme.X
 // bar, a theme-aware native empty-state card when no page is open (the
 // WebView is never mounted for a null page, so Midnight never flashes
 // white), a 56dp StatusBanner for page errors, and a 28dp-radius bottom
-// inspector tray (Page / Text / Links) with 52dp outline link rows and a
+// inspector tray (Page / Extracted / Links) with 52dp outline link rows and a
 // Save to Memory action that stamps the source page URL.
 //
 // The WebView instance is retained in WebViewHolder and detached from its
@@ -94,13 +96,24 @@ fun BrowserScreen(
     val canGoBack by WebViewHolder.canGoBack.collectAsStateWithLifecycle()
     val canGoForward by WebViewHolder.canGoForward.collectAsStateWithLifecycle()
     val chrome = browserChromeState(page, url, progress, state.webLoading, canGoBack, canGoForward)
+    // Recently visited pages for the empty state, newest first.
+    val recentUrls =
+        remember(state.interactions) {
+            state.interactions.mapNotNull { it.webPage?.url?.takeIf { u -> u.isNotBlank() } }
+                .distinct().take(5)
+        }
 
     ScreenScaffold(modifier) {
         Column(Modifier.fillMaxSize()) {
-            // 56dp top chrome with 48dp hit targets and a 40dp single-line URL pill.
+            // 56dp dark top chrome with 48dp hit targets and a 40dp single-line URL pill.
+            // statusBarsPadding keeps the bar pinned below the status icons so
+            // the white WebView never bleeds behind them (a no-op when the
+            // scaffold already consumed the inset).
             Row(
                 Modifier
                     .fillMaxWidth()
+                    .background(Theme.colors.background)
+                    .statusBarsPadding()
                     .height(56.dp)
                     .padding(horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -112,10 +125,8 @@ fun BrowserScreen(
                 IconButton(onClick = { WebViewHolder.goBack() }, contentDescription = "Back", enabled = chrome.canGoBack, size = IconButtonSize.Small) {
                     Icon(Icons.CaretLeft, contentDescription = null, modifier = Modifier.size(20.dp))
                 }
-                if (chrome.canGoForward) {
-                    IconButton(onClick = { WebViewHolder.goForward() }, contentDescription = "Forward", size = IconButtonSize.Small) {
-                        Icon(Icons.CaretRight, contentDescription = null, modifier = Modifier.size(20.dp))
-                    }
+                IconButton(onClick = { WebViewHolder.goForward() }, contentDescription = "Forward", enabled = chrome.canGoForward, size = IconButtonSize.Small) {
+                    Icon(Icons.CaretRight, contentDescription = null, modifier = Modifier.size(20.dp))
                 }
                 // 40dp URL pill: lock for an open https page, globe otherwise.
                 // Text syncs to the open page; typing + Go opens a new page.
@@ -187,8 +198,9 @@ fun BrowserScreen(
             }
 
             if (chrome.showEmptyState) {
-                // Optically centered empty state: the WebView stays unmounted
+                // Dark AIRA Browser empty state: the WebView stays unmounted
                 // while no page is open, so Midnight never flashes white.
+                // Shows recently visited pages plus the available page Tools.
                 Box(
                     Modifier.weight(1f).fillMaxSize().padding(24.dp),
                     contentAlignment = Alignment.Center,
@@ -196,6 +208,7 @@ fun BrowserScreen(
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.verticalScroll(rememberScrollState()),
                     ) {
                         Box(
                             Modifier.size(56.dp)
@@ -211,7 +224,7 @@ fun BrowserScreen(
                             )
                         }
                         Text(
-                            "No page open yet",
+                            "AIRA Browser",
                             style = Theme.typography.title.copy(textAlign = TextAlign.Center),
                             color = Theme.colors.onBackground,
                         )
@@ -220,6 +233,66 @@ fun BrowserScreen(
                             style = Theme.typography.body.copy(textAlign = TextAlign.Center),
                             color = Theme.colors.onBackgroundMuted,
                         )
+                        if (recentUrls.isNotEmpty()) {
+                            Text(
+                                "Recently visited",
+                                style = Theme.typography.caption.copy(textAlign = TextAlign.Center),
+                                color = Theme.colors.onBackgroundMuted,
+                            )
+                            recentUrls.forEach { visited ->
+                                Row(
+                                    Modifier.fillMaxWidth()
+                                        .heightIn(min = 48.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .border(1.dp, Theme.colors.border, RoundedCornerShape(12.dp))
+                                        .clickable { onOpenUrl(visited) }
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Icon(
+                                        Icons.Globe,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(14.dp),
+                                        tint = Theme.colors.onBackgroundMuted,
+                                    )
+                                    Text(
+                                        visited,
+                                        style = Theme.typography.label,
+                                        color = Theme.colors.onBackground,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
+                            }
+                        }
+                        Text(
+                            "Available Tools",
+                            style = Theme.typography.caption.copy(textAlign = TextAlign.Center),
+                            color = Theme.colors.onBackgroundMuted,
+                        )
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            listOf("get_page_text", "extract", "click").forEach { tool ->
+                                Box(
+                                    Modifier
+                                        .clip(RoundedCornerShape(50))
+                                        .border(1.dp, Theme.colors.border, RoundedCornerShape(50))
+                                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        toolLabel(tool),
+                                        style = Theme.typography.caption,
+                                        color = Theme.colors.onBackground,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             } else {
@@ -238,13 +311,24 @@ fun BrowserScreen(
                 )
             }
 
-            // Bottom inspector tray with a large 28dp top radius.
+            // Bottom inspector tray with a large 28dp top radius and a
+            // centered 32dp x 4dp drag-handle pill.
             Column(
                 Modifier.fillMaxWidth()
                     .navigationBarsPadding()
                     .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
                     .background(Theme.colors.panel),
             ) {
+                Box(
+                    Modifier.fillMaxWidth().padding(top = 8.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(
+                        Modifier.size(width = 32.dp, height = 4.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(Theme.colors.onBackground.copy(alpha = 0.16f)),
+                    )
+                }
                 Box(
                     Modifier.fillMaxWidth()
                         .height(0.5.dp)
@@ -260,7 +344,7 @@ fun BrowserScreen(
                 ) {
                     listOf(
                         "Page" to "Page",
-                        "Text" to "Text",
+                        "Extracted" to "Extracted",
                         "Links" to "Links (${page?.links?.size ?: 0})",
                     ).forEach { (key, label) ->
                         val selected = panel == key
@@ -301,7 +385,7 @@ fun BrowserScreen(
                                 "Nothing opened yet — open a page to inspect it.",
                                 color = Theme.colors.onBackgroundMuted,
                             )
-                        } else if (panel == "Text") {
+                        } else if (panel == "Extracted") {
                             Text(
                                 page.title.ifBlank { page.url },
                                 style = Theme.typography.title,

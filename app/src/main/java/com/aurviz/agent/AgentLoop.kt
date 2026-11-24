@@ -115,7 +115,7 @@ class AgentLoop(
     private val nowMs: () -> Long = System::currentTimeMillis,
 ) {
     companion object {
-        const val MAX_STEPS = 8
+        const val MAX_STEPS = 20
         const val DEFAULT_STEP_TIMEOUT_MS = 90_000L
         const val DEFAULT_TOTAL_TIMEOUT_MS = 300_000L
     }
@@ -157,7 +157,7 @@ class AgentLoop(
         // Ticket #106 (T1): consecutive identical failing Tool-call guard.
         // The last failed (name, effectiveArgs) signature; a repeat on the
         // next step gets a non-retryable pivot hint instead of burning all
-        // 8 steps on the same failure.
+        // 20 steps on the same failure.
         var lastFailedSignature: Pair<String, Map<String, Any?>>? = null
         fun failed(error: String): AgentLoopResult.Failed {
             onEvent(AgentEvent.Failed(error))

@@ -96,15 +96,28 @@ class WebAdapterTest {
     }
 
     @Test
+    fun openUrlFallsBackToBackgroundLoaderForScheduledRuns() {
+        val kernel =
+            kernelWithWeb(
+                webBridge = null,
+                backgroundWebLoader = FakeBackgroundPageLoader(mapOf("https://example.com" to fixture)),
+            )
+        val result = kernel.execute("open_url", mapOf("url" to "https://example.com"))
+        assertTrue(result is ToolResult.Success)
+        @Suppress("UNCHECKED_CAST")
+        val data = (result as ToolResult.Success).data as Map<String, Any?>
+        assertEquals("Example Shop", data["title"])
+    }
+
+    @Test
     fun foregroundOnlyToolsFailRetryablyWithNoBridge() {
         val kernel =
             kernelWithWeb(
                 webBridge = null,
                 backgroundWebLoader = FakeBackgroundPageLoader(mapOf("https://example.com" to fixture)),
             )
-        // get_page_text is served by the loader; the other four need the tab.
+        // open_url + get_page_text are served by the loader; the other three need the tab.
         for ((tool, args) in listOf(
-            "open_url" to mapOf("url" to "https://example.com"),
             "click" to mapOf("selector" to "a"),
             "scroll" to mapOf("px" to 100),
             "extract" to mapOf("query" to "milk"),

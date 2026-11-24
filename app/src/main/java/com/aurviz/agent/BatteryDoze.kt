@@ -17,16 +17,16 @@ import android.provider.Settings
 // the UI and the test read the same source of truth.
 const val OEM_AUTOSTART_GUIDANCE =
     "Some phones need one extra step beyond the prompt above. " +
-        "Xiaomi (MIUI): Settings > Battery > App battery saver > Aurviz > No restrictions, " +
-        "then Security > Autostart > allow Aurviz. " +
+        "Xiaomi (MIUI): Settings > Battery > App battery saver > AIRA > No restrictions, " +
+        "then Security > Autostart > allow AIRA. " +
         "Oppo/OnePlus (ColorOS/OxygenOS): Settings > Battery > App battery management > " +
-        "Aurviz > Allow background activity + Allow auto-launch. " +
-        "Vivo (Funtouch OS): Settings > Battery > Background power consumption > allow Aurviz, " +
-        "then Settings > Apps > Autostart > allow Aurviz. " +
-        "Huawei (EMUI): Settings > Battery > App launch > Aurviz > Manage manually > " +
+        "AIRA > Allow background activity + Allow auto-launch. " +
+        "Vivo (Funtouch OS): Settings > Battery > Background power consumption > allow AIRA, " +
+        "then Settings > Apps > Autostart > allow AIRA. " +
+        "Huawei (EMUI): Settings > Battery > App launch > AIRA > Manage manually > " +
         "allow Auto-launch, Secondary launch, Run in background. " +
         "Samsung (One UI): Settings > Battery > Background usage limits > Never sleeping apps > " +
-        "add Aurviz."
+        "add AIRA."
 
 // Pure decision: the prompt shows exactly when the app is not exempted.
 // Takes the PowerManager answer as input so JVM tests need no framework.

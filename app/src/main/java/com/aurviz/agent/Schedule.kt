@@ -53,17 +53,78 @@ class InMemoryScheduleStore : ScheduleStore {
 }
 
 // --- Seam A: understand "every morning at 9AM check emails". ---
-// Finds the first time-like bit (9AM, 7:30pm, 14:00); whatever is left
-// over (minus filler words) is the instruction. Null = no time found.
+// Finds the first time-like bit (9AM, 7:30pm, 14:00, 7:46 p.m., 1946);
+// whatever is left over (minus filler words) is the instruction.
+// Null = no time found. a.m./p.m. with periods normalize to am/pm
+// before matching so "7:46 p.m." converts PM correctly instead of
+// silently staying AM. Bare HHMM ("1946") splits into HH + MM.
 fun parseSchedule(text: String): ParsedSchedule? {
-    val time = Regex("(\\d{1,2})(?::(\\d{2}))?\\s*(am|pm)?", RegexOption.IGNORE_CASE)
-        .find(text) ?: return null
-    var hour = time.groupValues[1].toInt()
-    val minute = time.groupValues[2].ifEmpty { "0" }.toInt()
-    if (hour > 23 || minute > 59) return null
-    when (time.groupValues[3].lowercase()) {
-        "pm" -> if (hour < 12) hour += 12
-        "am" -> if (hour == 12) hour = 0
+    // Normalize dotted meridians first so the time regex sees them.
+    // "p.m." / "p. m." / "P.M." -> "pm", same for am. Word-boundary
+    // guarded so "camp" / "lamp" never match.
+    val dottedMeridian = Regex("\\b([AaPp])\\s*\\.\\s*[Mm]\\s*\\.?", RegexOption.IGNORE_CASE)
+    val normalized = dottedMeridian.replace(text) { m ->
+        m.groupValues[1].lowercase() + "m"
+    }
+    var hour = -1
+    var minute = 0
+    var matchedText: String? = null
+
+    // 1) HH:MM or H.MM with optional am/pm — "7:30pm", "19:46", "7.46 pm".
+    val colon = Regex("(\\d{1,2})\\s*[:.]\\s*(\\d{2})\\s*(am|pm)?", RegexOption.IGNORE_CASE)
+        .find(normalized)
+    if (colon != null) {
+        hour = colon.groupValues[1].toInt()
+        minute = colon.groupValues[2].toInt()
+        val meridian = colon.groupValues[3].lowercase()
+        if (hour > 23 || minute > 59) return null
+        when (meridian) {
+            "pm" -> if (hour < 12) hour += 12
+            "am" -> if (hour == 12) hour = 0
+        }
+        matchedText = colon.value
+    } else {
+        // 2) Bare HHMM — "1946" -> 19:46, "746" -> 7:46.
+        val hhmm = Regex("\\b(\\d{3,4})\\s*(am|pm)?\\b", RegexOption.IGNORE_CASE)
+            .find(normalized)
+        if (hhmm != null) {
+            val digits = hhmm.groupValues[1]
+            val meridian = hhmm.groupValues[2].lowercase()
+            val h: Int
+            val m: Int
+            if (digits.length == 3) {
+                h = digits.substring(0, 1).toInt()
+                m = digits.substring(1).toInt()
+            } else {
+                h = digits.substring(0, 2).toInt()
+                m = digits.substring(2).toInt()
+            }
+            if (h <= 23 && m <= 59 && (meridian.isNotEmpty() || h >= 6 || m != 0)) {
+                // Guard: bare 3-4 digit numbers are only times when they
+                // carry a meridian or look clock-like; plain counts ("read
+                // 200 emails") must not parse as times.
+                hour = h
+                minute = m
+                when (meridian) {
+                    "pm" -> if (hour < 12) hour += 12
+                    "am" -> if (hour == 12) hour = 0
+                }
+                matchedText = hhmm.value
+            }
+        }
+        if (hour < 0) {
+            // 3) Bare hour + meridian — "9AM", "7 pm".
+            val bare = Regex("(\\d{1,2})\\s*(am|pm)", RegexOption.IGNORE_CASE)
+                .find(normalized) ?: return null
+            hour = bare.groupValues[1].toInt()
+            minute = 0
+            if (hour > 23) return null
+            when (bare.groupValues[2].lowercase()) {
+                "pm" -> if (hour < 12) hour += 12
+                "am" -> if (hour == 12) hour = 0
+            }
+            matchedText = bare.value
+        }
     }
     val lower = text.lowercase()
     val days: Set<Int>? = when {
@@ -78,7 +139,28 @@ fun parseSchedule(text: String): ParsedSchedule? {
         "sunday" in lower -> setOf(7)
         else -> null
     }
-    var instruction = text.replace(time.value, " ")
+    // Strip the time tokens from the instruction. Colon times first
+    // ("7:46 p.m."), else the exact HHMM/hour digits that produced this
+    // parse — never a blind 3-digit strip that would eat "200 emails".
+    var instruction = text
+    val colonPat = Regex("\\b\\d{1,2}\\s*[:.]\\s*\\d{2}\\b")
+    instruction = if (colonPat.containsMatchIn(instruction)) {
+        colonPat.replaceFirst(instruction, " ")
+    } else {
+        val candidates = listOf(
+            "%02d%02d".format(hour, minute),
+            "%d%02d".format(hour, minute),
+            hour.toString(),
+        ).distinct()
+        var tmp = instruction
+        for (c in candidates) {
+            if (Regex("\\b$c\\b").containsMatchIn(tmp)) {
+                tmp = Regex("\\b$c\\b").replaceFirst(tmp, " ")
+                break
+            }
+        }
+        tmp
+    }
     for (filler in listOf("every", "morning", "evening", "afternoon", "at", "on", "please")) {
         instruction = instruction.replace(Regex("\\b$filler\\b", RegexOption.IGNORE_CASE), " ")
     }
@@ -98,8 +180,17 @@ fun formatSchedulePreview(parsed: ParsedSchedule): String {
     return "Save? $when_ at ${formatScheduleTime(parsed.hour, parsed.minute)} — ${parsed.instruction}"
 }
 
-// Shared HH:MM shape for both preview lines so the two framings cannot drift.
-fun formatScheduleTime(hour: Int, minute: Int): String = "%d:%02d".format(hour, minute)
+// Shared 12-hour shape with AM/PM for both preview lines so the two
+// framings cannot drift ("7:46 PM", never ambiguous "19:46"/"07:46").
+// Tests pin the "H:MM" substring, which the 12-hour form still contains.
+fun formatScheduleTime(hour: Int, minute: Int): String {
+    val h12 = when (hour % 12) {
+        0 -> 12
+        else -> hour % 12
+    }
+    val ampm = if (hour < 12) "AM" else "PM"
+    return "$h12:%02d $ampm".format(minute)
+}
 
 // Ticket #69 (part of #65 T4): the typed/voice `unschedule <id>` fast path
 // is preview-gated like create — no silent disarm. Pure helpers behind

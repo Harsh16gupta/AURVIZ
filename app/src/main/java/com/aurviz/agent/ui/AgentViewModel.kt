@@ -226,11 +226,28 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         val hasKeys = llmKeys != null &&
             (llmKeys.geminiKey.isNotBlank() || llmKeys.deepseekKey.isNotBlank() || llmKeys.metaKey.isNotBlank())
         val autoOnboarded = storedOnboarding || tokens.isConnected() || hasKeys
+        // Default the active provider to the first configured key so a fresh
+        // launch never pins to an unconfigured BuildConfig default (HTTP 401).
+        // Stored override wins; no keys keeps Auto (null).
+        val storedProvider = UiPrefs.selectedProvider(appCtx)
+        val defaultProvider =
+            storedProvider ?: if (hasKeys && llmKeys != null) {
+                try {
+                    firstConfiguredProvider(
+                        BuildConfig.LLM_DEFAULT_PROVIDER,
+                        effectiveSettings(settingsFromBuildConfig(), llmKeys),
+                    )
+                } catch (_: Exception) {
+                    null
+                }
+            } else {
+                null
+            }
         _state.update {
             it.copy(
                 themeMode = UiPrefs.themeMode(appCtx),
                 hapticsEnabled = UiPrefs.hapticsEnabled(appCtx),
-                selectedProvider = UiPrefs.selectedProvider(appCtx),
+                selectedProvider = defaultProvider,
                 confirmSendEmail = UiPrefs.confirmSendEmail(appCtx),
                 disabledScheduleIds = UiPrefs.disabledScheduleIds(appCtx),
                 allowAlways = allowAlwaysStore.list(),
@@ -361,6 +378,28 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
             refreshSessions()
             if (sessionId == activeSessionId) {
                 startNewSession()
+            }
+        }
+    }
+
+    // Settings "Clear Interaction History" row: wipes persisted Past
+    // Interactions plus the in-memory feed and Session summaries so the
+    // next launch stays empty. Room stays version 6 (clearAll is a plain
+    // DELETE, no schema change).
+    fun clearInteractions() {
+        if (state.value.agentRunning) return
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                db.interactions().clearAll()
+            } catch (_: Exception) {
+                return@launch
+            }
+            _state.update {
+                it.copy(
+                    interactions = emptyList(),
+                    sessions = emptyList(),
+                    statusLine = "Past Interactions cleared.",
+                )
             }
         }
     }
@@ -704,7 +743,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         val draft = if (parts.size >= 3) {
             composeEmail(address, parts[1], parts[2])
         } else {
-            composeEmail(address, "From AURVIZ", first.getOrNull(1).orEmpty())
+            composeEmail(address, "From AIRA", first.getOrNull(1).orEmpty())
         }
         if (draft.body.isBlank()) {
             _state.update { it.copy(statusLine = "Empty message — say what to send.") }
@@ -1337,7 +1376,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                     "No Schedules yet."
                 } else {
                     "Schedules:\n" + all.joinToString("\n") { r ->
-                        "• ${r.id}: ${r.instruction} at ${r.hour}:${"%02d".format(r.minute)}"
+                        "• ${r.id}: ${r.instruction} at ${com.aurviz.agent.formatScheduleTime(r.hour, r.minute)}"
                     }
                 }
             } else {
@@ -1670,6 +1709,14 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                 // Issue #51: thread history + signed-in identity ride too;
                 // scheduled runs never enter runLoopCommand so they stay cold.
                 val memories = recallFor(roomStore, cmd).take(5)
+                // Every supplied fact teaches ranking: stamp useCount +
+                // lastUsed on each recalled hit (same as search_memory) so
+                // repeated recalls outrank stale rows. Guarded — a Room
+                // failure must never break the Task Execution.
+                try {
+                    memories.forEach { roomStore.markUsed(it.id) }
+                } catch (_: Exception) {
+                }
                 _state.update { it.copy(activeRecalledMemories = memories.map { m -> m.text }) }
                 val history = synchronized(sessionTranscript) { sessionTranscript.toList() }
                 val accountEmail = tokens.gmailAccount ?: state.value.gmailAccount
@@ -1782,6 +1829,15 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // Editable transcript: the sheet's text field calls this on every
+    // keystroke so misheard words can be fixed before confirming.
+    // Edited text counts as final (crisp), never interim (muted).
+    fun editVoiceTranscript(text: String) {
+        _state.update {
+            it.copy(voice = it.voice.copy(transcript = text, isPartial = false))
+        }
+    }
+
     fun onVoiceError(message: String) {
         _state.update {
             it.copy(voice = it.voice.copy(error = message, listening = false, orb = OrbState.Muted))
@@ -1826,9 +1882,9 @@ fun formatRunDuration(durationMs: Long): String {
     return "${totalSeconds / 60}m ${totalSeconds % 60}s"
 }
 
-// Human line, e.g. "Daily at 09:00" or "Mon, Wed, Fri at 09:00".
+// Human line, e.g. "Daily at 9:00 AM" or "Mon, Wed, Fri at 9:00 AM".
 fun formatScheduleTime(schedule: Schedule): String {
-    val time = "%02d:%02d".format(schedule.hour, schedule.minute)
+    val time = com.aurviz.agent.formatScheduleTime(schedule.hour, schedule.minute)
     val days = schedule.days
     if (days.isNullOrEmpty()) return "Daily at $time"
     val names = mapOf(1 to "Mon", 2 to "Tue", 3 to "Wed", 4 to "Thu", 5 to "Fri", 6 to "Sat", 7 to "Sun")

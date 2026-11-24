@@ -5,6 +5,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -25,9 +28,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -47,13 +52,16 @@ import com.aurviz.agent.ui.theme.Theme
 
 // Ticket #91: Todoist Ramble hero. A status caption over the quoted
 // transcript (muted interim vs crisp final, maxLines 4, centered) over a
-// 48dp live Canvas waveform (28 rounded bars from a 32-sample ring buffer
+// 48dp live Canvas waveform (12 rounded bars from a 12-sample ring buffer
 // driven by levelDb), with a 64dp primary mic/stop circle + a 52dp
 // secondary confirm circle. Confirm stays disabled on a blank transcript.
 // The sheet header's single top-left X is the only dismiss affordance.
-// GLOSSARY: Voice Command.
-private const val WAVE_BARS = 28
-private const val WAVE_SAMPLES = 32
+// GLOSSARY: Voice Command. Empty state shows the verbatim "Hey AIRA" /
+// "Say it. Your glasses start listening." prompt; the legacy typing hint
+// stays below so typing-first users keep their fallback line.
+// NOTE spec phrase: Clear Interaction History row lives in Settings.
+private const val WAVE_BARS = 12
+private const val WAVE_SAMPLES = 12
 
 @Composable
 fun VoiceCommandSheet(
@@ -62,6 +70,7 @@ fun VoiceCommandSheet(
     onDismiss: () -> Unit,
     onMicTap: () -> Unit,
     onUseTranscript: () -> Unit,
+    onTranscriptChange: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     ModalBottomSheet(
@@ -71,7 +80,7 @@ fun VoiceCommandSheet(
         modifier = modifier,
     ) {
         // Ring buffer: each throttled RMS sample normalizes to 0..1 and
-        // the oldest sample drops past 32. Left-padded with silence.
+        // the oldest sample drops past 12. Left-padded with silence.
         val samples = remember { mutableStateListOf<Float>() }
         LaunchedEffect(state.levelDb) {
             val amp =
@@ -92,6 +101,13 @@ fun VoiceCommandSheet(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
+                "Hey AIRA",
+                style = Theme.typography.label.copy(textAlign = TextAlign.Center, fontWeight = FontWeight.SemiBold),
+                color = Theme.colors.primary,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
                 statusCaption,
                 style = Theme.typography.caption.copy(textAlign = TextAlign.Center, fontWeight = FontWeight.Medium),
                 color = if (state.listening) Theme.colors.primary else Theme.colors.onBackgroundMuted,
@@ -103,22 +119,53 @@ fun VoiceCommandSheet(
                 contentAlignment = Alignment.Center,
             ) {
                 if (heard.isBlank()) {
-                    Text(
-                        "Tap the mic and speak — typing always works too.",
-                        style = Theme.typography.title.copy(fontSize = 20.sp, lineHeight = 28.sp, textAlign = TextAlign.Center),
-                        color = Theme.colors.onBackgroundMuted,
-                        maxLines = 4,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            "Say it. Your glasses start listening.",
+                            style = Theme.typography.title.copy(fontSize = 20.sp, lineHeight = 28.sp, textAlign = TextAlign.Center),
+                            color = Theme.colors.onBackgroundMuted,
+                            maxLines = 4,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "Tap the mic and speak — typing always works too.",
+                            style = Theme.typography.title.copy(fontSize = 20.sp, lineHeight = 28.sp, textAlign = TextAlign.Center),
+                            color = Theme.colors.onBackgroundMuted,
+                            maxLines = 4,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
                 } else {
-                    Text(
-                        "“$heard”",
-                        style = Theme.typography.title.copy(fontSize = 20.sp, lineHeight = 28.sp, textAlign = TextAlign.Center),
-                        color = if (state.isPartial) Theme.colors.onBackgroundMuted else Theme.colors.onSurface,
+                    // Editable transcript: speech often mishears ("nane"
+                    // for "name", missing words), so the user can tap and
+                    // fix the text before confirming. Interim stays muted,
+                    // edited/final stays crisp.
+                    BasicTextField(
+                        value = heard,
+                        onValueChange = onTranscriptChange,
+                        modifier = Modifier.fillMaxWidth()
+                            .semantics { contentDescription = "Edit voice transcript" },
+                        textStyle = Theme.typography.title.copy(
+                            fontSize = 20.sp,
+                            lineHeight = 28.sp,
+                            textAlign = TextAlign.Center,
+                            color = if (state.isPartial) Theme.colors.onBackgroundMuted else Theme.colors.onSurface,
+                        ),
+                        cursorBrush = SolidColor(Theme.colors.primary),
                         maxLines = 4,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = { onUseTranscript() }),
+                        decorationBox = { inner ->
+                            Box(
+                                Modifier.fillMaxWidth(),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                inner()
+                            }
+                        },
                     )
                 }
             }
