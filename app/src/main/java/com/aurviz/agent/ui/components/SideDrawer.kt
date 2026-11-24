@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.systemGestures
 import androidx.compose.foundation.layout.union
@@ -66,18 +67,19 @@ fun SideDrawer(
                     ),
             ) {
                 // Bottom inset is gesture-aware: on gesture-nav devices
-                // navigationBars.bottom reads ~0, so union with
-                // systemGestures (home-handle zone) plus an 8.dp floor
-                // keeps the profile footer fully above the bottom edge.
+                // navigationBars.bottom reads ~0, so union safeDrawing +
+                // navigationBars + systemGestures (home-handle zone) plus a
+                // 16.dp floor keeps the profile footer fully above the edge.
                 Column(
                     Modifier.fillMaxSize()
                         .statusBarsPadding()
                         .windowInsetsPadding(
-                            WindowInsets.navigationBars
+                            WindowInsets.safeDrawing
+                                .union(WindowInsets.navigationBars)
                                 .union(WindowInsets.systemGestures)
                                 .only(WindowInsetsSides.Bottom),
                         )
-                        .padding(bottom = 8.dp),
+                        .padding(bottom = 16.dp),
                 ) {
                     ProvideContentColor(Theme.colors.onSurface) {
                         content()

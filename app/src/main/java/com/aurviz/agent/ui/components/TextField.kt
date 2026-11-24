@@ -46,14 +46,14 @@ fun TextField(
             modifier
                 .fillMaxWidth()
                 .clip(Theme.shapes.small)
-                .background(Theme.colors.surfaceVariant)
+                .background(Theme.colors.inset)
                 .border(
-                    1.dp,
-                    if (focused) Theme.colors.primary else Theme.colors.border,
+                    if (focused) 1.dp else 0.5.dp,
+                    if (focused) Theme.colors.primary else Theme.colors.edge,
                     Theme.shapes.small,
                 )
                 .semantics { contentDescription = label },
-        textStyle = Theme.typography.body.copy(color = Theme.colors.onSurfaceVariant),
+        textStyle = Theme.typography.body.copy(color = Theme.colors.onSurface),
         cursorBrush = SolidColor(Theme.colors.primary),
         singleLine = minLines == 1,
         minLines = minLines,
