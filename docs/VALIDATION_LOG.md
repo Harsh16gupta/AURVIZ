@@ -2,6 +2,54 @@
 
 Every case where the AI was wrong and how it was caught. Add an entry with file:line evidence before moving on.
 
+## 2026-11-24 — Issue #67 audit: already-implemented-but-open (`main`)
+
+- Audited #67 (T2 scheduled hold + bounded creation consent) against the
+  tree before writing code: all 5 acceptance bullets already satisfied, no
+  genuine gaps, no code changes.
+- Reads run unattended; sends/schedule writes hold except exact-match
+  consent: `ScheduledRun.kt:255-262` allowlist, `:406-444` `scheduledRegistry`
+  read-only view (consent-aware `send_email` `:417-432`), `:530-539`
+  headless confirmer (reads allow, send only via `isConsentedSend`),
+  `:201-211` exact-match + `SendPolicy` gate. Tests:
+  `ScheduledConsentTest.kt:51-78` reads unattended, `:83-114` writes held,
+  `ScheduledRunTest.kt:63-85,98-151` allowlist + held sends.
+- Drift defers: `ScheduledRun.kt:157-163` `consentMatches`,
+  `:173-177` `consentPolicyAllows`, `:423-430` executor re-check,
+  `:555-565` drift saved as `PendingApproval`. Tests:
+  `ScheduledConsentTest.kt:147-169` recipient, `:172-196` bulk,
+  `:199-238` subject/body, `:241-263` policy, `:267-317` schedule-write /
+  cross-schedule scope.
+- Held approve/reject exactly-once: `ScheduledRun.kt:75-86` claim-first
+  approve, `:89-94` reject, `:54-57` in-memory atomic `take`,
+  `ScheduleDb.kt:239-244` Room DELETE-count guard. Tests:
+  `PendingApprovalTest.kt:76-97` approve + double-approve, `:110-141`
+  reject + schedule-write doubled, `ScheduledConsentTest.kt:342-366`
+  drift-held double-approve.
+- Idempotent per fire time + reconnect: `ScheduledRun.kt:335-341`
+  claim, `:595-607` `DuplicateSkipped`, `ScheduleDb.kt:172-185` IGNORE
+  idempotency, `ScheduleWork.kt:152-164` unique REPLACE work,
+  `:380-395` `isGmailAuthFailure`, `:473-489` Reconnect note,
+  `:551-574` `AUTH_ERROR`. Tests: `ScheduledRunTest.kt:186-212`
+  double-fire, `:256-268,335-357,401-455` store/Room/stale-lease,
+  `:218-234` expired token; `ScheduledConsentTest.kt:322-338,439-466`
+  consented double-fire + expired-with-consent.
+- Unit-test bullet: read allowlist, writes-held, exact-match, drift,
+  double-approve, cron/timezone edges all present —
+  `ScheduleTest.kt:76-136` `nextFireTime`/timezone/`emptyDays` plus
+  `ScheduledConsentTest.kt:403-434` consent-across-rearm.
+- ADR check (#65 requirement): bounded-consent amendment already in
+  `docs/adr/0002-workmanager-alarm-scheduling.md:7-11` and
+  `docs/adr/0003-gmail-oauth-confirmation.md:9-25` — part of #67's scope,
+  no separate ticket needed. Stale pointer noted, not fixed (audit-only
+  scope): `ScheduledRun.kt:102-104` still says the amendment "lands in
+  #70" though the ADR is already amended — comment-only drift, no
+  functional gap. Glossary: Confirmation / PendingApproval / Schedule used
+  canonically; no ADR conflict.
+- Tests: full `:app:testDebugUnitTest --rerun-tasks` green (516 tests /
+  48 files, 0 failures/errors), secret scan clean. Closed #67 with audit
+  comment, no implementation commit beyond this log entry.
+
 ## 2026-11-24 — V2.1 drawer footer still clipped on gesture-nav device (PR #97 follow-up)
 
 - **Wrong assumption: `navigationBarsPadding()` suffices for the drawer footer.**
