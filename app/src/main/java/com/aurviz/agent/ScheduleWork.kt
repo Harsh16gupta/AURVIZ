@@ -122,7 +122,7 @@ class ScheduleWorker(context: Context, params: WorkerParameters) : Worker(contex
         return defaultToolRegistry(
             gmailApi = gmail,
             scheduleStore = scheduleStore,
-            memoryStore = RoomMemoryStore(db.memories()),
+            memoryStore = memoryStoreWithOptionalSync(RoomMemoryStore(db.memories()), TokenVault(applicationContext)),
             backgroundWebLoader = OkHttpBackgroundPageLoader(),
         )
     }

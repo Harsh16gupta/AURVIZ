@@ -27,6 +27,19 @@ data class LlmKeys(
 internal const val DB_PASSPHRASE_PREF_KEY = "db_passphrase_b64"
 internal const val DB_PASSPHRASE_BYTES = 32
 
+// ADR-0006: Opt-in Mem0 sync config. OFF by default — Room stays primary.
+const val DEFAULT_MEM0_BASE_URL = "https://api.mem0.ai"
+
+data class Mem0SyncConfig(
+    val enabled: Boolean = false,
+    val baseUrl: String = DEFAULT_MEM0_BASE_URL,
+    val apiKey: String = "",
+    val userId: String = "aurviz_user",
+) {
+    val isActive: Boolean
+        get() = enabled && baseUrl.isNotBlank() && apiKey.isNotBlank()
+}
+
 internal fun defaultSecureRandomBytes(size: Int): ByteArray =
     ByteArray(size).also { SecureRandom().nextBytes(it) }
 
@@ -118,5 +131,46 @@ class TokenVault(private val prefs: SharedPreferences) {
         val encoded = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(fresh)
         prefs.edit().putString(DB_PASSPHRASE_PREF_KEY, encoded).apply()
         return fresh.copyOf()
+    }
+
+    fun saveMem0SyncConfig(config: Mem0SyncConfig) {
+        prefs.edit()
+            .putString("mem0_enabled", if (config.enabled) "true" else "false")
+            .putString("mem0_base_url", config.baseUrl.trim().ifBlank { DEFAULT_MEM0_BASE_URL })
+            .putString("mem0_api_key", config.apiKey.trim())
+            .putString("mem0_user_id", config.userId.trim().ifBlank { "aurviz_user" })
+            .apply()
+    }
+
+    fun loadMem0SyncConfig(): Mem0SyncConfig =
+        Mem0SyncConfig(
+            enabled = prefs.getString("mem0_enabled", "false") == "true",
+            baseUrl = prefs.getString("mem0_base_url", null)?.takeIf { it.isNotBlank() } ?: DEFAULT_MEM0_BASE_URL,
+            apiKey = prefs.getString("mem0_api_key", null).orEmpty(),
+            userId = prefs.getString("mem0_user_id", null)?.takeIf { it.isNotBlank() } ?: "aurviz_user",
+        )
+
+    fun clearMem0SyncConfig() {
+        prefs.edit()
+            .remove("mem0_enabled")
+            .remove("mem0_base_url")
+            .remove("mem0_api_key")
+            .remove("mem0_user_id")
+            .apply()
+    }
+
+    // Maps local Room id ("room_12") -> remote Mem0 UUID ("27777b1c-...")
+    // so subsequent PUT/DELETE calls target the exact server-assigned UUID.
+    fun saveMem0RemoteId(localId: String, remoteId: String) {
+        if (localId.isBlank() || remoteId.isBlank()) return
+        prefs.edit().putString("mem0_id_$localId", remoteId.trim()).apply()
+    }
+
+    fun loadMem0RemoteId(localId: String): String? =
+        prefs.getString("mem0_id_$localId", null)?.takeIf { it.isNotBlank() }
+
+    fun removeMem0RemoteId(localId: String) {
+        if (localId.isBlank()) return
+        prefs.edit().remove("mem0_id_$localId").apply()
     }
 }

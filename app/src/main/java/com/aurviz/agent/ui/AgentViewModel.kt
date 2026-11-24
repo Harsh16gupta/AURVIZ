@@ -27,6 +27,10 @@ import com.aurviz.agent.GmailException
 import com.aurviz.agent.GmailHttpApi
 import com.aurviz.agent.LoopbackReceiver
 import com.aurviz.agent.LlmKeys
+import com.aurviz.agent.DEFAULT_MEM0_BASE_URL
+import com.aurviz.agent.Mem0SyncConfig
+import com.aurviz.agent.MemoryStore
+import com.aurviz.agent.memoryStoreWithOptionalSync
 import com.aurviz.agent.EmailSummary
 import com.aurviz.agent.Memory
 import com.aurviz.agent.NamedProvider
@@ -190,7 +194,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
             .addMigrations(*AppMigrations)
             .configureEncryptedRoom(application, tokenVault)
             .build()
-    private val roomStore = RoomMemoryStore(db.memories())
+    private val roomStore: MemoryStore = memoryStoreWithOptionalSync(RoomMemoryStore(db.memories()), tokenVault)
     private val scheduleStore = RoomScheduleStore(db.schedules())
     private val gmail = GmailHttpApi(
         tokens,
@@ -1016,6 +1020,26 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearSingleLlmKey(provider: String) {
         saveSingleLlmKey(provider, "")
+    }
+
+    fun saveMem0SyncConfig(
+        enabled: Boolean,
+        baseUrl: String = DEFAULT_MEM0_BASE_URL,
+        apiKey: String,
+        userId: String = "aurviz_user",
+    ) {
+        tokenVault.saveMem0SyncConfig(
+            Mem0SyncConfig(
+                enabled = enabled,
+                baseUrl = baseUrl.trim().ifBlank { DEFAULT_MEM0_BASE_URL },
+                apiKey = apiKey.trim(),
+                userId = userId.trim().ifBlank { "aurviz_user" },
+            ),
+        )
+    }
+
+    fun clearMem0SyncConfig() {
+        tokenVault.clearMem0SyncConfig()
     }
 
     private fun refreshLlmKeyFlags() {
