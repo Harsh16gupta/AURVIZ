@@ -181,6 +181,9 @@ class V2ShellPartATest {
         val drawer = mainText("com/aurviz/agent/ui/components/SideDrawer.kt")
         assertTrue(drawer.contains("fillMaxWidth(0.82f)"))
         assertTrue(drawer.contains("widthIn(max = 310.dp)"))
+        // Gesture-nav devices report navigationBars.bottom ~0: the drawer
+        // bottom inset must union in systemGestures (verified on-device).
+        assertTrue(drawer.contains("systemGestures"))
         assertTrue(drawer.contains("Theme.colors.scrim"))
     }
 
