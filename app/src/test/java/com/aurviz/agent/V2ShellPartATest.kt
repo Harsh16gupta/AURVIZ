@@ -192,11 +192,19 @@ class V2ShellPartATest {
         val cmd = mainText("com/aurviz/agent/ui/screens/CommandScreen.kt")
         assertTrue(cmd.contains("\"Open menu\""))
         assertTrue(cmd.contains("\"New Session\""))
-        assertTrue(cmd.contains("\"More options\""))
+        assertTrue(cmd.contains("\"Workspace\""))
+        assertFalse("banned copy 'More options' in CommandScreen", cmd.contains("More options"))
         assertTrue(cmd.contains("\"Manage Memory\""))
         assertTrue(cmd.contains("View or add saved Preferences"))
         assertTrue(cmd.contains("Set up a recurring Task Execution"))
         assertTrue(cmd.contains("navigationBarsPadding()"))
+        assertTrue(cmd.contains(".imePadding()"))
+        // Single IME inset on the outer Column only — no duplicate
+        // navigationBars/ime union on the Composer wrapper.
+        assertFalse(
+            "duplicate IME inset in CommandScreen",
+            cmd.contains("windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))"),
+        )
         val banned = listOf("History", "Chat", "Alarm", "Cron", "send_email")
         // "Chat" appears only inside allowed compound? Fail on raw banned UI strings.
         for (word in listOf("History", "Alarm", "Cron")) {

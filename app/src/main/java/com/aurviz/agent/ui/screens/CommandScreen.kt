@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -13,16 +14,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.union
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -184,7 +181,7 @@ fun CommandScreen(
                 },
                 actions = {
                     Box(
-                        Modifier.size(44.dp).alpha(if (state.agentRunning) 0.38f else 1f).clickable(
+                        Modifier.size(48.dp).alpha(if (state.agentRunning) 0.38f else 1f).clickable(
                             enabled = !state.agentRunning,
                             onClick = onNewSession,
                             interactionSource = remember { MutableInteractionSource() },
@@ -200,7 +197,7 @@ fun CommandScreen(
                         )
                     }
                     Box(
-                        Modifier.size(44.dp).clickable(
+                        Modifier.size(48.dp).clickable(
                             onClick = { showMenuSheet = true },
                             interactionSource = remember { MutableInteractionSource() },
                             indication = androidx.compose.foundation.LocalIndication.current,
@@ -209,7 +206,7 @@ fun CommandScreen(
                     ) {
                         Icon(
                             Icons.DotsThree,
-                            contentDescription = "More options",
+                            contentDescription = "Workspace",
                             modifier = Modifier.size(22.dp),
                             tint = Theme.colors.onBackground,
                         )
@@ -294,9 +291,9 @@ fun CommandScreen(
 
             Column(
                 Modifier.fillMaxWidth()
-                    .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))
+                    .background(Theme.colors.background)
                     .padding(horizontal = Space * 4)
-                    .padding(top = Space * 3, bottom = 8.dp),
+                    .padding(top = 8.dp, bottom = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Composer(
@@ -342,7 +339,7 @@ fun CommandScreen(
         ModalBottomSheet(
             visible = showMenuSheet,
             onDismiss = { showMenuSheet = false },
-            title = "More options",
+            title = "Workspace",
         ) {
             MenuSheetRow(
                 icon = Icons.Brain,
@@ -501,8 +498,18 @@ private fun InteractionItem(
             }
         }
 
-        visiblePlanSteps(record.steps).forEachIndexed { _, step ->
-            StepRow(step = step)
+        val planSteps = visiblePlanSteps(record.steps)
+        if (planSteps.isNotEmpty()) {
+            Column(
+                Modifier.fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Theme.colors.surface)
+                    .border(0.5.dp, Theme.colors.edge, RoundedCornerShape(14.dp))
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                planSteps.forEach { step -> StepRow(step = step) }
+            }
         }
 
         if (record.confirmationStatus != null) {
@@ -628,8 +635,18 @@ private fun ActiveRunSection(
             )
         }
 
-        visiblePlanSteps(state.timeline).forEachIndexed { _, step ->
-            StepRow(step = step)
+        val activePlanSteps = visiblePlanSteps(state.timeline)
+        if (activePlanSteps.isNotEmpty()) {
+            Column(
+                Modifier.fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Theme.colors.surface)
+                    .border(0.5.dp, Theme.colors.edge, RoundedCornerShape(14.dp))
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                activePlanSteps.forEach { step -> StepRow(step = step) }
+            }
         }
 
         val pendingCall = state.pendingApproval
@@ -738,27 +755,48 @@ private fun StepRow(step: TimelineStep) {
         }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(
-            modifier = headerModifier.fillMaxWidth(),
+            modifier = headerModifier.fillMaxWidth().heightIn(min = 36.dp).padding(vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             when (step.state) {
                 StepState.DONE ->
-                    Icon(
-                        Icons.Check,
-                        contentDescription = null,
-                        modifier = Modifier.size(14.dp),
-                        tint = Theme.colors.success,
-                    )
+                    Box(
+                        Modifier.size(18.dp).clip(RoundedCornerShape(50))
+                            .background(Theme.colors.success.copy(alpha = 0.14f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Check,
+                            contentDescription = null,
+                            modifier = Modifier.size(12.dp),
+                            tint = Theme.colors.success,
+                        )
+                    }
                 StepState.FAILED ->
-                    Icon(
-                        Icons.X,
-                        contentDescription = null,
-                        modifier = Modifier.size(14.dp),
-                        tint = Theme.colors.destructive,
-                    )
+                    Box(
+                        Modifier.size(18.dp).clip(RoundedCornerShape(50))
+                            .background(Theme.colors.destructive.copy(alpha = 0.14f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.X,
+                            contentDescription = null,
+                            modifier = Modifier.size(12.dp),
+                            tint = Theme.colors.destructive,
+                        )
+                    }
                 StepState.READY, StepState.RUNNING ->
-                    Text("•", color = Theme.colors.onBackgroundMuted)
+                    Box(
+                        Modifier.size(18.dp).clip(RoundedCornerShape(50))
+                            .background(Theme.colors.primary.copy(alpha = 0.14f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Box(
+                            Modifier.size(6.dp).clip(RoundedCornerShape(50))
+                                .background(Theme.colors.primary),
+                        )
+                    }
             }
             Text(
                 stepDisplayTitle(step),
@@ -781,12 +819,14 @@ private fun StepRow(step: TimelineStep) {
         }
         if (expanded) {
             if (step.argsSummary != null) {
-                Text(
-                    step.argsSummary,
-                    style = Theme.typography.caption,
-                    color = Theme.colors.onBackgroundMuted,
-                    modifier = Modifier.padding(start = 22.dp),
-                )
+                Box(
+                    Modifier.padding(start = 26.dp, top = 2.dp, bottom = 4.dp).fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Theme.colors.inset)
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                ) {
+                    Text(step.argsSummary, style = Theme.typography.code, color = Theme.colors.onBackgroundMuted)
+                }
             }
             if (step.error != null) {
                 Text(
