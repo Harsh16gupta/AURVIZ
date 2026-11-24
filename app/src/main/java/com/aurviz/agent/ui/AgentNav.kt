@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -237,11 +236,11 @@ fun AgentNav(
             // Pinned Shortcuts: 12.dp horizontal padding, 4.dp vertical gap.
             Column(
                 Modifier.fillMaxWidth().padding(horizontal = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                // Row 1: Schedules 48.dp.
+                // Row 1: Schedules 44.dp.
                 Row(
-                    Modifier.fillMaxWidth().height(48.dp).clip(Theme.shapes.small).clickable(
+                    Modifier.fillMaxWidth().height(44.dp).clip(Theme.shapes.small).clickable(
                         onClick = {
                             drawerOpen = false
                             navController.navigate(Dests.SCHEDULES)
@@ -284,9 +283,9 @@ fun AgentNav(
                         )
                     }
                 }
-                // Row 2: Browser 48.dp.
+                // Row 2: Browser 44.dp.
                 Row(
-                    Modifier.fillMaxWidth().height(48.dp).clip(Theme.shapes.small).clickable(
+                    Modifier.fillMaxWidth().height(44.dp).clip(Theme.shapes.small).clickable(
                         onClick = {
                             drawerOpen = false
                             navController.navigate(Dests.BROWSER)
@@ -498,10 +497,10 @@ private fun SessionRow(
 ) {
     val rowModifier =
         if (active) {
-            Modifier.fillMaxWidth().heightIn(min = 44.dp).clip(Theme.shapes.small)
-                .background(Theme.colors.surfaceVariant).border(1.dp, Theme.colors.edge, Theme.shapes.small)
+            Modifier.fillMaxWidth().height(44.dp).clip(Theme.shapes.small)
+                .background(Theme.colors.surfaceVariant)
         } else {
-            Modifier.fillMaxWidth().heightIn(min = 44.dp).clip(Theme.shapes.small)
+            Modifier.fillMaxWidth().height(44.dp).clip(Theme.shapes.small)
                 .background(androidx.compose.ui.graphics.Color.Transparent)
         }
     Row(
@@ -509,7 +508,7 @@ private fun SessionRow(
             onClick = onOpen,
             interactionSource = remember { MutableInteractionSource() },
             indication = androidx.compose.foundation.LocalIndication.current,
-        ).padding(horizontal = 12.dp, vertical = 8.dp),
+        ).padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(

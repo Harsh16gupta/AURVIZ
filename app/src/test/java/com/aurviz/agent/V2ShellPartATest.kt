@@ -179,8 +179,8 @@ class V2ShellPartATest {
         assertTrue(nav.contains("Your past Sessions appear here."))
         assertTrue(nav.contains("Settings & Memory"))
         val drawer = mainText("com/aurviz/agent/ui/components/SideDrawer.kt")
-        assertTrue(drawer.contains("fillMaxWidth(0.84f)"))
-        assertTrue(drawer.contains("widthIn(max = 316.dp)"))
+        assertTrue(drawer.contains("fillMaxWidth(0.82f)"))
+        assertTrue(drawer.contains("widthIn(max = 310.dp)"))
         assertTrue(drawer.contains("Theme.colors.scrim"))
     }
 

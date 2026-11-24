@@ -35,7 +35,7 @@ fun SideDrawer(
     if (!visible) return
     Dialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
         Box(
             Modifier.fillMaxSize().background(Theme.colors.scrim).clickable(
@@ -48,8 +48,8 @@ fun SideDrawer(
             Box(
                 modifier
                     .fillMaxHeight()
-                    .fillMaxWidth(0.84f)
-                    .widthIn(max = 316.dp)
+                    .fillMaxWidth(0.82f)
+                    .widthIn(max = 310.dp)
                     .background(Theme.colors.surface)
                     .clickable(
                         enabled = false,

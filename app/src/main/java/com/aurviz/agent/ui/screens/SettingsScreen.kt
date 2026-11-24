@@ -140,7 +140,10 @@ fun SettingsScreen(
 
     Page(title = "Settings", modifier = modifier, onBack = onBack) {
         Section("Appearance & Feedback") {
-            Row(horizontalArrangement = Arrangement.spacedBy(Space * 2)) {
+            Row(
+                modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 listOf(
                     ThemeMode.SYSTEM to "System",
                     ThemeMode.DARK to "Dark",
@@ -158,6 +161,7 @@ fun SettingsScreen(
                     }
                 }
             }
+            CardDivider()
             OptionToggle(
                 title = "Haptics",
                 checked = state.hapticsEnabled,
@@ -189,6 +193,7 @@ fun SettingsScreen(
                         "Scopes: gmail.readonly · gmail.send.",
                     icon = Icons.EnvelopeSimple,
                 )
+                CardDivider()
                 OptionRow(
                     title = "Revoke Gmail access",
                     onClick = onRevokeGmail,
@@ -203,6 +208,7 @@ fun SettingsScreen(
                     navigates = true,
                 )
             }
+            CardDivider()
             OptionRow(
                 title = if (state.pasteFallbackVisible) "Hide pasted-link fallback" else "Paste callback link instead",
                 onClick = {
@@ -212,6 +218,7 @@ fun SettingsScreen(
                 navigates = true,
             )
             if (state.pasteFallbackVisible) {
+                CardDivider()
                 Text(
                     state.loopbackHint.ifBlank { "Finish in the newest browser tab, then paste the full address-bar link here." },
                     color = Theme.colors.onBackgroundMuted,
@@ -238,7 +245,9 @@ fun SettingsScreen(
                     }
                 }
             }
-            listOf("gemini", "deepseek", "meta").forEach { name ->
+            CardDivider()
+            listOf("gemini", "deepseek", "meta").forEachIndexed { index, name ->
+                if (index > 0) CardDivider()
                 val set = isSet(name)
                 OptionRow(
                     title = providerLabel(name),
@@ -258,24 +267,20 @@ fun SettingsScreen(
         }
         Section("Performance Telemetry") {
             val perf = state.perf
-            val scale =
-                maxOf(
-                    perf.planMs ?: 0L,
-                    perf.toolMs ?: 0L,
-                    perf.recallMs ?: 0L,
-                    perf.planAvgMs ?: 0L,
-                    perf.toolAvgMs ?: 0L,
-                    perf.recallAvgMs ?: 0L,
-                    1L,
-                ).toFloat()
-            TelemetryBar("Plan", perf.planMs, perf.planAvgMs, scale)
-            TelemetryBar("Tool", perf.toolMs, perf.toolAvgMs, scale)
-            TelemetryBar("Recall", perf.recallMs, perf.recallAvgMs, scale)
+            TelemetryBar("Plan", perf.planMs, perf.planAvgMs)
+            CardDivider()
+            TelemetryBar("Tool", perf.toolMs, perf.toolAvgMs)
+            CardDivider()
+            TelemetryBar("Recall", perf.recallMs, perf.recallAvgMs)
+            CardDivider()
             OptionRow(
                 title = "Provider",
                 description = "${state.interactions.size} Interactions recorded · " +
                     "${(perf.successRate * 100).toInt()}% success over ${perf.runs} runs.",
-                value = state.selectedProvider ?: state.providerUsed ?: BuildConfig.LLM_DEFAULT_PROVIDER,
+                value = providerLabel(
+                    (state.selectedProvider ?: state.providerUsed ?: BuildConfig.LLM_DEFAULT_PROVIDER)
+                        .lowercase(),
+                ),
             )
         }
         Section("Confirmation Rules") {
@@ -288,21 +293,25 @@ fun SettingsScreen(
                 description = "Always requires explicit Confirmation",
                 value = "Enforced",
             )
+            CardDivider()
             OptionRow(
                 title = "Read emails",
                 description = "Mailbox reads run without a Confirmation.",
                 value = "Auto-run",
             )
+            CardDivider()
             OptionRow(
                 title = "Forget Memory",
                 description = "Deletions preview before anything is removed.",
                 value = "Preview & Confirm",
             )
+            CardDivider()
             OptionRow(
                 title = "Scheduled writes",
                 description = "Unattended writes wait in Schedules.",
                 value = "Hold for Confirmation",
             )
+            CardDivider()
             // Ticket #68: revocable per-recipient allow-always grants
             // (GLOSSARY Preference). One listed address skips the send
             // card; revocation applies to the next send. SendPolicy still
@@ -313,6 +322,7 @@ fun SettingsScreen(
                 value = if (state.allowAlways.isEmpty()) "None" else "${state.allowAlways.size} set",
             )
             state.allowAlways.sorted().forEach { address ->
+                CardDivider()
                 OptionRow(
                     title = address,
                     description = "Tap to revoke — takes effect immediately.",
@@ -320,18 +330,25 @@ fun SettingsScreen(
                     destructive = true,
                 )
             }
-            TextField(
-                value = newAllow,
-                onValueChange = { newAllow = it },
-                label = "Always allow sends to…",
-            )
-            Button(
-                onClick = {
-                    onAllowAlwaysAdd(newAllow)
-                    newAllow = ""
-                },
+            CardDivider()
+            Column(
+                Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Text("Always allow")
+                TextField(
+                    value = newAllow,
+                    onValueChange = { newAllow = it },
+                    label = "Always allow sends to…",
+                )
+                Button(
+                    onClick = {
+                        onAllowAlwaysAdd(newAllow)
+                        newAllow = ""
+                    },
+                    modifier = Modifier.height(44.dp),
+                ) {
+                    Text("Always allow")
+                }
             }
         }
         Section(
@@ -358,6 +375,7 @@ fun SettingsScreen(
                     valueColor = Theme.colors.success,
                 )
             }
+            CardDivider()
             if (state.batteryOptimizationNeeded) {
                 OptionRow(
                     title = "Background running",
@@ -377,13 +395,15 @@ fun SettingsScreen(
                     valueColor = Theme.colors.success,
                 )
             }
+            CardDivider()
             OptionRow(
                 title = "Voice Command",
                 onClick = onVoiceSettings,
-                description = "Waveform, live transcription, hands-free options.",
+                description = "Live waveform and Voice Command preferences.",
                 icon = Icons.Waveform,
                 navigates = true,
             )
+            CardDivider()
             OptionRow(
                 title = "Device battery & autostart guide",
                 onClick = { guideExpanded = !guideExpanded },
@@ -466,14 +486,19 @@ fun SettingsScreen(
 }
 
 // Ticket #90: one ChatGPT-Usage-style labeled progress bar per stage —
-// Last + Avg ms with the Last sample as the filled share of the shared
-// telemetry scale. Foundation Box only; no new icons.
+// Last + Avg ms with the Last sample as the filled share of a fixed
+// 4000ms scale. Foundation Box only; no new icons.
+@Composable
+private fun CardDivider() {
+    Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Theme.colors.edge))
+    }
+}
 @Composable
 private fun TelemetryBar(
     label: String,
     lastMs: Long?,
     avgMs: Long?,
-    scale: Float,
 ) {
     Column(
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
@@ -494,16 +519,21 @@ private fun TelemetryBar(
         Box(
             modifier =
                 Modifier.fillMaxWidth()
-                    .height(8.dp)
+                    .height(4.dp)
                     .clip(Theme.shapes.fullyRounded)
                     .background(Theme.colors.surfaceVariant),
         ) {
-            val fraction = ((lastMs ?: 0L).toFloat() / scale).coerceIn(0f, 1f)
+            val fraction =
+                if (lastMs == null) {
+                    0f
+                } else {
+                    (lastMs.toFloat() / 4000f).coerceIn(0.06f, 1f)
+                }
             if (fraction > 0f) {
                 Box(
                     modifier =
                         Modifier.fillMaxWidth(fraction)
-                            .height(8.dp)
+                            .height(4.dp)
                             .clip(Theme.shapes.fullyRounded)
                             .background(Theme.colors.primary),
                 )

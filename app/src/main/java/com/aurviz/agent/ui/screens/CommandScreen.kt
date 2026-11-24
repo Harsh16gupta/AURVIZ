@@ -13,11 +13,16 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -55,6 +60,7 @@ import com.aurviz.agent.stepDisplayTitle
 import com.aurviz.agent.visiblePlanSteps
 import com.aurviz.agent.ui.AgentUiState
 import com.aurviz.agent.ui.InteractionRecord
+import com.aurviz.agent.ui.components.AppBar
 import com.aurviz.agent.ui.components.Button
 import com.aurviz.agent.ui.components.ButtonVariant
 import com.aurviz.agent.ui.components.Composer
@@ -131,60 +137,51 @@ fun CommandScreen(
     var showMenuSheet by rememberSaveable { mutableStateOf(false) }
     var showComposerActions by rememberSaveable { mutableStateOf(false) }
     val effectiveModel = state.selectedProvider ?: state.providerUsed ?: BuildConfig.LLM_DEFAULT_PROVIDER
-    val providerKeySet =
-        when (effectiveModel.lowercase()) {
-            "gemini" -> state.geminiKeySet
-            "deepseek" -> state.deepseekKeySet
-            "meta" -> state.metaKeySet
-            else -> state.geminiKeySet || state.deepseekKeySet || state.metaKeySet
-        }
     fun copyReceipt(text: String) {
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clipboard.setPrimaryClip(ClipData.newPlainText("confirmation", text))
     }
 
     ScreenScaffold(modifier) {
-        Column(Modifier.fillMaxSize()) {
-            Row(
-                Modifier
-                    .height(56.dp)
-                    .fillMaxWidth()
-                    .background(Theme.colors.background)
-                    .padding(horizontal = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
-                    Modifier.size(48.dp).clickable(
-                        onClick = onOpenDrawer,
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = androidx.compose.foundation.LocalIndication.current,
-                    ),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
-                        Icon(
-                            Icons.Menu,
-                            contentDescription = "Open menu",
-                            modifier = Modifier.size(22.dp),
-                            tint = Theme.colors.onBackground,
-                        )
-                        if (state.pendingApprovals.isNotEmpty()) {
-                            Box(
-                                Modifier.align(Alignment.TopEnd).size(7.dp)
-                                    .clip(androidx.compose.foundation.shape.CircleShape)
-                                    .background(Theme.colors.primary),
+        Column(
+            Modifier.fillMaxSize()
+                .navigationBarsPadding()
+                .imePadding(),
+        ) {
+            AppBar(
+                navigation = {
+                    Box(
+                        Modifier.size(48.dp).clickable(
+                            onClick = onOpenDrawer,
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = androidx.compose.foundation.LocalIndication.current,
+                        ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Menu,
+                                contentDescription = "Open menu",
+                                modifier = Modifier.size(22.dp),
+                                tint = Theme.colors.onBackground,
                             )
+                            if (state.pendingApprovals.isNotEmpty()) {
+                                Box(
+                                    Modifier.align(Alignment.TopEnd).size(7.dp)
+                                        .clip(androidx.compose.foundation.shape.CircleShape)
+                                        .background(Theme.colors.primary),
+                                )
+                            }
                         }
                     }
-                }
-                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                },
+                title = {
                     ModelPill(
                         model = providerDisplayName(effectiveModel),
-                        badge = if (providerKeySet) "Set" else "Not set",
                         onClick = { showProviderSheet = true },
                     )
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                },
+                actions = {
                     Box(
                         Modifier.size(44.dp).alpha(if (state.agentRunning) 0.38f else 1f).clickable(
                             enabled = !state.agentRunning,
@@ -216,8 +213,8 @@ fun CommandScreen(
                             tint = Theme.colors.onBackground,
                         )
                     }
-                }
-            }
+                },
+            )
 
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 LazyColumn(
@@ -296,9 +293,9 @@ fun CommandScreen(
 
             Column(
                 Modifier.fillMaxWidth()
-                    .imePadding()
-                    .navigationBarsPadding()
-                    .padding(horizontal = Space * 4, vertical = Space * 3),
+                    .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))
+                    .padding(horizontal = Space * 4)
+                    .padding(top = Space * 3, bottom = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Composer(
