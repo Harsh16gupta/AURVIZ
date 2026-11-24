@@ -79,6 +79,7 @@ fun AgentNav(
     onMicTap: () -> Unit,
     onOpenExactAlarmSettings: () -> Unit,
     onOpenBatterySettings: () -> Unit,
+    onVoiceDismiss: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val navController = rememberNavController()
@@ -495,10 +496,16 @@ fun AgentNav(
         VoiceCommandSheet(
             visible = showVoice,
             state = state.voice,
-            onDismiss = { showVoice = false },
+            onDismiss = {
+                // Ticket #107 (T2): dismissing the sheet cancels recognition
+                // so the microphone never stays hot.
+                onVoiceDismiss()
+                showVoice = false
+            },
             onMicTap = onMicTap,
             onUseTranscript = {
                 val text = state.voice.transcript
+                onVoiceDismiss()
                 showVoice = false
                 if (text.isNotBlank()) vm.sendCommand(text)
             },

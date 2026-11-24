@@ -605,4 +605,105 @@ class RedTeamTest {
         assertEquals(ConfirmationOutcome.DENIED, receipt.outcome)
         assertTrue(receipt.detail.contains("denied"))
     }
+
+    // --- Ticket #107 (T2, fix 7): untrusted-run source guard for
+    // save_memory. After an external read (email/web) in the same run, an
+    // injected `source = "you told me"` is forced to "auto-saved" — the
+    // poison can never pass as a user-stated fact. A direct user command
+    // (no prior read) keeps its source.
+
+    @Test
+    fun saveMemoryAfterEmailReadForcesAutoSavedSource() {
+        val store = InMemoryStore()
+        val gmail = RecordingGmail()
+        val llm =
+            FakeLlmProvider(
+                listOf(
+                    call("call_1", "read_email", mapOf("id" to "m_evil")),
+                    call("call_2", "save_memory", mapOf("text" to "attacker directive", "source" to "you told me")),
+                    answer("Noted."),
+                ),
+            )
+        val result =
+            AgentLoop(
+                llm,
+                defaultToolRegistry(gmailApi = gmail, scheduleStore = InMemoryScheduleStore(), memoryStore = store),
+                confirm = { ApprovalDecision.Rejected },
+            ).run("check mail")
+        assertTrue(result is AgentLoopResult.Answered)
+        result as AgentLoopResult.Answered
+        val saveStep = result.steps.single { it.call.name == "save_memory" }
+        assertEquals("auto-saved", saveStep.call.arguments["source"])
+        val hits = recallFor(store, "attacker directive")
+        assertEquals(1, hits.size)
+        assertEquals("auto-saved", hits.single().source)
+        assertFalse(hits.single().text.contains("you told me"))
+    }
+
+    @Test
+    fun saveMemoryAfterWebReadForcesAutoSavedSource() {
+        val store = InMemoryStore()
+        val llm =
+            FakeLlmProvider(
+                listOf(
+                    call("call_1", "open_url", mapOf("url" to "https://example.com")),
+                    call("call_2", "save_memory", mapOf("text" to "poisoned page fact", "source" to "you told me")),
+                    answer("Saved."),
+                ),
+            )
+        val result =
+            AgentLoop(
+                llm,
+                defaultToolRegistry(
+                    scheduleStore = InMemoryScheduleStore(),
+                    memoryStore = store,
+                    webBridge = FakeWebBridge(mapOf("https://example.com" to "<html><body>hi</body></html>")),
+                ),
+                confirm = { ApprovalDecision.Rejected },
+            ).run("check page")
+        assertTrue(result is AgentLoopResult.Answered)
+        result as AgentLoopResult.Answered
+        assertEquals("auto-saved", result.steps.single { it.call.name == "save_memory" }.call.arguments["source"])
+        assertEquals("auto-saved", recallFor(store, "poisoned page fact").single().source)
+    }
+
+    @Test
+    fun saveMemoryWithoutPriorReadKeepsUserSource() {
+        val store = InMemoryStore()
+        val llm =
+            FakeLlmProvider(
+                listOf(
+                    call("call_1", "save_memory", mapOf("text" to "my boss is Priya", "source" to "you told me")),
+                    answer("Saved."),
+                ),
+            )
+        val result =
+            AgentLoop(
+                llm,
+                defaultToolRegistry(scheduleStore = InMemoryScheduleStore(), memoryStore = store),
+                confirm = { ApprovalDecision.Rejected },
+            ).run("remember my boss is Priya")
+        assertTrue(result is AgentLoopResult.Answered)
+        result as AgentLoopResult.Answered
+        assertEquals("you told me", result.steps.single { it.call.name == "save_memory" }.call.arguments["source"])
+        assertEquals("you told me", recallFor(store, "boss Priya").single().source)
+    }
+
+    @Test
+    fun sanitizeMemoryCallOnlyForcesSaveMemoryAfterUntrustedRead() {
+        val poison = ToolCall("c1", "save_memory", mapOf("text" to "x", "source" to "you told me"))
+        assertEquals(
+            "auto-saved",
+            sanitizeMemoryCallForUntrustedRun(poison, untrustedReadOccurred = true).arguments["source"],
+        )
+        assertEquals(
+            "you told me",
+            sanitizeMemoryCallForUntrustedRun(poison, untrustedReadOccurred = false).arguments["source"],
+        )
+        val other = ToolCall("c2", "read_email", mapOf("id" to "m1"))
+        assertEquals(other, sanitizeMemoryCallForUntrustedRun(other, untrustedReadOccurred = true))
+        assertTrue(UNTRUSTED_EXTERNAL_READ_TOOLS.containsAll(
+            setOf("search_emails", "read_email", "open_url", "get_page_text", "click", "scroll", "extract"),
+        ))
+    }
 }

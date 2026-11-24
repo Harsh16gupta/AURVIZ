@@ -69,7 +69,10 @@ class ScheduleWorker(context: Context, params: WorkerParameters) : Worker(contex
                 fireSchedule(scheduleId, fireTime, scheduleStore) { sched ->
                     runScheduledRoutine(sched, fireTime, chat, full, RoomScheduleRunStore(db.runs()), RoomPendingApprovalStore(db.approvals()))
                 }
-            if (outcome.nextArmMillis != null) {
+            // Ticket #107 (T2): a disabled Schedule is never re-armed after
+            // it fires — the toggle is a durable off, not a skip-once.
+            val disabledIds = com.aurviz.agent.ui.components.UiPrefs.disabledScheduleIds(applicationContext)
+            if (outcome.nextArmMillis != null && schedule.id !in disabledIds) {
                 try {
                     registerRoutineAlarm(applicationContext, schedule)
                 } catch (_: Exception) {
@@ -113,6 +116,7 @@ class ScheduleWorker(context: Context, params: WorkerParameters) : Worker(contex
                 tokens,
                 BuildConfig.GOOGLE_OAUTH_CLIENT_ID,
                 BuildConfig.GOOGLE_OAUTH_CLIENT_SECRET,
+                onTokensUpdated = { updated -> TokenVault(applicationContext).saveFrom(updated) },
             )
         return defaultToolRegistry(
             gmailApi = gmail,
@@ -181,7 +185,9 @@ class RescheduleWorker(context: Context, params: WorkerParameters) : Worker(cont
                 .addMigrations(*AppMigrations)
                 .build()
         try {
-            rescheduleAll(RoomScheduleStore(db.schedules())) { registerRoutineAlarm(applicationContext, it) }
+            // Ticket #107 (T2): boot/timezone re-arm skips disabled Schedules.
+            val disabledIds = com.aurviz.agent.ui.components.UiPrefs.disabledScheduleIds(applicationContext)
+            rescheduleAll(RoomScheduleStore(db.schedules()), disabledIds) { registerRoutineAlarm(applicationContext, it) }
             return Result.success()
         } catch (_: Exception) {
             return Result.failure()

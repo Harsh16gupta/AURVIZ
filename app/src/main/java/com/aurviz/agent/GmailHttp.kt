@@ -26,6 +26,7 @@ class GmailHttpApi(
     private val clientId: String,
     private val clientSecret: String = "",
     var redirectUri: String = GMAIL_REDIRECT_URI,
+    private val onTokensUpdated: (TokenStore) -> Unit = {},
     private val client: OkHttpClient =
         OkHttpClient.Builder()
             .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
@@ -47,20 +48,30 @@ class GmailHttpApi(
             val json = JSONObject(text)
             tokens.gmailAccessToken = json.getString("access_token")
             if (json.has("refresh_token")) tokens.gmailRefreshToken = json.getString("refresh_token")
+            onTokensUpdated(tokens)
         }
     }
 
     private fun refreshAccess() {
-        val refresh = tokens.gmailRefreshToken ?: throw GmailException(401, "not connected")
+        val refresh = tokens.gmailRefreshToken?.takeIf { it.isNotBlank() }
+            ?: throw GmailException(401, "not connected")
         val form = buildTokenRefreshForm(refresh, clientId, clientSecret)
         val body = FormBody.Builder().apply { form.forEach { (k, v) -> add(k, v) } }.build()
         val req = Request.Builder().url("https://oauth2.googleapis.com/token").post(body).build()
         client.newCall(req).execute().use { response ->
             val text = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
+                if (response.code == 400 || response.code == 401) {
+                    // Ticket #107 (T2): invalid_grant means the grant is dead —
+                    // drop the stale access token so the next call re-connects
+                    // instead of retrying with a revoked credential.
+                    tokens.gmailAccessToken = null
+                    onTokensUpdated(tokens)
+                }
                 throw GmailException(response.code, "token refresh: HTTP ${response.code} ${text.take(200).replace("\n", " ")}")
             }
             tokens.gmailAccessToken = JSONObject(text).getString("access_token")
+            onTokensUpdated(tokens)
         }
     }
 
@@ -69,14 +80,25 @@ class GmailHttpApi(
     private fun post(path: String, json: String): String = authed("POST", path, json)
 
     // One call with the current token; on 401 refresh once and retry once.
+    // Ticket #107 (T2): bootstraps refreshAccess() when the access token is
+    // blank but a refresh token is present (e.g. cold start from vault with
+    // only the refresh persisted).
     private fun authed(method: String, path: String, json: String?): String {
-        val token = tokens.gmailAccessToken ?: throw GmailException(401, "not connected")
+        var token = tokens.gmailAccessToken?.takeIf { it.isNotBlank() }
+        if (token == null) {
+            if (!tokens.isConnected()) throw GmailException(401, "not connected")
+            refreshAccess()
+            token = tokens.gmailAccessToken?.takeIf { it.isNotBlank() }
+                ?: throw GmailException(401, "not connected")
+            return rawCall(method, path, json, token)
+        }
         try {
             return rawCall(method, path, json, token)
         } catch (e: GmailException) {
             if (e.httpCode != 401) throw e
             refreshAccess()
-            val retry = tokens.gmailAccessToken ?: throw GmailException(401, "not connected")
+            val retry = tokens.gmailAccessToken?.takeIf { it.isNotBlank() }
+                ?: throw GmailException(401, "not connected")
             return rawCall(method, path, json, retry)
         }
     }

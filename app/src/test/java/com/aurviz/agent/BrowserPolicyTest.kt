@@ -1,6 +1,8 @@
 package com.aurviz.agent
 
+import java.io.File
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -57,6 +59,65 @@ class BrowserPolicyTest {
         // hosts. The Browser tab must refuse them like the Tool layer does.
         val route = routeBrowserUrl("example.com")
         assertTrue(route is BrowserRoute.Refuse)
+    }
+
+    // --- Ticket #107 (T2, fix 5): WebView redirect/sub-navigation gate. ---
+    // shouldBlockWebNavigation is the pure JVM-testable verdict; the
+    // WebViewClient overrides in WebViewBridge.kt pin the wiring.
+
+    @Test
+    fun shouldBlockWebNavigationAllowsHttpAndBlocksOthers() {
+        assertFalse(shouldBlockWebNavigation("https://example.com"))
+        assertFalse(shouldBlockWebNavigation("http://example.com/path?q=1"))
+        assertFalse(shouldBlockWebNavigation("HTTPS://example.com"))
+        assertFalse(shouldBlockWebNavigation("  https://example.com  "))
+        for (bad in listOf(
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "data:text/html,hi",
+            "ftp://example.com/x",
+            "about:blank",
+            "intent://example.com/#Intent;scheme=https;end",
+            "example.com",
+            "",
+            "   ",
+        )) {
+            assertTrue("$bad must block, got allow", shouldBlockWebNavigation(bad))
+        }
+        assertTrue("null must block", shouldBlockWebNavigation(null))
+    }
+
+    @Test
+    fun webNavigationGateMatchesSharedAllowlist() {
+        val loads = listOf("https://example.com", "http://example.com/x")
+        val refuses = listOf(
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "data:text/html,hi",
+            "ftp://example.com/x",
+            "example.com",
+        )
+        for (url in loads) {
+            assertTrue(isAllowedWebUrl(url))
+            assertFalse(shouldBlockWebNavigation(url))
+        }
+        for (url in refuses) {
+            assertTrue(!isAllowedWebUrl(url))
+            assertTrue(shouldBlockWebNavigation(url))
+        }
+    }
+
+    @Test
+    fun webViewClientOverridesEnforceSchemeGate() {
+        var dir = File(System.getProperty("user.dir"))
+        while (true) {
+            if (File(dir, "src/main/AndroidManifest.xml").exists()) break
+            dir = dir.parentFile ?: throw AssertionError("Could not locate app module dir from user.dir")
+        }
+        val bridge = File(dir, "src/main/java/com/aurviz/agent/WebViewBridge.kt").readText()
+        assertTrue(bridge.contains("shouldOverrideUrlLoading"))
+        assertTrue(bridge.contains("shouldBlockWebNavigation"))
+        assertTrue(bridge.contains("android.webkit.WebResourceRequest"))
     }
 
     @Test

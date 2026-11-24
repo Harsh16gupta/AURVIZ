@@ -24,6 +24,18 @@ class WebViewBridge(private val webView: WebView) : WebBridge {
         webView.post {
             webView.webViewClient =
                 object : android.webkit.WebViewClient() {
+                    // Ticket #107 (T2): scheme enforcement on every redirect
+                    // and sub-navigation — anything outside http(s) is
+                    // blocked via the shared shouldBlockWebNavigation gate.
+                    override fun shouldOverrideUrlLoading(
+                        view: WebView,
+                        request: android.webkit.WebResourceRequest,
+                    ): Boolean = shouldBlockWebNavigation(request.url?.toString())
+
+                    @Suppress("DEPRECATION")
+                    override fun shouldOverrideUrlLoading(view: WebView, url: String?): Boolean =
+                        shouldBlockWebNavigation(url)
+
                     override fun onPageFinished(view: WebView, u: String) {
                         if (!finished.compareAndSet(false, true)) return
                         view.evaluateJavascript(buildOuterHtmlJs()) { value ->

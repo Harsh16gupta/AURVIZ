@@ -108,6 +108,7 @@ class MainActivity : ComponentActivity() {
                     AgentNav(
                         vm = vm,
                         onMicTap = ::onMicTapped,
+                        onVoiceDismiss = ::stopVoiceRecognition,
                         onOpenExactAlarmSettings = ::openExactAlarmSettings,
                         onOpenBatterySettings = ::openBatteryExemption,
                     )
@@ -161,6 +162,16 @@ class MainActivity : ComponentActivity() {
             PackageManager.PERMISSION_GRANTED
 
     private fun onMicTapped() {
+        // Ticket #107 (T2): the sheet's mic button doubles as Stop while
+        // listening — stop instead of starting a second recognition.
+        if (vm.state.value.voice.listening) {
+            try {
+                recognizer?.stopListening()
+            } catch (_: Exception) {
+            }
+            vm.setVoiceListening(false)
+            return
+        }
         val availability =
             voiceAvailability(SpeechRecognizer.isRecognitionAvailable(this), hasMicPermission())
         when (availability.state) {
@@ -178,6 +189,18 @@ class MainActivity : ComponentActivity() {
             VoiceState.FALLBACK_TEXT -> {
                 vm.onVoiceError("No voice recognition on this device. Please type.")
             }
+        }
+    }
+
+    // Ticket #107 (T2): dismissing the Voice Command sheet must never
+    // leave the microphone hot — cancel recognition and clear listening.
+    private fun stopVoiceRecognition() {
+        if (vm.state.value.voice.listening) {
+            try {
+                recognizer?.cancel()
+            } catch (_: Exception) {
+            }
+            vm.setVoiceListening(false)
         }
     }
 

@@ -83,6 +83,7 @@ import com.aurviz.agent.settingsFromBuildConfig
 import com.aurviz.agent.recallFor
 import com.aurviz.agent.receiptForGated
 import com.aurviz.agent.registerRoutineAlarm
+import com.aurviz.agent.rescheduleAll
 import com.aurviz.agent.rejectPendingApproval
 import com.aurviz.agent.rememberFact
 import com.aurviz.agent.retryDisclosure
@@ -192,6 +193,9 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         tokens,
         BuildConfig.GOOGLE_OAUTH_CLIENT_ID,
         BuildConfig.GOOGLE_OAUTH_CLIENT_SECRET,
+        // Ticket #107 (T2): refreshed tokens persist to the vault on every
+        // rotation so a cold start never reuses a stale access token.
+        onTokensUpdated = { updated -> tokenVault.saveFrom(updated) },
     )
 
     // Set by BrowserScreen once its retained WebView exists (see WebViewHolder).
@@ -199,6 +203,9 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
 
     private var lastCommand: String? = null
     private var signingIn = false
+    // Ticket #107 (T2): the live loopback socket. Closed on paste/dismiss/
+    // re-entry/clear so a stale receiver never leaks its ServerSocket.
+    private var activeLoopback: LoopbackReceiver? = null
     private var pendingLinkVerifier: String? = null
     private var lastExchangedCode: String? = null
     private var signInDone = false
@@ -778,7 +785,11 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun startSignIn() {
-        if (signingIn) return
+        // Ticket #107 (T2): a stuck signingIn flag must not brick sign-in —
+        // close any previous receiver and start fresh instead of returning.
+        activeLoopback?.close()
+        activeLoopback = null
+        signingIn = false
         signingIn = true
         signInDone = false
         _state.update { it.copy(statusLine = "Opening Google sign-in…") }
@@ -790,6 +801,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                 _state.update { it.copy(statusLine = "Sign-in failed: ${e.message}") }
                 return@launch
             }
+            activeLoopback = receiver
             val verifier = newCodeVerifier()
             pendingLinkVerifier = verifier
             gmail.redirectUri = receiver.redirectUri
@@ -808,6 +820,7 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
             val code = receiver.waitForCode()
+            activeLoopback = null
             signingIn = false
             if (signInDone) return@launch
             if (code == null) {
@@ -833,6 +846,11 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
             _state.update { it.copy(statusLine = "That link is from an older attempt — copy the newest tab's link.") }
             return
         }
+        // Ticket #107 (T2): the pasted code supersedes the socket wait —
+        // close it so the waiter wakes instead of holding the port.
+        activeLoopback?.close()
+        activeLoopback = null
+        signingIn = false
         pendingLinkVerifier = null
         signInDone = true
         _state.update { it.copy(pasteFallbackVisible = false) }
@@ -840,6 +858,10 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun dismissPasteFallback() {
+        // Ticket #107 (T2): dismissing the fallback abandons the socket wait.
+        activeLoopback?.close()
+        activeLoopback = null
+        signingIn = false
         _state.update { it.copy(pasteFallbackVisible = false) }
     }
 
@@ -1346,7 +1368,10 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val app = getApplication<Application>()
-                for (schedule in listSchedules(scheduleStore)) {
+                // Ticket #107 (T2): a disabled Schedule stays off across
+                // resume — the toggle is durable, never re-armed.
+                val disabledIds = state.value.disabledScheduleIds
+                rescheduleAll(scheduleStore, disabledIds) { schedule ->
                     try {
                         registerRoutineAlarm(app, schedule)
                     } catch (_: Exception) {
@@ -1691,6 +1716,9 @@ class AgentViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
+        // Ticket #107 (T2): never leak the loopback socket past the ViewModel.
+        activeLoopback?.close()
+        activeLoopback = null
         try {
             db.close()
         } catch (_: Exception) {
