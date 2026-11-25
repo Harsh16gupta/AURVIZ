@@ -11,37 +11,37 @@ agent loop, receivers doing no DB work.
 
 ```mermaid
 flowchart TB
-    subgraph UI ["UI and Input"]
-        CMD ["CommandScreen + Composer"]
-        VOICE ["VoiceInput + Sheets"]
-        CARDS ["Confirmation Cards"]
-        SCREENS ["Browser Schedules Memory Settings"]
+    subgraph UI["UI and Input"]
+        CMD["CommandScreen + Composer"]
+        VOICE["VoiceInput + Sheets"]
+        CARDS["Confirmation Cards"]
+        SCREENS["Browser Schedules Memory Settings"]
     end
-    subgraph ORCH ["Agent Orchestration + Security Gate"]
-        VM ["AgentViewModel router"]
-        LOOP ["AgentLoop max 20 steps"]
-        REG ["ToolRegistry gate"]
-        GATE ["ApprovalGate one-shot"]
+    subgraph ORCH["Agent Orchestration + Security Gate"]
+        VM["AgentViewModel router"]
+        LOOP["AgentLoop max 20 steps"]
+        REG["ToolRegistry gate"]
+        GATE["ApprovalGate one-shot"]
     end
-    subgraph LLM ["LLM Layer"]
-        PIN ["PinnedFallbackChatLlm"]
-        PROV ["DeepSeek + Meta OpenAI-shape"]
+    subgraph LLM["LLM Layer"]
+        PIN["PinnedFallbackChatLlm"]
+        PROV["DeepSeek + Meta OpenAI-shape"]
     end
-    subgraph TOOL ["Tool Execution"]
-        GMAIL ["Gmail search read send"]
-        WEB ["Web open extract"]
-        MEMT ["Memory save search"]
-        SCHT ["Schedule create list cancel"]
+    subgraph TOOL["Tool Execution"]
+        GMAIL["Gmail search read send"]
+        WEB["Web open extract"]
+        MEMT["Memory save search"]
+        SCHT["Schedule create list cancel"]
     end
-    subgraph STORE ["Memory + Secure Storage"]
-        ROOM ["Room v7 + FTS SQLCipher"]
-        VAULT ["TokenVault encrypted"]
-        MEM0 ["Mem0Sync opt-in mirror"]
+    subgraph STORE["Memory + Secure Storage"]
+        ROOM["Room v7 + FTS SQLCipher"]
+        VAULT["TokenVault encrypted"]
+        MEM0["Mem0Sync opt-in mirror"]
     end
-    subgraph BG ["Scheduling + Background"]
-        ALARM ["AlarmManager + BootReceiver"]
-        WORK ["WorkManager routine Worker"]
-        SRUN ["ScheduledRun allowlist + PendingApproval"]
+    subgraph BG["Scheduling + Background"]
+        ALARM["AlarmManager + BootReceiver"]
+        WORK["WorkManager routine Worker"]
+        SRUN["ScheduledRun allowlist + PendingApproval"]
     end
     CMD --> VM
     VOICE --> VM
