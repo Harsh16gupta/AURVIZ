@@ -1,4 +1,4 @@
-# AURVIZ architecture
+# AIRA architecture
 
 Glossary terms are used exactly (`GLOSSARY.md`); ADRs 0001–0005 decide the
 closed questions. Boundaries (`AGENTS.md`): UI renders state and collects
@@ -11,47 +11,67 @@ agent loop, receivers doing no DB work.
 
 ```mermaid
 flowchart TB
-    subgraph UI["Compose UI (renders state, collects approvals)"]
-        CMD[CommandScreen<br/>Interaction feed + Composer]
-        CARD[ConfirmationCard<br/>approve / edit / reject]
-        BROW[BrowserScreen]
-        SCHS[SchedulesScreen]
-        MEM[MemoryScreen]
-        SET[SettingsScreen]
+    subgraph UI ["UI and Input"]
+        CMD ["CommandScreen + Composer"]
+        VOICE ["VoiceInput + Sheets"]
+        CARDS ["Confirmation Cards"]
+        SCREENS ["Browser Schedules Memory Settings"]
     end
-    subgraph AG["Agent (orchestrates, holds no tool impls)"]
-        VM[AgentViewModel]
-        LOOP[AgentLoop<br/>max 8 steps, timeouts]
-        REG[ToolRegistry<br/>confirmation gate]
+    subgraph ORCH ["Agent Orchestration + Security Gate"]
+        VM ["AgentViewModel router"]
+        LOOP ["AgentLoop max 20 steps"]
+        REG ["ToolRegistry gate"]
+        GATE ["ApprovalGate one-shot"]
     end
-    subgraph TOOLS["Tools (schemas + executors)"]
-        GMAIL[Gmail: search/read/send]
-        WEB[Web: foreground bridge +<br/>background OkHttp/Jsoup]
-        MEM[Memory: Room store]
-        SCH[Schedule store]
+    subgraph LLM ["LLM Layer"]
+        PIN ["PinnedFallbackChatLlm"]
+        PROV ["DeepSeek + Meta OpenAI-shape"]
     end
-    SCHED[Scheduler: exact alarm -> Worker -> loop<br/>read-only allowlist]
-    MEMDB[(Room v6: memories, memoriesFts<br/>schedules, schedule_runs<br/>pending_approvals, interactions)]
-    VAULT[[TokenVault<br/>EncryptedSharedPreferences]]
-    LLM[(DeepSeek default + fallbacks<br/>OpenAI-shape HTTP)]
-
-    CMD -->|command| VM
-    VM -->|memories section + user text| LOOP
-    LOOP <-->|tool calls / gated results| REG
+    subgraph TOOL ["Tool Execution"]
+        GMAIL ["Gmail search read send"]
+        WEB ["Web open extract"]
+        MEMT ["Memory save search"]
+        SCHT ["Schedule create list cancel"]
+    end
+    subgraph STORE ["Memory + Secure Storage"]
+        ROOM ["Room v7 + FTS SQLCipher"]
+        VAULT ["TokenVault encrypted"]
+        MEM0 ["Mem0Sync opt-in mirror"]
+    end
+    subgraph BG ["Scheduling + Background"]
+        ALARM ["AlarmManager + BootReceiver"]
+        WORK ["WorkManager routine Worker"]
+        SRUN ["ScheduledRun allowlist + PendingApproval"]
+    end
+    CMD --> VM
+    VOICE --> VM
+    SCREENS --> VM
+    VM --> LOOP
+    LOOP --> PIN
+    PIN --> PROV
+    PIN --> LOOP
+    LOOP --> REG
     REG --> GMAIL
     REG --> WEB
-    REG --> MEM
-    REG --> SCH
-    REG -.->|requiresConfirmation| CARD
-    CARD -.->|approve / edit / reject| REG
-    SCHED -->|headless loop, 5 read tools| REG
-    SCHED -.->|send / writes| MEMDB
-    MEM <--> MEMDB
-    SCH <--> MEMDB
-    VM <--> VAULT
-    VM <--> SET
-    LOOP <--> LLM
+    REG --> MEMT
+    REG --> SCHT
+    REG --> GATE
+    GATE --> CARDS
+    CARDS --> REG
+    MEMT --> ROOM
+    SCHT --> ROOM
+    VM --> ROOM
+    VM --> VAULT
+    VAULT --> PROV
+    ROOM --> MEM0
+    ALARM --> WORK
+    WORK --> SRUN
+    SRUN --> REG
+    SRUN --> ROOM
+    SRUN --> SCREENS
 ```
+
+Verified: Room v7 + FTS + SQLCipher, DeepSeek and Meta only (no Groq, no Gemini provider, no Supermemory), Mem0 opt-in mirror with Room as source of truth. Every `send_email` and Schedule write passes `ApprovalGate`; `execute()` refuses gated Tools outright.
 
 ## 1. Agent loop and tool calling (ADR-0005)
 
@@ -86,7 +106,7 @@ Recall = keyword overlap, ties broken by importance, then recency
 (`max(lastUsed, createdAt)`), then insertion order; offline path is an FTS
 `MATCH 't*'` prefix AND with the same boosts. `save_memory` /
 `search_memory` are LLM tools; the shipped path trims to `max_results`
-(top-k) before rendering the prompt section (~100× smaller, ~50× faster —
+(top-k) before rendering the prompt section (~100× smaller, ~50× faster -
 `docs/PERF_TIMINGS.md`). **Embeddings (#32) are cut**: no embedding column,
 no cosine, no cache.
 
@@ -95,7 +115,7 @@ no cosine, no cache.
 DeepSeek (`deepseek-flash`) default with Meta (`muse-spark-1.3`) fallback over one
 OpenAI-shape OkHttp client (connect 15 s, read 60 s, backoff honouring
 `retry-after`). Fallback triggers on 429/5xx (never 401), never silently
-mid-conversation with private context — the UI shows "retried on Y" from
+mid-conversation with private context - the UI shows "retried on Y" from
 `providersTried`. No key → Room + app still work. The Command screen
 provider sheet switches the runtime override (`selectedProvider`, `null`
 = Auto/Default); `BuildConfig.LLM_DEFAULT_PROVIDER` remains the fallback.
@@ -120,7 +140,7 @@ lets an exact-match templated send run headless, with any drift held as a
 read are source-sanitized (`UNTRUSTED_EXTERNAL_READ_TOOLS`,
 `sanitizeMemoryCallForUntrustedRun` in `MemoryTools.kt`), so
 attacker-influenced runs cannot plant trusted memories. Scheduled runs
-hold only the 5 read tools — a send or write becomes a `PendingApproval`
+hold only the 5 read tools - a send or write becomes a `PendingApproval`
 row + notification, approved in-app. Red-team tests (evil-forward +
 memory-poisoning, foreground card vs scheduled hold) are the acceptance
 criterion.
@@ -141,7 +161,7 @@ launcher shortcuts (`shortcuts.xml`) deep-link voice, new Session, and
 Schedules; the current Session exports as Markdown via share/copy. Gmail
 tokens and
 user-entered LLM keys live in `TokenVault` (EncryptedSharedPreferences,
-Keystore-backed; `security-crypto:1.1.0` deprecated-but-working — see
+Keystore-backed; `security-crypto:1.1.0` deprecated-but-working - see
 `SECURITY.md`). `allowBackup="false"` + `data_extraction_rules` deny all
 backup/transfer domains. Release ships `app/proguard-rules.pro` (Tink,
 Room, WorkManager, OkHttp/Jsoup keeps) wired into the `release` build

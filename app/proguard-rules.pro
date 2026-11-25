@@ -1,4 +1,4 @@
-# Aurviz ProGuard / R8 rules
+# Aira ProGuard / R8 rules
 # 1. AndroidX Security Crypto (EncryptedSharedPreferences / Google Tink reflection)
 -keep class com.google.crypto.tink.** { *; }
 -dontwarn com.google.crypto.tink.**
@@ -9,7 +9,7 @@
 -keep class * extends androidx.room.RoomDatabase { *; }
 -keep @androidx.room.Entity class * { *; }
 -keep @androidx.room.Dao class * { *; }
--keep class com.aurviz.agent.*_Impl { *; }
+-keep class com.aira.agent.*_Impl { *; }
 
 # 3. WorkManager Workers constructed via reflection
 -keep class * extends androidx.work.Worker {

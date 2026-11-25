@@ -16,11 +16,11 @@ fun prop(key: String, default: String = ""): String =
     (localProps.getProperty(key) ?: default).trim()
 
 android {
-    namespace = "com.aurviz.agent"
+    namespace = "com.aira.agent"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.aurviz.agent"
+        applicationId = "com.aira.agent"
         minSdk = 26
         targetSdk = 35
         versionCode = 1

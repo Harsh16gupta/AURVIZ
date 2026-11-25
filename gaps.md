@@ -1,4 +1,4 @@
-# AURVIZ gap analysis and build plan - current state
+# AIRA gap analysis and build plan - current state
 
 Date: 2026-11-23 (updated; branch `ui/midnight-daylight`, 4-phase
 Compose UI upgrade). Basis: the code as it stands today, checked against

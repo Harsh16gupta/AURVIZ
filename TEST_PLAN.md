@@ -1,4 +1,4 @@
-# Aurviz test plan
+# Aira test plan
 
 ## How to run
 

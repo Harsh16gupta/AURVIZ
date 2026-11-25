@@ -1,4 +1,4 @@
-# Aurviz Security Notes
+# Aira Security Notes
 
 ## API keys
 

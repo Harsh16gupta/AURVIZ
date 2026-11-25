@@ -1,4 +1,4 @@
-# Aurviz Personal Agent
+# Aira Personal Agent
 
 Android personal AI agent that understands voice and text commands and executes real-world tasks on the user's behalf.
 

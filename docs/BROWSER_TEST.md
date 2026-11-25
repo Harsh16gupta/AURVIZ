@@ -65,4 +65,4 @@ Settings audit (file/content access off, mixed-content pinned) is code-set
 in `WebViewHolder.obtain` and has no remote-readable surface - unit +
 code-confirmed only, same as before. Note: a phone-call screen ("Arjun")
 took the foreground mid-run; no call UI was touched, testing continued in
-Aurviz after bringing it back.
+Aira after bringing it back.

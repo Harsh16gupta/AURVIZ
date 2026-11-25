@@ -9,26 +9,26 @@
         android:enabled="true"
         android:shortcutShortLabel="@string/shortcut_voice_short">
         <intent
-            android:action="com.aurviz.agent.action.VOICE_COMMAND"
-            android:targetPackage="com.aurviz.agent"
-            android:targetClass="com.aurviz.agent.MainActivity" />
+            android:action="com.aira.agent.action.VOICE_COMMAND"
+            android:targetPackage="com.aira.agent"
+            android:targetClass="com.aira.agent.MainActivity" />
     </shortcut>
     <shortcut
         android:shortcutId="new_session"
         android:enabled="true"
         android:shortcutShortLabel="@string/shortcut_new_session_short">
         <intent
-            android:action="com.aurviz.agent.action.NEW_SESSION"
-            android:targetPackage="com.aurviz.agent"
-            android:targetClass="com.aurviz.agent.MainActivity" />
+            android:action="com.aira.agent.action.NEW_SESSION"
+            android:targetPackage="com.aira.agent"
+            android:targetClass="com.aira.agent.MainActivity" />
     </shortcut>
     <shortcut
         android:shortcutId="schedules"
         android:enabled="true"
         android:shortcutShortLabel="@string/shortcut_schedules_short">
         <intent
-            android:action="com.aurviz.agent.action.SCHEDULES"
-            android:targetPackage="com.aurviz.agent"
-            android:targetClass="com.aurviz.agent.MainActivity" />
+            android:action="com.aira.agent.action.SCHEDULES"
+            android:targetPackage="com.aira.agent"
+            android:targetClass="com.aira.agent.MainActivity" />
     </shortcut>
 </shortcuts>

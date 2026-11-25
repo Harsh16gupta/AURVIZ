@@ -12,5 +12,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "AURVIZ"
+rootProject.name = "AIRA"
 include(":app")

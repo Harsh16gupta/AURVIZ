@@ -451,7 +451,7 @@ Every case where the AI was wrong and how it was caught. Add an entry with file:
   (`ScheduleWork.kt:78-86`).
 - **Foreign uncommitted work parked, not committed.** Same condition as
   #67/#70/#72-#76: `GLOSSARY.md`, `HANDOFF.md` plus
-  `architecture-deep-dive.html` / `docs/AURVIZ_EVOLUTION_PLAN.md` carry
+  `architecture-deep-dive.html` / `docs/AIRA_EVOLUTION_PLAN.md` carry
   unrelated mods - untouched here; the commit holds only
   `ScheduleRuntime.kt`, `ScheduleWork.kt`, `ScheduleRuntimeTest.kt`, and
   this log.
@@ -675,9 +675,9 @@ Every case where the AI was wrong and how it was caught. Add an entry with file:
 
 - **ViewModel missed import broke compile.** First build failed with
   unresolved `appendSessionTurn` in `AgentViewModel.kt:1312,1335` - the
-  ViewModel lives in `com.aurviz.agent.ui` while the helper lives in
-  `com.aurviz.agent`. Fixed with explicit
-  `import com.aurviz.agent.appendSessionTurn`; suite green after.
+  ViewModel lives in `com.aira.agent.ui` while the helper lives in
+  `com.aira.agent`. Fixed with explicit
+  `import com.aira.agent.appendSessionTurn`; suite green after.
 - **Glossary avoided Session, issue requires it.** `GLOSSARY.md:29` said
   Interaction avoids Session, but #51 is session-scoped. Added Session
   term (sequence of Interactions sharing one transcript) instead of
@@ -690,33 +690,33 @@ Every case where the AI was wrong and how it was caught. Add an entry with file:
 
 - **Fail-open default broke two loop tests after the fix, not before.**
   Changing `AgentLoop` default confirm to `Rejected`
-  (`app/src/main/java/com/aurviz/agent/AgentLoop.kt:97`) turned
+  (`app/src/main/java/com/aira/agent/AgentLoop.kt:97`) turned
   `multiStepLoopMatchesToolCallIds` and `loopTimelineShowsExecutedTools`
   red - both script a gated `create_schedule` and relied on the old
   auto-approve. Fixed by passing explicit `Approved` in those tests
-  (`app/src/test/java/com/aurviz/agent/AgentLoopTest.kt:67,199`); the new
+  (`app/src/test/java/com/aira/agent/AgentLoopTest.kt:67,199`); the new
   `ApprovalGateTest.defaultConfirmerIsFailClosed` pins the fail-closed default.
 - **Per-call deadline check was too strict on the first call.** Checking the
   total budget before every batched call broke
   `totalTimeoutAbortsToFailedKeepingFinishedSteps` (expected 1 finished step,
   got 0): the LLM turn itself had consumed the budget and the first Tool
   still ran. Scoped the check to `callIndex > 0`
-  (`app/src/main/java/com/aurviz/agent/AgentLoop.kt:152-160`) - a slow first
+  (`app/src/main/java/com/aira/agent/AgentLoop.kt:152-160`) - a slow first
   Tool/Confirmation cannot start another call, matching the review wording;
   `secondCallInBatchDoesNotStartAfterTotalTimeout` pins it.
 - **Room `@Query` is CLASS-retention: reflection sees null.** The FTS test
   first read the DAO annotation via reflection and failed on
   `assertTrue(ann != null)`. Rewrote as a source assertion with the
   `moduleDir()` walk used by the manifest tests
-  (`app/src/test/java/com/aurviz/agent/MemoryTest.kt:226-241`).
+  (`app/src/test/java/com/aira/agent/MemoryTest.kt:226-241`).
 - **Commit message said FTS5, code uses FTS4.** Fixed by amend before pushing
   (`ffc9369`).
 - **Stale RUNNING recovery needs the pid, but `find()` hides it.** The
   `ScheduleRun` record carries no pid, so reclaim goes through a new
   `resetStaleRunning` returning the existing pid (marked FAILED for the
   record) instead of deleting the row
-  (`app/src/main/java/com/aurviz/agent/ScheduledRun.kt:212-224`,
-  `app/src/main/java/com/aurviz/agent/ScheduleDb.kt:184-191`).
+  (`app/src/main/java/com/aira/agent/ScheduledRun.kt:212-224`,
+  `app/src/main/java/com/aira/agent/ScheduleDb.kt:184-191`).
 - **Not fixed here (no device attached):** the scheduled-run device exercise,
   profiler capture, and live Gmail/LLM calls. `docs/SCHEDULING_TEST.md` and
   `docs/PERF_TIMINGS.md` record the green unit subset plus the human-pass
@@ -728,24 +728,24 @@ Every case where the AI was wrong and how it was caught. Add an entry with file:
   held a single `pendingDecisions` replaced per `runLoopCommand` (`:887`),
   `CommandScreen.kt:84-92` sent approve/reject with no call id, and the
   Composer stayed live (`:123-129`) so a second command overwrote the queue.
-  Fixed with `ApprovalGate` (`app/src/main/java/com/aurviz/agent/ApprovalGate.kt`):
+  Fixed with `ApprovalGate` (`app/src/main/java/com/aira/agent/ApprovalGate.kt`):
   per-call one-shot queue bound to (runId, callId), stale ids ignored,
   double-tap dropped, single-flight runs.
 - **Default confirmer was fail-open.** `AgentLoop.kt:97` defaulted to
   `Approved`; headless already used `Rejected` (`ScheduledRun.kt:112`).
   Changed to `Rejected`; `AgentLoopTest` gated cases now pass explicit
-  `Approved` (`app/src/test/java/com/aurviz/agent/AgentLoopTest.kt:67,199`).
+  `Approved` (`app/src/test/java/com/aira/agent/AgentLoopTest.kt:67,199`).
   New `ApprovalGateTest` (6 tests) pins stale-callback, cross-run,
   double-tap, single-flight, fail-closed default, and two-call two-approval
   paths. Full suite: 312 tests / 30 classes, 0 failures.
 
 ## 2026-11-23 - ADR/code drift found during grill (against HEAD `3fcfbff`)
 
-- **ADR-0002 said periodic work; code uses one-time work.** `docs/adr/0002-workmanager-alarm-scheduling.md` claimed "WorkManager periodic work", but `enqueueRoutineWork` (`app/src/main/java/com/aurviz/agent/ScheduleWork.kt:40-51`) builds a `OneTimeWorkRequest` with `enqueueUniqueWork` - no periodic builder anywhere in `app/src`. Fixed by ADR-0002 rewrite.
+- **ADR-0002 said periodic work; code uses one-time work.** `docs/adr/0002-workmanager-alarm-scheduling.md` claimed "WorkManager periodic work", but `enqueueRoutineWork` (`app/src/main/java/com/aira/agent/ScheduleWork.kt:40-51`) builds a `OneTimeWorkRequest` with `enqueueUniqueWork` - no periodic builder anywhere in `app/src`. Fixed by ADR-0002 rewrite.
 - **ADR-0003 said whole-Plan confirmation; decisions require per-tool-call.** `docs/adr/0003-gmail-oauth-confirmation.md` required "explicit whole-Plan Confirmation before any send", but a plan cannot be approved before later steps exist, and the code had no registry gate at all. Fixed by ADR-0003 amendment.
-- **ADR-0001 hybrid vs Room-only shipped path.** `docs/adr/0001-supermemory-room-hybrid.md` described Supermemory behind `MemoryRepository`, but the only wiring is `RoomMemoryStore` (`app/src/main/java/com/aurviz/agent/ui/AgentViewModel.kt:72`); Supermemory appears only in a comment (`app/src/main/java/com/aurviz/agent/Memory.kt:5`) and an unread sample key. Fixed by ADR-0001 amendment.
+- **ADR-0001 hybrid vs Room-only shipped path.** `docs/adr/0001-supermemory-room-hybrid.md` described Supermemory behind `MemoryRepository`, but the only wiring is `RoomMemoryStore` (`app/src/main/java/com/aira/agent/ui/AgentViewModel.kt:72`); Supermemory appears only in a comment (`app/src/main/java/com/aira/agent/Memory.kt:5`) and an unread sample key. Fixed by ADR-0001 amendment.
 - **ADR-0004 promised picker UI and DeepSeek/Meta keys; code has neither.** `docs/adr/0004-openai-compatible-llm.md` promised an in-app picker and Meta key wiring, but `ProviderPicker.kt:3-4` notes the screen stays unwired and no `META_*` BuildConfig field exists. Fixed by ADR-0004 amendment (config-only, Groq fallback).
-- **Stale comment: "memory-only for now".** `app/src/main/java/com/aurviz/agent/Email.kt:37` says credentials are memory-only, but `TokenVault` (EncryptedSharedPreferences) exists and `AgentViewModel.kt:75` loads tokens from it. Comment predates the vault.
+- **Stale comment: "memory-only for now".** `app/src/main/java/com/aira/agent/Email.kt:37` says credentials are memory-only, but `TokenVault` (EncryptedSharedPreferences) exists and `AgentViewModel.kt:75` loads tokens from it. Comment predates the vault.
 - **ADR-0004 said dropped providers are unwired, but DeepSeek still is.**
   `docs/adr/0004-openai-compatible-llm.md` declares Groq the single fallback
   with DeepSeek "unwired", but `ProviderPicker.kt:112-113,141-146` still reads
@@ -776,14 +776,14 @@ Every case where the AI was wrong and how it was caught. Add an entry with file:
 
 ## 2026-11-23 - draft grill answers checked (against HEAD `903f011`)
 
-- **Draft B3 called `TIME_SET` handling and receiver registration unverified.** Both are present: `shouldRescheduleOnSystemAction` handles `Intent.ACTION_TIME_CHANGED` (`app/src/main/java/com/aurviz/agent/ScheduleAlarm.kt:110-113`), and `BootReceiver` subscribes to `BOOT_COMPLETED`, `TIMEZONE_CHANGED`, and `TIME_SET` (`app/src/main/AndroidManifest.xml:36-45`). Only the physical alarm/Doze/reboot proof remains unverified.
-- **Draft NG-1 analysis misstated the legacy test.** `allToolSchemasExposeEmailPlusThreeScheduleTools` calls `allToolSchemas()` directly and checks that four names are present; it does not inspect an HTTP request, assert an exact count, or assert that other tools are absent (`app/src/test/java/com/aurviz/agent/LlmProviderTest.kt:116-125`). Keeping the helper therefore need not make this test fail; the fix needs a request-path schema test instead of relying on that claim.
+- **Draft B3 called `TIME_SET` handling and receiver registration unverified.** Both are present: `shouldRescheduleOnSystemAction` handles `Intent.ACTION_TIME_CHANGED` (`app/src/main/java/com/aira/agent/ScheduleAlarm.kt:110-113`), and `BootReceiver` subscribes to `BOOT_COMPLETED`, `TIMEZONE_CHANGED`, and `TIME_SET` (`app/src/main/AndroidManifest.xml:36-45`). Only the physical alarm/Doze/reboot proof remains unverified.
+- **Draft NG-1 analysis misstated the legacy test.** `allToolSchemasExposeEmailPlusThreeScheduleTools` calls `allToolSchemas()` directly and checks that four names are present; it does not inspect an HTTP request, assert an exact count, or assert that other tools are absent (`app/src/test/java/com/aira/agent/LlmProviderTest.kt:116-125`). Keeping the helper therefore need not make this test fail; the fix needs a request-path schema test instead of relying on that claim.
 - **Draft Q3 undercounted `headless` usage.** The report has one descriptive use plus the `HeadlessChatLlm` identifier (`docs/RESEARCH_PATTERNS.md:103,187`), not three descriptive occurrences. Production has 16 textual matches across five files, including background-web loading where the term is appropriate. Scope the terminology cleanup to scheduled-run prose rather than claiming a global three-comment replacement.
 
 ## 2026-11-23 - P0 opaque approval proposal ID on `integration/agent-loop`
 
-- **Fix:** `ApprovalGate.openGate` now returns `GateTicket(proposalId, queue)` with a UUID nonce; `resolve(proposalId, decision)` is the only release path - the Tool call id is recorded for introspection only (`app/src/main/java/com/aurviz/agent/ApprovalGate.kt:27-31,86-124`). ViewModel approve/reject echo the nonce from `pendingApprovalProposalId` with no tap-time `currentRunId` read (`app/src/main/java/com/aurviz/agent/ui/AgentViewModel.kt:825-848`); the card renders only when the nonce is present and keys edit fields on it (`app/src/main/java/com/aurviz/agent/ui/screens/CommandScreen.kt:86-107,173-189`). Killed the recycled-fallback-id cross-run approve (`call_s0_0` regenerated every run, old tap + new run previously shared the id string).
-- **Tests:** updated 3 existing gate tests to the ticket API; added `proposalIdsAreUniqueOpaqueAndUnrelatedToCallId`, `staleNonceCannotReleaseRecycledFallbackId`, `resolveAfterFinishRunFails` (`app/src/test/java/com/aurviz/agent/ApprovalGateTest.kt:19-105`). Suite: 325 tests / 30 suites, 0 failures (`./gradlew :app:testDebugUnitTest --rerun-tasks`). Marker + secret scans clean.
+- **Fix:** `ApprovalGate.openGate` now returns `GateTicket(proposalId, queue)` with a UUID nonce; `resolve(proposalId, decision)` is the only release path - the Tool call id is recorded for introspection only (`app/src/main/java/com/aira/agent/ApprovalGate.kt:27-31,86-124`). ViewModel approve/reject echo the nonce from `pendingApprovalProposalId` with no tap-time `currentRunId` read (`app/src/main/java/com/aira/agent/ui/AgentViewModel.kt:825-848`); the card renders only when the nonce is present and keys edit fields on it (`app/src/main/java/com/aira/agent/ui/screens/CommandScreen.kt:86-107,173-189`). Killed the recycled-fallback-id cross-run approve (`call_s0_0` regenerated every run, old tap + new run previously shared the id string).
+- **Tests:** updated 3 existing gate tests to the ticket API; added `proposalIdsAreUniqueOpaqueAndUnrelatedToCallId`, `staleNonceCannotReleaseRecycledFallbackId`, `resolveAfterFinishRunFails` (`app/src/test/java/com/aira/agent/ApprovalGateTest.kt:19-105`). Suite: 325 tests / 30 suites, 0 failures (`./gradlew :app:testDebugUnitTest --rerun-tasks`). Marker + secret scans clean.
 
 ## 2026-11-23 - §9 blocker batch on `integration/agent-loop` (7 fixes)
 
@@ -836,7 +836,7 @@ Every case where the AI was wrong and how it was caught. Add an entry with file:
   resurrected the stale branch. Dropped stale `README` drift note and
   `RESEARCH_PATTERNS`/`VALIDATION_LOG` hunks from the reference.
 - **Main had no `defaultCandidates` order tests.** Bracket C unwire left only
-  `droppedDeepseekNameFallsBackToGemini` (`app/src/test/java/com/aurviz/agent/ProviderPickerTest.kt:37-43`);
+  `droppedDeepseekNameFallsBackToGemini` (`app/src/test/java/com/aira/agent/ProviderPickerTest.kt:37-43`);
   the re-wire adds `deepseekName`/`metaName` + 3 order tests
   (preferred → deepseek → meta → gemini → groq, blank → gemini).
 
@@ -861,7 +861,7 @@ Every case where the AI was wrong and how it was caught. Add an entry with file:
 ## 2026-11-23 - NG-4 landing (RedTeamTest from `8d583a5` onto main)
 
 - **Tests-only pick, no prod change.** Took only
-  `app/src/test/java/com/aurviz/agent/RedTeamTest.kt` (+249) from the
+  `app/src/test/java/com/aira/agent/RedTeamTest.kt` (+249) from the
   reference commit; dropped its stale `TEST_PLAN.md` count hunk and
   `VALIDATION_LOG.md` hunk (both refreshed below for the current tree).
 - **Prompt-injection red-team path (per repo rule for send-path-adjacent
@@ -894,14 +894,14 @@ Every case where the AI was wrong and how it was caught. Add an entry with file:
 - **Bulk-count test first drafted against the wrong seam.** Assumed a
   6-address `to` string through `executeGated` would reach
   `DefaultSendPolicy`'s `maxRecipients` branch
-  (`app/src/main/java/com/aurviz/agent/Email.kt:308`), but `draftFrom`
+  (`app/src/main/java/com/aira/agent/Email.kt:308`), but `draftFrom`
   wraps `to` as a single-element list
-  (`app/src/main/java/com/aurviz/agent/ToolRegistry.kt:326`), so any
+  (`app/src/main/java/com/aira/agent/ToolRegistry.kt:326`), so any
   multi-address string denies earlier as malformed - the count branch is
   reachable only via direct `EmailDraft` construction. Wrote the test at
   that level instead (`DefaultSendPolicy.check` Deny plus
   `executeSendEmail(..., approved = true)` Failure, zero sends;
-  `app/src/test/java/com/aurviz/agent/ApprovalCardTest.kt:158`).
+  `app/src/test/java/com/aira/agent/ApprovalCardTest.kt:158`).
 - Tests: 2 new (`policyBlocksHeaderInjectionEvenWhenGateApproved`,
   `policyBlocksBulkRecipientCountEvenWhenApproved`). Full
   `:app:testDebugUnitTest` green (344 tests, 0 failures). No red-green
@@ -912,11 +912,11 @@ Every case where the AI was wrong and how it was caught. Add an entry with file:
 
 - **Wildcard grant reached the store.** First `InMemoryAllowAlwaysStore.allow`
   persisted any non-blank string, so `allow("*")` landed in the grant set
-  (`app/src/main/java/com/aurviz/agent/AllowAlways.kt`). Eligibility still
+  (`app/src/main/java/com/aira/agent/AllowAlways.kt`). Eligibility still
   rejected it (not plausible), but a direct `isAllowed` consumer would have
   honored a blanket. Caught by
   `blankAndWildcardAreNeverStoredOrEligible`
-  (`app/src/test/java/com/aurviz/agent/AllowAlwaysTest.kt`): `allow` now
+  (`app/src/test/java/com/aira/agent/AllowAlwaysTest.kt`): `allow` now
   persists only plausible addresses, and eligibility re-checks. 14/14 green.
 - **`allowAlwaysStore` declared after `init`.** `init` hydrates the store
   from prefs, so the property must precede it - compile error
@@ -932,7 +932,7 @@ Every case where the AI was wrong and how it was caught. Add an entry with file:
 
 - **Working tree carried uncommitted work beyond the handoff list.**
   `HANDOFF.md §7` listed only `GLOSSARY.md`, `HANDOFF.md`,
-  `architecture-deep-dive.html`, `docs/AURVIZ_EVOLUTION_PLAN.md`, but the
+  `architecture-deep-dive.html`, `docs/AIRA_EVOLUTION_PLAN.md`, but the
   tree also held ticket-1/2 edits (`Schedule.kt`, `ScheduleAlarm.kt`,
   `ScheduleDb.kt`, `AgentViewModel.kt`, new `ScheduleIds.kt`, later also
   `ScheduleWork.kt`, `ScheduleRuntime.kt` appearing mid-session). A full
@@ -963,13 +963,13 @@ Every case where the AI was wrong and how it was caught. Add an entry with file:
 - **Gate-refusal string capitalized under an old assertion.** Canonicalizing
   `ToolRegistry.kt:166` to "requires Confirmation: confirm, edit, or reject…"
   broke `directExecuteRefusesGatedToolWithoutRunning`
-  (`app/src/test/java/com/aurviz/agent/ConfirmationGateTest.kt:130,135`),
+  (`app/src/test/java/com/aira/agent/ConfirmationGateTest.kt:130,135`),
   which asserted lowercase `contains("confirmation")`. Caught on the first
   full-suite run (1 failure / 399); updated the assertion to the canonical
   `contains("Confirmation")` instead of reverting the string. Suite green
   after: 399 tests, 0 failures.
 - **Case-sensitive receipt assert in the new test.** `scheduledAttemptIsHeld`
-  (`app/src/test/java/com/aurviz/agent/ConfirmationReceiptTest.kt`) asserted
+  (`app/src/test/java/com/aira/agent/ConfirmationReceiptTest.kt`) asserted
   `detail.contains("nothing ran yet")` against "Nothing ran yet." - failed
   on the capital N. Fixed with `lowercase()` before contains; 11/11 green.
 - **Tree again held foreign uncommitted work beyond the handoff list**
@@ -1099,7 +1099,7 @@ Every case where the AI was wrong and how it was caught. Add an entry with file:
   `ViewModelLoopWiringTest`, `LlmKeysTest`).
 - **Docs amended, history kept.** ADR-0004 re-amended (title, Status,
   fallback order) instead of silently contradicting it; README,
-  ARCHITECTURE, gaps, SECURITY, SCHEDULING_TEST, AURVIZ_EVOLUTION_PLAN,
+  ARCHITECTURE, gaps, SECURITY, SCHEDULING_TEST, AIRA_EVOLUTION_PLAN,
   and spike docs updated. Historical records left intact:
   `docs/research/0001-llm-android-stack.md` (§2 Groq API notes),
   `docs/VALIDATION_LOG.md` prior entries, `RESEARCH_PATTERNS.md`
@@ -1109,14 +1109,14 @@ Every case where the AI was wrong and how it was caught. Add an entry with file:
   `:app:testDebugUnitTest` required after this change.
 
 ## 2026-11-24 - Ticket #86 (primitives + nav chrome) self-review catches
-- Wrong assertion drafted in `app/src/test/java/com/aurviz/agent/ToolLabelMapperTest.kt`
+- Wrong assertion drafted in `app/src/test/java/com/aira/agent/ToolLabelMapperTest.kt`
   (`assertEquals("Click", toolLabel("click").let { "Select item" })` tautologically
   failed); rewrote as `assertEquals("Select item", toolLabel("click"))` before the
   first test run. Lesson: never wrap the value under test in an identity lambda.
 - Fallback casing drift: first `toolLabel()` fallback title-cased every word
   ("Unknown Tool Id"), contradicting the spec's sentence-case examples
   ("Send email", "Create schedule"); fixed to capitalize the first word only in
-  `app/src/main/java/com/aurviz/agent/ToolLabels.kt`. Caught by the new unit test.
+  `app/src/main/java/com/aira/agent/ToolLabels.kt`. Caught by the new unit test.
 - Accidental import deletion: an edit removing `statusBarsPadding` from
   `CommandScreen.kt` also dropped the still-used `size` import; restored
   immediately after re-reading the file. Lesson: verify each import removal
@@ -1289,7 +1289,7 @@ Per-screen/sheet audit, Midnight + Daylight (code inspection; no PNGs needed):
 
 - **Spec-vs-test drift (flagged, not silently overridden): brand tagline trips the glossary guard.** The task mandates verbatim `"Your personal assistant that knows you."` (`CommandScreen.kt:534`), but `FlagshipUiCraftTest.glossaryStaysCleanAcrossScreensSheetsAndComponents` bans `"assistant"` in any string literal under `ui/screens|ui/sheets|ui/components`. Kept the verbatim per the explicit task instruction; the owning agent should add a targeted exemption for this brand line (or drop `"assistant"` from the banned list). Evidence: `testDebugUnitTest` → `FlagshipUiCraftTest` 1 failure naming `CommandScreen.kt:534`.
 - **Spec-vs-test drift (flagged): Plan card radius/border vs T2 pin.** The task mandates the Plan trace card at `12.dp` radius / `1.dp` border (`CommandScreen.kt` `PlanTraceCard`), but `FlagshipT2CraftTest.planStepsGroupInConnectedTonalCard` pins the old `RoundedCornerShape(14.dp)` + `.border(0.5.dp, Theme.colors.edge` in `CommandScreen.kt`. Kept the spec values; the owning agent should update the T2 pin to `12.dp` / `1.dp`. Evidence: `testDebugUnitTest` → `FlagshipT2CraftTest` 1 failure.
-- No package/symbol renames (`com.aurviz.agent.*`, `aurviz.db`, public signatures intact; `Composer` gains only defaulted `model`/`onModelClick` params so old call sites compile). No material imports in touched files (foundation/ui/runtime + VelaTheme/Icons only; `Color(0xFF1E78FF)` hardcoded for the voice accent). Single provider selector lives in the Composer (`model` + `onModelClick` → existing provider sheet); header shows `AiraLogoMark(20.dp)` + `"aira"` only. `AgentViewModel` init defaults `selectedProvider` to `firstConfiguredProvider(...)` when keys exist and no stored override, so fresh launches don't pin an unconfigured default (401).
+- No package/symbol renames (`com.aira.agent.*`, `aira.db`, public signatures intact; `Composer` gains only defaulted `model`/`onModelClick` params so old call sites compile). No material imports in touched files (foundation/ui/runtime + VelaTheme/Icons only; `Color(0xFF1E78FF)` hardcoded for the voice accent). Single provider selector lives in the Composer (`model` + `onModelClick` → existing provider sheet); header shows `AiraLogoMark(20.dp)` + `"aira"` only. `AgentViewModel` init defaults `selectedProvider` to `firstConfiguredProvider(...)` when keys exist and no stored override, so fresh launches don't pin an unconfigured default (401).
 - Gate: `:app:compileDebugKotlin` green; `testDebugUnitTest` **624/626 green** (2 failures are the two spec-vs-test drifts above, no behavioral regressions; `ProviderPickerTest` + `CommandPlanUiTest` green). Secret scan: no keys in code (brand hex + copy only).
 
 ## 2026-11-24 - SUB-AGENT 4: Browser, Schedules, Memories, Settings polish
@@ -1297,7 +1297,7 @@ Per-screen/sheet audit, Midnight + Daylight (code inspection; no PNGs needed):
 - **Spec-vs-test drift (resolved by updating the stale pin): drawer label.** The task mandates the `"Memories"` drawer label (`AgentNav.kt`), but `FlagshipT2CraftTest.drawerHasMemoryRowAndBorderlessSessionPill` pinned the old `"Memory"` literal (`AgentNav.kt:356`). Updated the pin to `"Memories"` (one literal, same assertion shape). Memory screen title likewise `"Memory"` → `"Memories"`; recall metadata `"Used N×"` → `"Recalled N×"` (`MemoryScreen.kt:220`); `+ Add Memory` was already a header action. Evidence: `drawerHasMemoryRowAndBorderlessSessionPill` green after the change.
 - **Spec-vs-test tension (kept the test, logged the deviation): Browser chrome height.** The task asks for a `48.dp` top bar, but `FlagshipT4CraftTest.browserChromeCraft` pins `.height(56.dp)` + `.height(40.dp)` pill + all empty-state size literals. Kept `56.dp` (test is the contract); still satisfied the intent: bar is now dark (`Theme.colors.background`), carries `Modifier.statusBarsPadding()`, and Back/Forward/URL-pill/Reload are all pinned (Forward is now always present, disabled when nothing to go to, instead of conditional). Empty state is branded `"AIRA Browser"` with newest-first visited URLs (from `state.interactions.*.webPage`, no new model) + real Tool badges via `toolLabel("get_page_text"|"extract"|"click")` (exempt lines; "read_page" in the task brief is not a registry Tool - `get_page_text` is). Bottom tray keeps `[Page | Extracted | Links]` (`"Text"` → `"Extracted"`; no test pinned the old key) with a centered `32.dp x 4.dp` drag-handle pill.
 - **Already-done items (no change, verified):** provider keys were already collapsed to `52.dp` `OptionRow`s opening the single masked key-editor sheet (only 3 providers - Gemini/DeepSeek/Meta - since `TokenVault.kt:84` deliberately drops legacy Groq; adding a Groq row would contradict the vault); `"Background running"` already uses `Icons.DeviceMobile` (no bell duplication, and no battery/shield vector exists in `Icons.kt` to swap to); Schedule cards never rendered raw cron (`formatScheduleTime` human line only) and carry no `"Enabled"` label next to the toggle.
-- **Root tabs:** `SchedulesScreen`/`MemoryScreen`/`SettingsScreen` `onBack` is now `(() -> Unit)? = null` and `AgentNav.kt` no longer passes `popBackStack()` for `SCHEDULES`/`MEMORY`/`SETTINGS`, so `Page` renders no back chevron on root tabs. Browser keeps its `X` close (`onBack` unchanged). `TokenVault`/`AgentViewModel`/DB/CommandScreen untouched; no `com.aurviz.*` renames; no material imports (foundation only + `android.os.Build`).
+- **Root tabs:** `SchedulesScreen`/`MemoryScreen`/`SettingsScreen` `onBack` is now `(() -> Unit)? = null` and `AgentNav.kt` no longer passes `popBackStack()` for `SCHEDULES`/`MEMORY`/`SETTINGS`, so `Page` renders no back chevron on root tabs. Browser keeps its `X` close (`onBack` unchanged). `TokenVault`/`AgentViewModel`/DB/CommandScreen untouched; no `com.aira.*` renames; no material imports (foundation only + `android.os.Build`).
 - **Settings battery guide:** inline shows only the `Build.MANUFACTURER`-matched 2-line `OemGuide` (`SettingsScreen.kt:626-688`, pure `oemGuideForManufacturer` + per-vendor splits of `OEM_AUTOSTART_GUIDANCE`); `"View all device guides ›"` row opens a `ModalBottomSheet` with every vendor plus the verbatim `OEM_AUTOSTART_GUIDANCE` const (test pin kept).
 - Gate: `:app:compileDebugKotlin` green; `testDebugUnitTest` **624/626 green** - the 2 failures are SUB-AGENT 3's already-flagged `CommandScreen.kt` drifts (`glossaryStaysClean` re `CommandScreen.kt:534` brand line; `planStepsGroupInConnectedTonalCard` radius/border), both in a file this agent is forbidden to touch. New-copy banned-word scan over the five touched files clean.
 
@@ -1322,7 +1322,7 @@ Per-screen/sheet audit, Midnight + Daylight (code inspection; no PNGs needed):
 
 ## 2026-11-25 - Startup crash-loop: SQLCipher migration ATTACH with bound KEY
 
-- **Symptom (on-device, exact):** tap icon → logo (splash) → instant close, every time. `adb logcat --buffer=crash` showed 3 identical `FATAL EXCEPTION: main` for `com.aurviz.agent`: `AgentViewModel.<init>` → `configureEncryptedRoom` → `migratePlaintextDatabaseIfNeeded (AppDbCipher.kt:71)` → `SQLiteException: unknown database encrypted (code 1)` at `sqlcipher_export('encrypted')`. Device header dump (`run-as ... od`) confirmed the on-disk DB is still plaintext (`53 51 ...` = `"SQLite format 3\0"`), so every launch retried the same broken migration on the main thread - a permanent crash loop, never reaching first draw.
+- **Symptom (on-device, exact):** tap icon → logo (splash) → instant close, every time. `adb logcat --buffer=crash` showed 3 identical `FATAL EXCEPTION: main` for `com.aira.agent`: `AgentViewModel.<init>` → `configureEncryptedRoom` → `migratePlaintextDatabaseIfNeeded (AppDbCipher.kt:71)` → `SQLiteException: unknown database encrypted (code 1)` at `sqlcipher_export('encrypted')`. Device header dump (`run-as ... od`) confirmed the on-disk DB is still plaintext (`53 51 ...` = `"SQLite format 3\0"`), so every launch retried the same broken migration on the main thread - a permanent crash loop, never reaching first draw.
 - **Root cause (ticket #114, my fix was wrong, not the reporter's phone):** the migration opened the plaintext DB and ran `ATTACH DATABASE '...' AS encrypted KEY ?` with the passphrase as a bound `byte[]` arg. SQLCipher's ATTACH does not honor a bound key parameter, so the `encrypted` alias was never usable and the very next statement (`SELECT sqlcipher_export('encrypted')`) threw. Two further traps ruled out by reading the 4.6.1 AAR (`javap`: `openDatabase(String, byte[], CursorFactory, int, DatabaseErrorHandler, SQLiteDatabaseHook)`, `CREATE_IF_NECESSARY` present): embedding the 32 raw bytes as SQL text is unsafe, and a hex `x'...'` literal would select raw-key mode, which does NOT match the password-KDF mode Room's `SupportOpenHelperFactory(passphrase-bytes)` opens with - the migrated file would have been unreadable afterwards.
 - **Fix (`AppDbCipher.kt`, reversed direction):** open the fresh encrypted target with the SAME byte[] credential Room uses later, ATTACH the old plaintext file with NO key clause at all (keyless attach = unencrypted: `plaintextAttachStatement`), then `SELECT sqlcipher_export('main', 'plaintext')` FROM the attached file INTO this connection's main DB, `DETACH`, atomic replace. Migration is now also non-fatal: any failure deletes the half-written target, quarantines the plaintext aside (`plaintextBackupFile`: `<name>.plaintext-backup`, `-2`, … - data stays on disk, never deleted), and lets Room create a fresh encrypted DB, so startup can never crash-loop again.
 - **Same crash site in workers:** `ScheduleWorker.doWork` and `RescheduleWorker.doWork` (`ScheduleWork.kt:59-63,184-188`) built the encrypted Room DB OUTSIDE their try blocks - a keystore/migration throw would have crashed the worker thread instead of returning `retry()`/`failure()`. Moved both opens inside the existing try blocks (nullable `db` + `open` local; `finally` closes `db?`). No signature changes; the `AppDbCipherTest` open-site pins still hold.

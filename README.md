@@ -1,6 +1,6 @@
-# AURVIZ
+# AIRA
 
-AURVIZ is a local-first Android AI agent that turns voice and text commands into real actions. It plans with an LLM, executes through a confirmation gate, and remembers context across sessions.
+AIRA is a local-first Android AI agent that turns voice and text commands into real actions. It plans with an LLM, executes through a confirmation gate, and remembers context across sessions.
 
 [![CI](https://img.shields.io/badge/CI-check.yml-blue)](.github/workflows/check.yml) ![tests](https://img.shields.io/badge/tests-659%20passed%20%2F%2055%20classes-green) ![Kotlin](https://img.shields.io/badge/Kotlin-2.0.21-purple) ![Android](https://img.shields.io/badge/API-26%E2%80%9335-lightgrey)
 
@@ -44,7 +44,7 @@ cp local.properties.sample local.properties   # then fill in your keys
 
 ## Architecture & Security
 
-![AURVIZ system architecture](docs/assets/architecture.png)
+![AIRA system architecture](docs/assets/architecture.png)
 
 Full flow: [ARCHITECTURE.md](ARCHITECTURE.md) ([diagram source](docs/architecture.mmd)).
 
@@ -67,7 +67,7 @@ AI coding tools were used to accelerate development and test coverage, directed 
 ## Project Structure
 
 ```
-app/src/main/java/com/aurviz/agent/
+app/src/main/java/com/aira/agent/
   AgentLoop.kt, LlmProvider.kt          # planning loop + providers
   ToolRegistry.kt, *Tools.kt           # confirmation gate + tool adapters
   Memory*.kt, AppDbCipher.kt           # encrypted Room memory store
