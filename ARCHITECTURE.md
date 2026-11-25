@@ -78,7 +78,7 @@ Verified: Room v7 + FTS + SQLCipher, DeepSeek and Meta only (no Groq, no Gemini 
 `AgentLoop` keeps a messages list (`system` with the injection-framing
 preamble + delimited `[memories]` section, `user`, `assistant` with tool
 calls, `role:"tool"` results matched by `tool_call_id`). It repeats
-LLM → `executeGated` → append result until a plain answer, max 8 steps,
+LLM → `executeGated` → append result until a plain answer, max 20 steps,
 per-step 90 s / total 5 min timeouts → `Failed` with partial steps kept.
 Tool errors return `{ok:false, error, retryable}` so the model recovers;
 unknown tools and schema violations fail the same way. 13 tools are
