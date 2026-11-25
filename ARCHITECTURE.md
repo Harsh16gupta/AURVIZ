@@ -1,7 +1,7 @@
 # AIRA architecture
 
-Glossary terms are used exactly (`GLOSSARY.md`); ADRs 0001–0005 decide the
-closed questions. Boundaries (`AGENTS.md`): UI renders state and collects
+ADRs 0001–0005 decide the
+closed questions. Boundaries: UI renders state and collects
 approvals; `AgentLoop`/`AgentViewModel` orchestrate; Tools own schemas,
 risk, `requiresConfirmation`, and executors; Memory is Room via
 `MemoryStore` only; Scheduler is exact alarm → expedited unique Worker →

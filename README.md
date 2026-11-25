@@ -62,7 +62,7 @@ Full flow: [ARCHITECTURE.md](ARCHITECTURE.md) ([diagram source](docs/architectur
 
 ## AI Development Tools
 
-AI coding tools were used to accelerate development and test coverage, directed through written specs and decision records in `docs/adr/`. The result was audited against the code in [docs/PRODUCTION_READINESS_AUDIT.md](docs/PRODUCTION_READINESS_AUDIT.md) and verified with the full JUnit suite plus physical Android hardware runs logged in [docs/VALIDATION_LOG.md](docs/VALIDATION_LOG.md).
+AI coding tools were used to accelerate development and test coverage, directed through written specs and decision records in `docs/adr/`. All output was verified with the 659-test JUnit suite (`TEST_PLAN.md`) plus physical Android hardware runs recorded in `docs/SCHEDULING_TEST.md` and `docs/BROWSER_TEST.md`.
 
 ## Project Structure
 
