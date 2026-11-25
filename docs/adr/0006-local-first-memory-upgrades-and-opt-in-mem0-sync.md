@@ -1,6 +1,6 @@
 # Local-first Memory upgrades and opt-in Mem0 Sync Adapter
 
-Status: accepted 2026-11-24 — amends ADR-0001 (Room-only Memory remains primary; adds source-moment provenance, SQLCipher at-rest encryption, on-device Mem0-style fact reconciliation, and an opt-in Mem0 sync decorator verified against Mem0 Platform v1/v3 & self-hosted OSS REST contracts).
+Status: accepted 2026-11-24 - amends ADR-0001 (Room-only Memory remains primary; adds source-moment provenance, SQLCipher at-rest encryption, on-device Mem0-style fact reconciliation, and an opt-in Mem0 sync decorator verified against Mem0 Platform v1/v3 & self-hosted OSS REST contracts).
 
 ## Context
 

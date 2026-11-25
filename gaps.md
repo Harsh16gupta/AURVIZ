@@ -1,9 +1,9 @@
-# AURVIZ gap analysis and build plan — current state
+# AURVIZ gap analysis and build plan - current state
 
 Date: 2026-11-23 (updated; branch `ui/midnight-daylight`, 4-phase
 Compose UI upgrade). Basis: the code as it stands today, checked against
 the listed files. The original 2026-11-23 plan (commit 3fcfbff, 82 tests,
-no agent loop) is superseded — every P0 item below shipped.
+no agent loop) is superseded - every P0 item below shipped.
 
 ## 1. Where you actually are
 
@@ -23,7 +23,7 @@ no agent loop) is superseded — every P0 item below shipped.
   unified `ConfirmationCard` (24dp pending, 18dp settled receipt, inline
   editable email fields). Scheduled runs hold sends/writes as
   `PendingApproval` rows + notification, approved in-app exactly once.
-  `send_email` Confirmation is **Enforced** — Settings shows a read-only
+  `send_email` Confirmation is **Enforced** - Settings shows a read-only
   row, no bypass exists.
 - **Persistence**: Room-only memory (`MemoryStore`, no cloud provider),
   `schedules`, `schedule_runs` (idempotent scheduleId+fireTime),
@@ -38,7 +38,7 @@ no agent loop) is superseded — every P0 item below shipped.
   provider sheet (`selectedProvider`, `null` = Auto); visible
   "retried on Y" disclosure, never silent mid-run replay.
 - **UI**: full Jetpack Compose Light/Dark (Midnight/Daylight) system with
-  6 screens — Onboarding, Command (scrollable Room-persisted
+  6 screens - Onboarding, Command (scrollable Room-persisted
   `Interaction` feed, live `ThinkingIndicator`, Stop/Cancel, provider
   sheet, settled Confirmation receipts, Markdown `Session`
   export/share), Browser (Back/Forward/Reload, 2dp load progress,
@@ -48,7 +48,7 @@ no agent loop) is superseded — every P0 item below shipped.
   history), Memory (search + category/source filters, inline edit,
   delete with 4 s undo), Settings (theme, haptics, connections,
   Confirmation rules, 1-tap System Diagnostics, permissions,
-  `Plan`/`Tool`/`Recall` telemetry) — plus the `SideDrawer`
+  `Plan`/`Tool`/`Recall` telemetry) - plus the `SideDrawer`
   (`Sessions` with search and `New Session`, cold-start transcript
   hydration), the live-RMS `VoiceCommandSheet` waveform, the
   `ACTION_SEND` Share Sheet target, launcher shortcuts
@@ -65,26 +65,26 @@ no agent loop) is superseded — every P0 item below shipped.
 
 ## 2. Genuine remaining gaps / trade-offs (honest list)
 
-1. **Interaction feed persistence — SHIPPED (T4, #109).** `InteractionRecord`
+1. **Interaction feed persistence - SHIPPED (T4, #109).** `InteractionRecord`
    rows are Room v6 persisted (`interactions` table in `InteractionDb.kt`)
-   with per-`Session` transcript hydration on cold start — past commands
+   with per-`Session` transcript hydration on cold start - past commands
    survive process death.
-2. **Full-row Memory undo — SHIPPED (T4, #109).** `restoreMemoryRow`
+2. **Full-row Memory undo - SHIPPED (T4, #109).** `restoreMemoryRow`
    (`Memory.kt:110`) re-saves the full row (text, source, category,
    importance, createdAt, lastUsed, useCount), so a restored Memory keeps
    its ranking state.
-3. **Live RMS waveform — SHIPPED (T2, #107).** `onRmsChanged` drives the
+3. **Live RMS waveform - SHIPPED (T2, #107).** `onRmsChanged` drives the
    `VoiceCommandSheet` waveform (`MainActivity.kt` + `VoiceCommandSheet.kt`),
    falling back to `VoiceUiState` when levels are unavailable. By design
    where levels are missing, not a bug.
-4. **Device-only proof outstanding** — on-device scheduling proof
+4. **Device-only proof outstanding** - on-device scheduling proof
    (`docs/SCHEDULING_TEST.md`), STT/LLM-first-token/end-to-end medians,
    and the Android Studio profiler screenshot (`docs/PERF_TIMINGS.md`
    documents the JVM medians + the human-pass method). Nothing fabricated.
-5. **Memory retrieval is keyword + importance/recency + FTS** — embeddings
+5. **Memory retrieval is keyword + importance/recency + FTS** - embeddings
    (#32) remain cut: no embedding column, no cosine, no cache.
 6. **No TTS replies** (P2, cut).
-7. **Debug keys compile into `BuildConfig`** — release builds use empty
+7. **Debug keys compile into `BuildConfig`** - release builds use empty
    keys + Settings entry; never share a debug APK built from personal
    `local.properties`.
 
@@ -92,7 +92,7 @@ no agent loop) is superseded — every P0 item below shipped.
 
 - **Tests**: loop (scripted fake LLM: multi-step, error recovery,
   max-step abort, reject path), prompt-injection red-team, cron/timezone
-  edges, memory ranking, confirmation-cannot-be-bypassed — all green.
+  edges, memory ranking, confirmation-cannot-be-bypassed - all green.
 - **Scheduling proof**: needs the human device pass (see gap 4).
 - **Performance**: JVM medians + top-k optimization in
   `docs/PERF_TIMINGS.md`; device medians pending (see gap 4).

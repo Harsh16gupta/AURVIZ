@@ -9,7 +9,7 @@ Orchestrator that interprets a command, plans steps, and invokes tools to comple
 _Avoid_: Chatbot, assistant
 
 **Plan**:
-The sequence of tool calls the agent loop actually made to satisfy one command, recorded with their results. The draft does not exist up front, so a Plan is never approved in advance — approval happens per sensitive tool call.
+The sequence of tool calls the agent loop actually made to satisfy one command, recorded with their results. The draft does not exist up front, so a Plan is never approved in advance - approval happens per sensitive tool call.
 _Avoid_: Workflow, script
 
 **Tool**:
@@ -33,7 +33,7 @@ Sequence of Interactions sharing one short-term transcript. Turns inside one Ses
 _Avoid_: chat log
 
 **Schedule**:
-A recurring instruction with cron-like timing. At fire time an exact alarm enqueues an expedited unique Worker that runs the agent loop with the read-only tool allowlist — never the send tool.
+A recurring instruction with cron-like timing. At fire time an exact alarm enqueues an expedited unique Worker that runs the agent loop with the read-only tool allowlist - never the send tool.
 _Avoid_: Alarm, timer, cron job
 
 **Confirmation**:
@@ -41,7 +41,7 @@ Explicit user decision required before each sensitive tool call runs. The regist
 _Avoid_: Consent popup, authorization
 
 **PendingApproval**:
-A deferred Confirmation awaiting the in-app decision: an unattended run attempted a sensitive tool with no one present, so the attempt waits in the held list — nothing ran yet. Confirming runs it exactly once; denying drops it untouched.
+A deferred Confirmation awaiting the in-app decision: an unattended run attempted a sensitive tool with no one present, so the attempt waits in the held list - nothing ran yet. Confirming runs it exactly once; denying drops it untouched.
 _Avoid_: Approval queue, pending request
 
 **Voice Command**:

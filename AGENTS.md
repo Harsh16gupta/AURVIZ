@@ -18,7 +18,7 @@ Single-context layout: root `GLOSSARY.md` + `docs/adr/`. See `docs/agents/domain
 
 - **UI** (Compose screens, preview cards, timeline): renders state, collects approvals. Never executes tools directly, never holds API keys.
 - **Agent** (`AgentLoop`, `Planner`, `AgentViewModel`): orchestrates the loop, moves results into UI state. Holds no tool implementations.
-- **Tools** (registry, schemas, executors): each tool declares JSON schema, risk level, `requiresConfirmation`, and result type. The confirmation gate lives in the registry — the model has no path around it. Tools never touch UI.
+- **Tools** (registry, schemas, executors): each tool declares JSON schema, risk level, `requiresConfirmation`, and result type. The confirmation gate lives in the registry - the model has no path around it. Tools never touch UI.
 - **Memory** (Room via `MemoryStore` only): the sole persisted memory path. No cloud memory provider in the shipped path.
 - **Scheduler** (exact alarm → expedited unique Worker → agent loop): receivers do no database work on raw threads; scheduled runs use the read-only tool allowlist; sends and schedule writes from a scheduled run become `PendingApproval` rows, never executions.
 
@@ -38,4 +38,4 @@ One ticket per commit, concise message. Do not bundle unrelated changes.
 
 ### Validation log
 
-Whenever you catch your own or another agent's mistake — a wrong claim about the code, ADR/code drift, a missing test path — add an entry to `docs/VALIDATION_LOG.md` with file:line evidence before moving on.
+Whenever you catch your own or another agent's mistake - a wrong claim about the code, ADR/code drift, a missing test path - add an entry to `docs/VALIDATION_LOG.md` with file:line evidence before moving on.

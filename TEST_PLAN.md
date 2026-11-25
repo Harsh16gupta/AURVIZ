@@ -3,7 +3,7 @@
 ## How to run
 
 - `export ANDROID_HOME=$HOME/Library/Android/sdk`
-- `./gradlew :app:testDebugUnitTest` — NG-4: **626 tests, 0 failures**
+- `./gradlew :app:testDebugUnitTest` - NG-4: **626 tests, 0 failures**
   (52 classes incl. `BrowserPolicyTest`; 334 at NG-7 plus EchoLeak cases).
 - Reports: `app/build/test-results/testDebugUnitTest/*.xml`.
 
@@ -32,13 +32,13 @@
 ## Device pass (human, not run ticket 37)
 
 `docs/SCHEDULING_TEST.md`: 2-minute schedule, killed app, screen off,
-`force-idle`, reboot re-arm — record device model + Android version.
+`force-idle`, reboot re-arm - record device model + Android version.
 `docs/PERF_TIMINGS.md`: on-device STT / first-token / end-to-end medians via
 the Settings `planMs`/`toolMs`/`recallMs` readout; profiler memory
 screenshot method.
 `docs/BROWSER_TEST.md`: page-host settings audit (file/content access off,
 mixed content pinned) + typed-URL matrix (http, https, file, javascript,
-bare host) — record device model + Android version; platform-doc
+bare host) - record device model + Android version; platform-doc
 requirements stay distinguished from OEM-specific behavior.
 
 ## Known gaps

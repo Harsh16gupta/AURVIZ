@@ -6,22 +6,22 @@ AURVIZ is a local-first Android AI agent that turns voice and text commands into
 
 `TBD` · [Architecture](ARCHITECTURE.md) · [Security](SECURITY.md) · [Performance](docs/PERF_TIMINGS.md) · [Scheduling Proof](docs/SCHEDULING_TEST.md)
 
-> Demo Video: TBD — link will be added here.
+> Demo Video: TBD - link will be added here.
 
 ## Features & Available Tools
 
-- **Voice & text commands** — speak or type a request; the agent plans the steps and runs them.
-- **Persistent memory** — Room with full-text search, encrypted with SQLCipher, plus an opt-in Mem0 cloud mirror.
-- **Real-world actions** — Gmail triage, in-app WebView automation (open, read, click, scroll, extract), and multi-step chaining across tools.
-- **Scheduled tasks** — describe a routine in natural language; it runs on time via AlarmManager plus WorkManager.
-- **Confirmation gate** — sensitive actions pause for your approval before anything happens.
+- **Voice & text commands** - speak or type a request; the agent plans the steps and runs them.
+- **Persistent memory** - Room with full-text search, encrypted with SQLCipher, plus an opt-in Mem0 cloud mirror.
+- **Real-world actions** - Gmail triage, in-app WebView automation (open, read, click, scroll, extract), and multi-step chaining across tools.
+- **Scheduled tasks** - describe a routine in natural language; it runs on time via AlarmManager plus WorkManager.
+- **Confirmation gate** - sensitive actions pause for your approval before anything happens.
 
 | Area | Tools | Needs confirmation |
 |---|---|---|
 | Gmail | `search_emails`, `read_email`, `send_email` | `send_email` only |
 | Schedules | `create_schedule`, `list_schedules`, `cancel_schedule` | `create_schedule`, `cancel_schedule` |
-| Memory | `save_memory`, `search_memory` | — |
-| Web | `open_url`, `get_page_text`, `click`, `scroll`, `extract` | — |
+| Memory | `save_memory`, `search_memory` | - |
+| Web | `open_url`, `get_page_text`, `click`, `scroll`, `extract` | - |
 
 Background scheduled runs are restricted to a read-only allowlist (`search_emails`, `read_email`, `get_page_text`, `search_memory`, `list_schedules`). Anything that sends or changes state becomes a pending approval instead of executing.
 
@@ -37,14 +37,18 @@ cp local.properties.sample local.properties   # then fill in your keys
 ```
 
 - DeepSeek is the default provider with Meta as fallback; add both keys to `local.properties`.
-- Mem0 is optional and off by default — only needed for the cloud memory mirror.
+- Mem0 is optional and off by default - only needed for the cloud memory mirror.
 - Release builds strip build-time keys, so release users enter keys in-app under Settings (stored in EncryptedSharedPreferences).
 
-`app-release-unsigned.apk` is unsigned — install `app-debug.apk` directly or sign the release build yourself.
+`app-release-unsigned.apk` is unsigned - install `app-debug.apk` directly or sign the release build yourself.
 
 ## Architecture & Security
 
-- Modular loop (`AgentViewModel` → `AgentLoop` → gated `ToolRegistry` → Gmail/schedule/memory/web adapters) with Room as the single source of truth. Full flow: [ARCHITECTURE.md](ARCHITECTURE.md) ([diagram source](docs/architecture.mmd)).
+![AURVIZ system architecture](docs/assets/architecture.png)
+
+Full flow: [ARCHITECTURE.md](ARCHITECTURE.md) ([diagram source](docs/architecture.mmd)).
+
+- Modular loop (`AgentViewModel` → `AgentLoop` → gated `ToolRegistry` → Gmail/schedule/memory/web adapters) with Room as the single source of truth.
 - Keys in the Keystore, database encrypted with SQLCipher, per-call confirmation for sensitive tools, and a CI secret scan before tests. Details: [SECURITY.md](SECURITY.md).
 
 ## Testing & Performance

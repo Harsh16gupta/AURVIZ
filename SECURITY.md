@@ -19,7 +19,7 @@ file (`androidx.security:security-crypto:1.1.0`), backed by the Android Keystore
 (`MasterKey` AES256-GCM; AES256-SIV key encryption + AES256-GCM value
 encryption). Key drafts are memory-only Compose state (remember, never
 rememberSaveable, cleared on save and on screen exit) so they are never
-serialized into saved-instance state — Settings shows only set/not-set
+serialized into saved-instance state - Settings shows only set/not-set
 flags and clears fields after saving.
 
 ## `security-crypto` deprecation status (checked 2026-11-23)
@@ -32,7 +32,7 @@ Google ships no official migration guide. The 1.1.0 implementation still works
 and remains the encrypted-at-rest store for this app; the known Keystore
 initialization crashes on some Android 9–10 devices (upstream issue 176215143)
 are accepted as a fallback-to-reconnect risk. Revisit when Google publishes a
-replacement path — do not downgrade to unencrypted storage in the meantime.
+replacement path - do not downgrade to unencrypted storage in the meantime.
 
 ## Prompt-injection defences (the send-tool threat model)
 
@@ -55,7 +55,7 @@ acceptance gate.
 - Gmail OAuth is PKCE (S256) with a loopback redirect; scopes are
   least-privilege `gmail.send` + `gmail.readonly`; tokens live only in
   `TokenVault`. An OAuth app in Testing shows the unverified-app screen and
-  its refresh tokens expire after ~7 days — the app surfaces a "Reconnect
+  its refresh tokens expire after ~7 days - the app surfaces a "Reconnect
   Gmail" notification instead of failing silently.
 - OkHttp uses explicit timeouts (connect 15 s, read 60 s) with backoff
   honouring `retry-after`; fallback never triggers on 401 and never replays
@@ -68,5 +68,5 @@ acceptance gate.
   tracked files: **no hits**.
 - `local.properties` is git-ignored and untracked; no `*.jks`/`*.keystore`/
   `*.p12` tracked. The only key-like hits are the `DEEPSEEK_API_KEY`/`META_API_KEY` variable
-  names in docs and a `"TEST_KEY"` placeholder in `spike/test_t1_llm_provider.py` —
+  names in docs and a `"TEST_KEY"` placeholder in `spike/test_t1_llm_provider.py` -
   not real credentials.

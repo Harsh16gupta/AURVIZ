@@ -1,9 +1,9 @@
-# Per-stage timing medians — 10 runs (ticket 37)
+# Per-stage timing medians - 10 runs (ticket 37)
 
 Date: 2026-11-23. Commit `f251cf2`. Source: `PerfTimingsTest`
 (`app/src/test/java/com/aurviz/agent/PerfTimingsTest.kt`), run on the
 submission machine via `./gradlew :app:testDebugUnitTest --tests
-"com.aurviz.agent.PerfTimingsTest"` — JVM, no network, no device, 500
+"com.aurviz.agent.PerfTimingsTest"` - JVM, no network, no device, 500
 synthetic memories. First prompt sample includes one-off JIT/string-cache
 warmup; medians are robust to it.
 
