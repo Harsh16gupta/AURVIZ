@@ -60,10 +60,6 @@ Full flow: [ARCHITECTURE.md](ARCHITECTURE.md) ([diagram source](docs/architectur
 | Performance | Timing and memory analysis | [docs/PERF_TIMINGS.md](docs/PERF_TIMINGS.md) |
 | CI pipeline | Secret scan → unit tests → assemble → lint | [.github/workflows/check.yml](.github/workflows/check.yml) |
 
-## AI Development Tools
-
-AI coding tools were used to accelerate development and test coverage, directed through written specs and decision records in `docs/adr/`. All output was verified with the 659-test JUnit suite (`TEST_PLAN.md`) plus physical Android hardware runs recorded in `docs/SCHEDULING_TEST.md` and `docs/BROWSER_TEST.md`.
-
 ## Project Structure
 
 ```
