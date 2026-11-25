@@ -6,7 +6,7 @@ AIRA is a local-first Android AI agent that turns voice and text commands into r
 
 `TBD` · [Architecture](ARCHITECTURE.md) · [Security](SECURITY.md) · [Performance](docs/PERF_TIMINGS.md) · [Scheduling Proof](docs/SCHEDULING_TEST.md)
 
-> Demo Video: [google drive link](https://drive.google.com/file/d/1QLlgzsOX3_gwSiIWV5ctNdg1P2n2hrS2/view?usp=sharing)
+> Demo Video: [google drive link](https://drive.google.com/file/d/1QLlgzsOX3_gwSiIWV5ctNdg1P2n2hrS2/view?usp=sharing) [youtube link](https://youtu.be/ThxeDVNyJIc)
 
 ## Features & Available Tools
 
